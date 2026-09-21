@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Disallow: /admin/
+Disallow: /includes/
+Disallow: /config/
+Disallow: /mon-compte.php
+Disallow: /login.php
+Disallow: /register.php
+
+Sitemap: https://palaisdespionniers.ml/sitemap.php

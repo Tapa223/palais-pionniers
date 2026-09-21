@@ -1,0 +1,280 @@
+<?php
+require_once __DIR__ . '/config/database.php'; 
+
+try {
+    $pdo = db(); 
+} catch (Exception $e) {
+    die("Erreur de connexion.");
+}
+
+$slug = isset($_GET['slug']) ? $_GET['slug'] : '';
+if (empty($slug)) { header('Location: activites.php'); exit; }
+
+// Récupération de l'activité
+$stmt = $pdo->prepare("SELECT * FROM activites WHERE slug = ?");
+$stmt->execute([$slug]);
+$activite = $stmt->fetch();
+
+if (!$activite) { exit; }
+
+// Photos en vrac (galerie), mélangées aléatoirement à chaque visite pour le carrousel
+$stmtPh = $pdo->prepare("SELECT image_path FROM activite_galerie WHERE activite_id = ?");
+$stmtPh->execute([$activite['id']]);
+$photosGalerie = array_column($stmtPh->fetchAll(), 'image_path');
+
+// L'image de couverture fait aussi partie du carrousel, en premier si elle existe
+$toutesLesPhotos = [];
+if (!empty($activite['image_principale']) && $activite['image_principale'] !== 'default-hero.jpg') {
+    $toutesLesPhotos[] = ['chemin' => 'assets/images/activites/' . $activite['image_principale'], 'legende_absente' => true];
+}
+shuffle($photosGalerie);
+foreach ($photosGalerie as $p) {
+    $toutesLesPhotos[] = ['chemin' => 'assets/images/galerie/' . $p];
+}
+
+// Liens utiles (facultatifs)
+$stmtLiens = $pdo->prepare("SELECT * FROM activite_liens WHERE activite_id = ?");
+$stmtLiens->execute([$activite['id']]);
+$liens = $stmtLiens->fetchAll();
+
+$accent = $activite['couleur'] ?: '#E61E2A';
+?>
+
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><?= htmlspecialchars($activite['nom']) ?> - Palais des Pionniers</title>
+    <link rel="stylesheet" href="assets/css/tailwind.css">
+    <link rel="stylesheet" href="assets/fontawesome/css/all.min.css">
+    <link rel="stylesheet" href="assets/css/fonts.css">
+    
+    <!-- CSS LIGHTBOX -->
+    <link rel="stylesheet" href="assets/vendor/luminous/luminous-basic.min.css">
+    
+    <style>
+        .gallery-image { transition: transform 0.6s cubic-bezier(0.165, 0.84, 0.44, 1); cursor: zoom-in; }
+        .group:hover .gallery-image { transform: scale(1.08); }
+        /* Style pour s'assurer que la lightbox passe au-dessus du header */
+        .lum-lightbox { z-index: 1000; }
+    </style>
+</head>
+<body class="bg-[#f8fafc] text-slate-900 font-sans">
+
+    <?php if(file_exists(__DIR__ . '/includes/header.php')) include __DIR__ . '/includes/header.php'; ?>
+
+    <div class="container mx-auto px-4 sm:px-6 pt-4 sm:pt-6">
+        <a href="activites.php" class="inline-flex items-center gap-2 text-xs font-black uppercase tracking-widest text-primary hover:text-accent transition bg-primary/5 hover:bg-accent/10 px-3.5 py-2 rounded-full">
+            <i class="fas fa-arrow-left"></i> Retour aux activités
+        </a>
+    </div>
+
+    <!-- HERO — plusieurs photos défilent, avec flou et voile comme le reste du site -->
+    <section class="relative h-[28vh] sm:h-[45vh] flex items-center bg-[#0a214a] overflow-hidden">
+        <?php if ($toutesLesPhotos): ?>
+        <?php foreach ($toutesLesPhotos as $i => $p): ?>
+        <img src="<?= e($p['chemin']) ?>" class="detail-slide absolute inset-0 w-full h-full object-cover scale-110 blur-sm transition-opacity duration-700 ease-in-out <?= $i === 0 ? 'opacity-100' : 'opacity-0' ?>">
+        <?php endforeach; ?>
+        <?php endif; ?>
+        <div class="absolute inset-0 bg-[#0a214a]/60"></div>
+        <div class="container mx-auto px-4 sm:px-6 relative z-10">
+            <h1 class="text-2xl sm:text-5xl md:text-6xl font-black text-white uppercase italic tracking-tighter leading-tight">
+                <?= htmlspecialchars($activite['nom']) ?>
+            </h1>
+            <div class="h-1.5 sm:h-2 w-14 sm:w-20 mt-2 sm:mt-4" style="background:<?= e($accent) ?>"></div>
+        </div>
+    </section>
+
+    <!-- PRÉSENTATION -->
+    <section class="py-8 sm:py-16">
+        <div class="container mx-auto px-6">
+            <div class="space-y-10">
+                <?php
+                    $photosMosaique = array_slice($toutesLesPhotos, 0, 3);
+                    $photosCarrousel = array_slice($toutesLesPhotos, 3);
+                ?>
+                <?php if (count($photosMosaique) >= 2): ?>
+                <!-- Texte à gauche (largeur contrainte, retombe bien à la ligne), mosaïque de 3 photos à droite -->
+                <div class="grid md:grid-cols-2 gap-x-10 lg:gap-x-16 gap-y-6">
+                    <div class="min-w-0">
+                        <?php if (!empty($activite['sous_titre'])): ?>
+                        <p class="text-sm sm:text-lg font-bold uppercase tracking-widest mb-4" style="color:<?= e($accent) ?>"><?= htmlspecialchars($activite['sous_titre']) ?></p>
+                        <?php endif; ?>
+                        <?php if (!empty($activite['description'])): ?>
+                        <div class="text-base sm:text-lg leading-relaxed text-slate-600 font-light break-words">
+                            <?= nl2br(htmlspecialchars($activite['description'])) ?>
+                        </div>
+                        <?php endif; ?>
+                    </div>
+                    <div class="min-w-0 grid grid-cols-2 gap-3 sm:gap-4" style="grid-template-rows: 160px 110px;">
+                        <?php foreach ($photosMosaique as $i => $p): ?>
+                        <a href="<?= e($p['chemin']) ?>" class="luminous-gallery group relative overflow-hidden rounded-xl sm:rounded-2xl bg-slate-50 shadow-sm transition-all hover:shadow-xl min-w-0 <?= $i === 0 ? 'col-span-2' : '' ?>" style="grid-row:<?= $i === 0 ? '1' : '2' ?>">
+                            <img src="<?= e($p['chemin']) ?>" class="gallery-image w-full h-full object-cover" alt="">
+                            <div class="absolute inset-0 bg-[#0a214a]/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                <div class="w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center text-white" style="background:<?= e($accent) ?>">
+                                    <i class="fas fa-expand-alt text-xs"></i>
+                                </div>
+                            </div>
+                        </a>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+                <?php else: ?>
+                <?php if (!empty($activite['sous_titre'])): ?>
+                <p class="text-sm sm:text-lg font-bold uppercase tracking-widest" style="color:<?= e($accent) ?>"><?= htmlspecialchars($activite['sous_titre']) ?></p>
+                <?php endif; ?>
+                <?php if (!empty($activite['description'])): ?>
+                <div class="text-lg sm:text-xl leading-relaxed text-slate-600 font-light max-w-3xl">
+                    <?= nl2br(htmlspecialchars($activite['description'])) ?>
+                </div>
+                <?php endif; ?>
+                <?php if ($photosMosaique && !$photosCarrousel): $photosCarrousel = $photosMosaique; endif; ?>
+                <?php endif; ?>
+
+                <?php if ($photosCarrousel): ?>
+                <!-- Carrousel — le reste des photos, séparé du texte -->
+                <div class="relative rounded-2xl sm:rounded-[2rem] overflow-hidden h-[38vh] sm:h-[55vh] bg-slate-100">
+                    <?php foreach ($photosCarrousel as $i => $p): ?>
+                    <a href="<?= e($p['chemin']) ?>" class="luminous-gallery content-slide group absolute inset-0 block transition-opacity duration-700 ease-in-out <?= $i === 0 ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none' ?>">
+                        <img src="<?= e($p['chemin']) ?>" class="w-full h-full object-cover">
+                        <div class="absolute inset-0 bg-[#0a214a]/0 group-hover:bg-[#0a214a]/30 transition-colors flex items-center justify-center">
+                            <div class="w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity" style="background:<?= e($accent) ?>">
+                                <i class="fas fa-expand-alt text-sm"></i>
+                            </div>
+                        </div>
+                    </a>
+                    <?php endforeach; ?>
+                    <?php if (count($photosCarrousel) > 1): ?>
+                    <div class="absolute bottom-3 sm:bottom-5 left-1/2 -translate-x-1/2 z-30 flex gap-1.5 pointer-events-none">
+                        <?php foreach ($photosCarrousel as $i => $p): ?>
+                        <span class="content-dot h-1.5 rounded-full transition-all <?= $i === 0 ? 'w-6' : 'w-1.5 bg-white/50' ?>" style="<?= $i === 0 ? "background:$accent" : '' ?>"></span>
+                        <?php endforeach; ?>
+                    </div>
+                    <?php endif; ?>
+                </div>
+                <?php endif; ?>
+
+                    <?php if ($liens): ?>
+                    <div class="flex flex-wrap gap-3">
+                        <?php foreach ($liens as $l): ?>
+                        <a href="<?= e($l['url']) ?>" target="_blank" rel="noopener" class="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-white text-xs font-black uppercase tracking-widest hover:opacity-90 transition" style="background:<?= e($accent) ?>">
+                            <i class="fas fa-arrow-up-right-from-square"></i> <?= e($l['titre']) ?>
+                        </a>
+                        <?php endforeach; ?>
+                    </div>
+                    <?php endif; ?>
+            </div>
+        </div>
+    </section>
+
+    <!-- CONTACT -->
+    <section class="py-8 sm:py-20 bg-slate-50">
+        <div class="container mx-auto px-4 sm:px-6">
+            <div class="max-w-5xl mx-auto bg-white rounded-2xl sm:rounded-[3rem] shadow-2xl overflow-hidden flex flex-col md:flex-row">
+                <div class="md:w-1/3 bg-[#0a214a] p-12 text-white">
+                    <h3 class="text-3xl font-black uppercase italic mb-6">Un mot sur ce projet ?</h3>
+                    <p class="text-slate-400 text-sm leading-relaxed">
+                        Pour toute information supplémentaire concernant l'activité <?= htmlspecialchars($activite['nom']) ?>, contactez-nous.
+                    </p>
+                </div>
+                <div class="md:w-2/3 p-12">
+                    <form action="#" method="POST" class="space-y-6">
+                        <div class="grid md:grid-cols-2 gap-6">
+                            <div class="space-y-2">
+                                <label class="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-2">Nom complet</label>
+                                <input type="text" class="w-full px-6 py-4 bg-slate-50 rounded-2xl border-none focus:ring-2 focus:ring-red-600 outline-none">
+                            </div>
+                            <div class="space-y-2">
+                                <label class="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-2">Email</label>
+                                <input type="email" class="w-full px-6 py-4 bg-slate-50 rounded-2xl border-none focus:ring-2 focus:ring-red-600 outline-none">
+                            </div>
+                        </div>
+                        <div class="space-y-2">
+                            <label class="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-2">Message</label>
+                            <textarea rows="4" class="w-full px-6 py-4 bg-slate-50 rounded-2xl border-none focus:ring-2 focus:ring-red-600 outline-none"></textarea>
+                        </div>
+                        <button class="w-full py-5 bg-red-600 text-white rounded-2xl font-black uppercase text-xs tracking-[0.2em] hover:bg-red-700 transition-all shadow-lg shadow-red-600/20">
+                            Envoyer le message
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <?php if(file_exists(__DIR__ . '/includes/footer.php')) include __DIR__ . '/includes/footer.php'; ?>
+
+    <!-- SCRIPTS JS LIGHTBOX -->
+    <script src="assets/vendor/luminous/luminous.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Sélection de tous les liens de la galerie
+            var galleryLinks = document.querySelectorAll(".luminous-gallery");
+            
+            if (galleryLinks.length > 0) {
+                // Initialisation en mode Galerie pour permettre la navigation (Suivant/Précédent)
+                new LuminousGallery(galleryLinks, {
+                    arrowNavigation: true
+                }, {
+                    caption: function(trigger) {
+                        // Optionnel : affiche le texte de l'image (alt) en légende
+                        return trigger.querySelector('img').getAttribute('alt');
+                    }
+                });
+            }
+
+            // Carrousel du haut — défilement automatique entre les photos
+            var detailSlides = document.querySelectorAll('.detail-slide');
+            var detailDots = document.querySelectorAll('.detail-dot');
+            var accentCouleur = <?= json_encode($accent) ?>;
+            if (detailSlides.length > 1) {
+                var detailIdx = 0;
+                setInterval(function() {
+                    detailSlides[detailIdx].classList.replace('opacity-100', 'opacity-0');
+                    detailSlides[detailIdx].classList.replace('z-10', 'z-0');
+                    if (detailDots[detailIdx]) {
+                        detailDots[detailIdx].classList.replace('w-6', 'w-1.5');
+                        detailDots[detailIdx].classList.add('bg-white/40');
+                        detailDots[detailIdx].style.background = '';
+                    }
+                    detailIdx = (detailIdx + 1) % detailSlides.length;
+                    detailSlides[detailIdx].classList.replace('opacity-0', 'opacity-100');
+                    detailSlides[detailIdx].classList.replace('z-0', 'z-10');
+                    if (detailDots[detailIdx]) {
+                        detailDots[detailIdx].classList.replace('w-1.5', 'w-6');
+                        detailDots[detailIdx].classList.remove('bg-white/40');
+                        detailDots[detailIdx].style.background = accentCouleur;
+                    }
+                }, 4000);
+            }
+
+            // Carrousel du bas — même principe, indépendant du hero
+            var contentSlides = document.querySelectorAll('.content-slide');
+            var contentDots = document.querySelectorAll('.content-dot');
+            if (contentSlides.length > 1) {
+                var contentIdx = 0;
+                setInterval(function() {
+                    contentSlides[contentIdx].classList.replace('opacity-100', 'opacity-0');
+                    contentSlides[contentIdx].classList.replace('z-10', 'z-0');
+                    contentSlides[contentIdx].classList.add('pointer-events-none');
+                    if (contentDots[contentIdx]) {
+                        contentDots[contentIdx].classList.replace('w-6', 'w-1.5');
+                        contentDots[contentIdx].classList.add('bg-white/50');
+                        contentDots[contentIdx].style.background = '';
+                    }
+                    contentIdx = (contentIdx + 1) % contentSlides.length;
+                    contentSlides[contentIdx].classList.replace('opacity-0', 'opacity-100');
+                    contentSlides[contentIdx].classList.replace('z-0', 'z-10');
+                    contentSlides[contentIdx].classList.remove('pointer-events-none');
+                    if (contentDots[contentIdx]) {
+                        contentDots[contentIdx].classList.replace('w-1.5', 'w-6');
+                        contentDots[contentIdx].classList.remove('bg-white/50');
+                        contentDots[contentIdx].style.background = accentCouleur;
+                    }
+                }, 4500);
+            }
+        });
+    </script>
+</body>
+</html>
