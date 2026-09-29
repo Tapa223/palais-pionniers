@@ -259,19 +259,54 @@ if (!$readonly && isset($_POST['action'])) {
 }
 
 // --- RÉCUPÉRATION DES DONNÉES (Correction de u.nom -> u.nom_complet) ---
-$filterCanal = in_array($_GET['canal'] ?? '', ['en_ligne','guichet'], true) ? $_GET['canal'] : '';
-$whereResa = $filterCanal ? "WHERE r.canal = " . $pdo->quote($filterCanal) : '';
+// Filtres simples : canal (existant), statut, client / téléphone / n°, salle, date
+$statutsFiltre = ['en_attente' => 'En attente', 'validee' => 'Validées', 'refusee' => 'Refusées',
+                  'annulee' => 'Annulées', 'expiree' => 'Expirées', 'requisitionnee' => 'Réquisitionnées'];
+$filterCanal  = in_array($_GET['canal'] ?? '', ['en_ligne','guichet'], true) ? $_GET['canal'] : '';
+$filterStatut = isset($statutsFiltre[$_GET['statut'] ?? '']) ? $_GET['statut'] : '';
+$filterQ      = trim((string)($_GET['q'] ?? ''));
+$filterEspace = (int)($_GET['espace'] ?? 0);
+$filterDate   = (string)($_GET['date'] ?? '');
+$dObj = DateTime::createFromFormat('!Y-m-d', $filterDate);
+if (!$dObj || $dObj->format('Y-m-d') !== $filterDate) {
+    $filterDate = '';
+}
 
-$reservations = $pdo->query("
-    SELECT r.*, e.nom as espace_nom, u.nom_complet as user_nom, u.telephone as user_tel, 
+$whereResa  = [];
+$paramsResa = [];
+if ($filterCanal)  { $whereResa[] = 'r.canal = ?';     $paramsResa[] = $filterCanal; }
+if ($filterStatut) { $whereResa[] = 'r.statut = ?';    $paramsResa[] = $filterStatut; }
+if ($filterEspace) { $whereResa[] = 'r.espace_id = ?'; $paramsResa[] = $filterEspace; }
+if ($filterDate) {
+    // Date couverte par la réservation (créneau : le jour ; séjour : de l'arrivée à la veille du départ)
+    $whereResa[] = '(r.date_resa = ? OR (r.date_depart IS NOT NULL AND r.date_resa <= ? AND r.date_depart > ?))';
+    array_push($paramsResa, $filterDate, $filterDate, $filterDate);
+}
+if ($filterQ !== '') {
+    $condQ = 'u.nom_complet LIKE ? OR u.telephone LIKE ? OR u.email LIKE ?';
+    array_push($paramsResa, "%$filterQ%", "%$filterQ%", "%$filterQ%");
+    if (preg_match('/^#?(?:RESA-?)?(\d+)$/i', $filterQ, $mQ)) {
+        $condQ .= ' OR r.id = ?';
+        $paramsResa[] = (int)$mQ[1];
+    }
+    $whereResa[] = "($condQ)";
+}
+$filtreResaActif = $filterCanal || $filterStatut || $filterEspace || $filterDate || $filterQ !== '';
+
+$stmtResa = $pdo->prepare("
+    SELECT r.*, e.nom as espace_nom, u.nom_complet as user_nom, u.telephone as user_tel,
            t.libelle as tarif_nom, t.montant as tarif_prix
-    FROM reservations r 
-    JOIN espaces e ON e.id = r.espace_id 
-    JOIN users u ON u.id = r.user_id 
+    FROM reservations r
+    JOIN espaces e ON e.id = r.espace_id
+    JOIN users u ON u.id = r.user_id
     LEFT JOIN tarifs t ON t.id = r.tarif_id
-    $whereResa
+    " . ($whereResa ? 'WHERE ' . implode(' AND ', $whereResa) : '') . "
     ORDER BY r.created_at DESC
-")->fetchAll();
+");
+$stmtResa->execute($paramsResa);
+$reservations = $stmtResa->fetchAll();
+
+$espacesFiltre = $pdo->query("SELECT id, nom FROM espaces ORDER BY nom")->fetchAll();
 
 require __DIR__ . '/_admin_header.php';
 ?>
@@ -295,7 +330,41 @@ require __DIR__ . '/_admin_header.php';
         </div>
     <?php endif; ?>
 
+    <!-- Recherche -->
+    <form method="GET" class="grid grid-cols-2 md:grid-cols-5 gap-2 mb-5">
+        <?php if ($filterCanal): ?><input type="hidden" name="canal" value="<?= e($filterCanal) ?>"><?php endif; ?>
+        <div class="relative col-span-2">
+            <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-[10px]"></i>
+            <input type="search" name="q" value="<?= e($filterQ) ?>" placeholder="Client, téléphone, n° de réservation…"
+                   class="w-full text-xs font-bold rounded-xl border border-slate-200 bg-white pl-8 pr-3 py-2 outline-none focus:border-primary text-primary">
+        </div>
+        <select name="espace" class="w-full text-xs font-bold rounded-xl border border-slate-200 bg-white px-3 py-2 outline-none text-primary">
+            <option value="0">Toutes les salles</option>
+            <?php foreach ($espacesFiltre as $espF): ?>
+            <option value="<?= (int)$espF['id'] ?>" <?= $filterEspace === (int)$espF['id'] ? 'selected' : '' ?>><?= e($espF['nom']) ?></option>
+            <?php endforeach; ?>
+        </select>
+        <input type="date" name="date" value="<?= e($filterDate) ?>" title="Date de la réservation"
+               class="w-full text-xs font-bold rounded-xl border border-slate-200 bg-white px-3 py-2 outline-none focus:border-primary text-primary">
+        <select name="statut" class="w-full text-xs font-bold rounded-xl border border-slate-200 bg-white px-3 py-2 outline-none text-primary">
+            <option value="">Tous les statuts</option>
+            <?php foreach ($statutsFiltre as $cleS => $libS): ?>
+            <option value="<?= $cleS ?>" <?= $filterStatut === $cleS ? 'selected' : '' ?>><?= $libS ?></option>
+            <?php endforeach; ?>
+        </select>
+        <div class="flex flex-wrap items-center gap-2 col-span-2">
+            <button type="submit" class="text-xs font-black bg-primary text-white px-4 py-2 rounded-xl hover:bg-slate-800 transition">Rechercher</button>
+            <?php if ($filtreResaActif): ?>
+            <a href="reservations.php" class="text-xs font-bold text-slate-400 px-2 py-2 hover:text-accent transition">Réinitialiser</a>
+            <span class="text-[11px] font-bold text-slate-500"><?= count($reservations) ?> résultat(s)<?= $filterCanal ? ' — ' . ($filterCanal === 'guichet' ? 'guichet' : 'en ligne') : '' ?></span>
+            <?php endif; ?>
+        </div>
+    </form>
+
     <div class="bg-white rounded-[2.5rem] border border-slate-100 shadow-xl overflow-hidden">
+        <?php if (!$reservations): ?>
+        <p class="p-10 text-center text-sm text-slate-400 italic">Aucune réservation ne correspond à la recherche.</p>
+        <?php endif; ?>
         <div class="overflow-x-auto">
         <table class="w-full text-left border-collapse">
             <thead class="bg-slate-50/50 border-b border-slate-100">

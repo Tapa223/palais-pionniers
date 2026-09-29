@@ -7,6 +7,53 @@ expirer_reservations_non_payees();
 $pdo = db();
 $msg = null;
 
+/*
+ * Vérification de disponibilité (lecture seule, JSON) : réutilise exactement
+ * les fonctions utilisées à l'enregistrement d'une réservation
+ * (tarif_disponible() et creneaux_libres_du_jour()).
+ */
+if (($_GET['verifier_dispo'] ?? '') === '1') {
+    header('Content-Type: application/json; charset=utf-8');
+    $dateOk = fn($d) => ($o = DateTime::createFromFormat('!Y-m-d', (string)$d)) && $o->format('Y-m-d') === $d;
+    $heureOk = fn($h) => (bool)preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', (string)$h);
+
+    $tarifId  = (int)($_GET['tarif_id'] ?? 0);
+    $date     = (string)($_GET['date'] ?? '');
+    $depart   = (string)($_GET['date_depart'] ?? '');
+    $hd       = (string)($_GET['heure_debut'] ?? '');
+    $hf       = (string)($_GET['heure_fin'] ?? '');
+    $quantite = max(1, (int)($_GET['quantite'] ?? 1));
+
+    $t = $pdo->prepare("SELECT t.id, e.mode_reservation FROM tarifs t JOIN espaces e ON e.id = t.espace_id WHERE t.id = ?");
+    $t->execute([$tarifId]);
+    $tarif = $t->fetch();
+
+    if (!$tarif || !$dateOk($date)) {
+        echo json_encode(['ok' => false, 'message' => 'Choisissez un espace, un tarif et une date.']);
+        exit;
+    }
+
+    if ($tarif['mode_reservation'] === 'sejour') {
+        if (!$dateOk($depart) || $depart <= $date) {
+            echo json_encode(['ok' => false, 'message' => 'Indiquez une date de départ postérieure à l\'arrivée.']);
+            exit;
+        }
+        $dispo = tarif_disponible($pdo, $tarifId, $date, $depart, null, null, null, $quantite);
+        echo json_encode(['ok' => true, 'disponible' => $dispo,
+            'message' => $dispo ? 'Disponible pour ces dates.' : 'Complet pour ces dates.']);
+        exit;
+    }
+
+    $libres = creneaux_libres_du_jour($pdo, $tarifId, $date);
+    $dispo = null;
+    if ($heureOk($hd) && $heureOk($hf) && $hf > $hd) {
+        $dispo = tarif_disponible($pdo, $tarifId, $date, null, $hd . ':00', $hf . ':00', null, 1);
+    }
+    echo json_encode(['ok' => true, 'disponible' => $dispo, 'libres' => $libres,
+        'message' => $dispo === null ? 'Horaire incomplet : l\'heure de fin doit suivre l\'heure de début.' : ($dispo ? 'Créneau disponible.' : 'Ce créneau est déjà occupé.')]);
+    exit;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!csrf_check($_POST['csrf_token'] ?? '')) {
         $msg = ['err', 'Requête invalide.'];
@@ -152,10 +199,10 @@ require __DIR__ . '/_admin_header.php';
 </div>
 <?php endif; ?>
 
-<div class="grid lg:grid-cols-3 gap-6">
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
   <!-- Formulaire -->
-  <div class="lg:col-span-2">
+  <div class="lg:col-span-2 min-w-0">
     <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
       <div class="px-6 py-4 border-b border-slate-100 bg-slate-50">
         <h2 class="font-black text-primary text-sm uppercase italic flex items-center gap-2">
@@ -291,6 +338,15 @@ require __DIR__ . '/_admin_header.php';
           </label>
         </div>
 
+        <!-- Vérification de disponibilité (même règle que l'enregistrement) -->
+        <div>
+          <button type="button" onclick="verifierDisponibilite()"
+                  class="flex items-center justify-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-black uppercase px-4 py-2.5 rounded-xl transition">
+            <i class="fas fa-calendar-check"></i> Vérifier la disponibilité
+          </button>
+          <div id="resultatDispo" class="hidden mt-3 rounded-xl border p-3 text-xs font-bold"></div>
+        </div>
+
         <!-- Motif -->
         <div>
           <label class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Motif</label>
@@ -389,6 +445,42 @@ function onEspaceChangeGuichet(espaceId) {
     document.getElementById('petitDejLabelGuichet').classList.toggle('hidden', !avecPetitDej);
     if (!avecPetitDej) document.querySelector('#sejourFields input[name="petit_dejeuner"]').checked = false;
     document.getElementById('quantiteGuichet').value = 1;
+}
+
+function verifierDisponibilite() {
+    const box = document.getElementById('resultatDispo');
+    const espaceId = document.querySelector('select[name="espace_id"]').value;
+    const tarifEl = document.querySelector('input[name="tarif_id"]:checked');
+    const sejour = espacesModes[espaceId] === 'sejour';
+    const params = new URLSearchParams({ verifier_dispo: '1', tarif_id: tarifEl ? tarifEl.value : '' });
+    if (sejour) {
+        params.set('date', document.getElementById('dateResaSejourGuichet').value);
+        params.set('date_depart', document.getElementById('dateDepartGuichet').value);
+        params.set('quantite', document.getElementById('quantiteGuichet').value || '1');
+    } else {
+        params.set('date', document.getElementById('dateResaGuichet').value);
+        params.set('heure_debut', document.getElementById('heure_debutGuichet').value);
+        params.set('heure_fin', document.getElementById('heure_finGuichet').value);
+    }
+    const afficher = (classes, html) => {
+        box.className = 'mt-3 rounded-xl border p-3 text-xs font-bold ' + classes;
+        box.innerHTML = html;
+    };
+    fetch('guichet.php?' + params.toString(), { credentials: 'same-origin' })
+        .then(r => r.json())
+        .then(d => {
+            if (!d.ok) { afficher('bg-slate-50 border-slate-200 text-slate-600', d.message); return; }
+            const cls = d.disponible === false ? 'bg-red-50 border-red-200 text-red-700'
+                      : (d.disponible === true ? 'bg-green-50 border-green-200 text-green-700' : 'bg-slate-50 border-slate-200 text-slate-600');
+            let html = '';
+            const span = document.createElement('span'); span.textContent = d.message; html += span.outerHTML;
+            if (d.libres) {
+                html += '<p class="mt-1 font-semibold text-slate-600">Plages libres ce jour : '
+                     + (d.libres.length ? d.libres.map(l => l.replace(/[<>&]/g, '')).join(', ') : 'aucune') + '</p>';
+            }
+            afficher(cls, html);
+        })
+        .catch(() => afficher('bg-red-50 border-red-200 text-red-700', 'Vérification impossible pour le moment.'));
 }
 
 function changeQuantiteGuichet(delta) {

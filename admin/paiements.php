@@ -345,17 +345,35 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
 // ============================================================
 $filterMode   = $_GET['mode']   ?? '';
 $search       = trim($_GET['q'] ?? '');
+$filterDate   = (string)($_GET['date'] ?? '');
+$filterEspace = (int)($_GET['espace'] ?? 0);
 $openId       = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 $openResa     = isset($_GET['resa']) ? (int)$_GET['resa'] : (int)($_POST['reservation_id'] ?? 0);
+
+$dObj = DateTime::createFromFormat('!Y-m-d', $filterDate);
+if (!$dObj || $dObj->format('Y-m-d') !== $filterDate) {
+    $filterDate = '';
+}
 
 $where  = [];
 $params = [];
 
 if ($filterMode && isset($modeLabels[$filterMode])) { $where[]='p.mode=?'; $params[]=$filterMode; }
 if ($search) {
-    $where[]='(u.nom_complet LIKE ? OR e.nom LIKE ? OR p.reference LIKE ? OR CONCAT(RIGHT(YEAR(p.created_at),2), "-", LPAD(p.id,3,"0"), "/DGPP-C") LIKE ?)';
-    $params=array_merge($params,["%$search%","%$search%","%$search%","%$search%"]);
+    // Client, espace, référence, n° de reçu, ou n° de réservation (12, #12, RESA-12)
+    $cond = 'u.nom_complet LIKE ? OR e.nom LIKE ? OR p.reference LIKE ? OR CONCAT(RIGHT(YEAR(p.created_at),2), "-", LPAD(p.id,3,"0"), "/DGPP-C") LIKE ?';
+    $params = array_merge($params, ["%$search%","%$search%","%$search%","%$search%"]);
+    if (preg_match('/^#?(?:RESA-?)?(\d+)$/i', $search, $mResa)) {
+        $cond .= ' OR p.reservation_id = ?';
+        $params[] = (int)$mResa[1];
+    }
+    $where[] = "($cond)";
 }
+if ($filterDate)   { $where[] = 'DATE(p.created_at) = ?'; $params[] = $filterDate; }
+if ($filterEspace) { $where[] = 'r.espace_id = ?';        $params[] = $filterEspace; }
+$filtreActif = $search || $filterMode || $filterDate || $filterEspace;
+
+$espacesListe = $pdo->query("SELECT id, nom FROM espaces ORDER BY nom")->fetchAll();
 
 // Historique des paiements
 $paiementsQuery = $pdo->prepare("
@@ -464,73 +482,79 @@ require __DIR__ . '/_admin_header.php';
 </div>
 <?php endif; ?>
 
-<!-- Stats -->
-<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-  <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
-    <div class="w-10 h-10 bg-green-50 rounded-xl flex items-center justify-center mb-3">
-      <i class="fas fa-check-circle text-green-500"></i>
+<?php
+  // Paiement refusé car identique à un paiement récent : on propose alors la case « second versement »
+  $doublonSignale = $msg && $msg[0] === 'err' && str_contains($msg[1], 'paiement identique');
+?>
+
+<!-- Stats : chaque carte mène aux données correspondantes -->
+<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+  <?php foreach ([
+      ['rapport.php?type=encaisse', 'fa-check-circle text-green-500', 'bg-green-50', $fcfa($totalPaye - $totalRembourse) . ' <span class="text-xs">FCFA</span>', 'text-green-600', 'Total encaissé', 'Brut ' . $fcfa($totalPaye) . ' FCFA — remboursé ' . $fcfa($totalRembourse) . ' FCFA'],
+      ['#historique', 'fa-receipt text-blue-500', 'bg-blue-50', (string)$nbPaiements, 'text-primary', 'Paiements enregistrés', 'Voir l\'historique'],
+      ['#a-encaisser', 'fa-clock text-amber-500', 'bg-amber-50', (string)$nbEnAttente, 'text-amber-500', 'En attente de paiement', 'Voir les réservations à encaisser'],
+      ['acomptes.php?statut=retard', 'fa-exclamation-triangle text-accent', 'bg-red-50', (string)$nbRetard, 'text-accent', 'Soldes en retard', 'Voir les soldes en retard'],
+  ] as [$lien, $ico, $bg, $val, $cls, $lib, $titre]): ?>
+  <a href="<?= $lien ?>" title="<?= e($titre) ?>"
+     class="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 hover:shadow-md transition group min-w-0">
+    <div class="flex items-center justify-between mb-2">
+      <div class="w-9 h-9 <?= $bg ?> rounded-xl flex items-center justify-center">
+        <i class="fas <?= $ico ?> text-sm"></i>
+      </div>
+      <i class="fas fa-arrow-right text-slate-200 text-xs group-hover:text-primary transition"></i>
     </div>
-    <p class="text-2xl font-black text-green-600"><?= $fcfa($totalPaye - $totalRembourse) ?> <span class="text-sm">FCFA</span></p>
-    <p class="text-xs font-bold text-slate-500 mt-1">Encaissé net</p>
-    <p class="text-[10px] text-slate-400 mt-0.5">Brut <?= $fcfa($totalPaye) ?> — remboursé <?= $fcfa($totalRembourse) ?></p>
-  </div>
-  <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
-    <div class="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center mb-3">
-      <i class="fas fa-receipt text-blue-500"></i>
-    </div>
-    <p class="text-2xl font-black text-primary"><?= $nbPaiements ?></p>
-    <p class="text-xs font-bold text-slate-500 mt-1">Paiements enregistrés</p>
-  </div>
-  <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 <?= $nbEnAttente>0?'border-amber-200':'' ?>">
-    <div class="w-10 h-10 bg-amber-50 rounded-xl flex items-center justify-center mb-3">
-      <i class="fas fa-clock text-amber-500"></i>
-    </div>
-    <p class="text-2xl font-black text-amber-500"><?= $nbEnAttente ?></p>
-    <p class="text-xs font-bold text-slate-500 mt-1">À encaisser (total ou solde)</p>
-  </div>
-  <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 <?= $nbRetard>0?'border-red-200':'' ?>">
-    <div class="w-10 h-10 bg-red-50 rounded-xl flex items-center justify-center mb-3">
-      <i class="fas fa-exclamation-triangle text-accent"></i>
-    </div>
-    <p class="text-2xl font-black text-accent"><?= $nbRetard ?></p>
-    <p class="text-xs font-bold text-slate-500 mt-1">Soldes en retard</p>
-  </div>
+    <p class="text-base sm:text-2xl font-black <?= $cls ?>"><?= $val ?></p>
+    <p class="text-[11px] sm:text-xs font-bold text-slate-500 mt-0.5"><?= $lib ?></p>
+  </a>
+  <?php endforeach; ?>
 </div>
 
-<!-- Réservations à encaisser -->
+<!-- Réservations en attente de paiement -->
 <?php if (!empty($enAttente)): ?>
-<div class="bg-white rounded-2xl border-2 border-amber-200 shadow-sm overflow-hidden mb-6">
-  <div class="flex items-center gap-3 px-5 py-4 border-b border-amber-100 bg-amber-50">
-    <i class="fas fa-clock text-amber-500"></i>
-    <h2 class="font-black text-amber-800 text-sm uppercase italic tracking-tight">
-      <?= count($enAttente) ?> réservation(s) validée(s) — paiement ou solde à encaisser
+<div id="a-encaisser" class="bg-white rounded-2xl border-2 border-amber-200 shadow-sm overflow-hidden mb-6">
+  <div class="flex flex-col sm:flex-row sm:items-center gap-3 px-5 py-4 border-b border-amber-100 bg-amber-50">
+    <h2 class="flex-1 font-black text-amber-800 text-sm uppercase italic tracking-tight flex items-center gap-2">
+      <i class="fas fa-clock text-amber-500"></i>
+      <?= count($enAttente) ?> réservation(s) validée(s) — paiement en attente
     </h2>
+    <div class="relative">
+      <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-[10px]"></i>
+      <input type="search" id="rechercheAttente" oninput="filtrerAttente(this.value)" placeholder="Client, espace, n°, date…"
+             class="w-full text-xs font-bold rounded-xl border border-amber-200 bg-white pl-8 pr-3 py-2 outline-none focus:border-primary text-primary">
+    </div>
   </div>
+  <p id="attenteVide" class="hidden px-5 py-6 text-sm text-slate-400 italic text-center">Aucune réservation ne correspond à la recherche.</p>
   <div class="divide-y divide-slate-50">
     <?php foreach ($enAttente as $r):
         $s = $r['situation'];
+        $rid = (int)$r['id'];
         $estSejourResa = empty($r['heure_debut']);
         $nuitees = $estSejourResa ? max(1, (int)((strtotime($r['date_depart']) - strtotime($r['date_resa'])) / 86400)) : 1;
-        [$etatLib, $etatCls] = libelle_etat_financier($s['etat']);
-        $echeance = $s['echeance_solde'] ?? $s['echeance_premier_paiement'];
-        $heuresRestantes = $echeance ? ($echeance - time()) / 3600 : null;
-        $ouvert = ($openResa === (int)$r['id']);
+        $quantiteResa = max(1, (int)($r['quantite'] ?? 1));
+        $ouvert = ($openResa === $rid);
         $acompte25 = round($s['net_du'] * 0.25);
         $acompte50 = round($s['net_du'] * 0.50);
+        $proposer25 = $s['total_paye'] <= 0 && $acompte25 > 0 && $acompte25 < $s['solde'];
+        $proposer50 = $s['total_paye'] <= 0 && $acompte50 > 0 && $acompte50 < $s['solde'];
+        // Avertissement d'expiration : uniquement tant qu'aucun paiement n'a été reçu (délai de 48 h)
+        $heuresRestantes = $s['echeance_premier_paiement'] ? ($s['echeance_premier_paiement'] - time()) / 3600 : null;
+        $red = $s['reduction_appliquee'];
+        $rechercheTexte = mb_strtolower($r['nom_complet'] . ' ' . $r['espace_nom'] . ' #resa-' . $rid . ' ' . $rid . ' ' . ($r['telephone'] ?? '') . ' ' . date('d/m/Y', strtotime($r['date_resa'])));
     ?>
-    <div id="resa-<?= $r['id'] ?>">
-    <div onclick="<?= !$readonly ? "togglePayForm({$r['id']})" : '' ?>" class="flex flex-col md:flex-row md:items-center gap-4 px-5 py-4 hover:bg-slate-50 transition <?= !$readonly ? 'cursor-pointer' : '' ?>">
+    <div id="resa-<?= $rid ?>" data-recherche="<?= e($rechercheTexte) ?>" class="ligne-attente">
+    <div onclick="<?= !$readonly ? "togglePayForm($rid)" : '' ?>" class="flex flex-col md:flex-row md:items-center gap-3 px-5 py-4 hover:bg-slate-50 transition <?= !$readonly ? 'cursor-pointer' : '' ?>">
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-2 flex-wrap">
           <p class="font-black text-primary text-sm"><?= e($r['nom_complet']) ?></p>
           <span class="text-xs text-slate-400">·</span>
           <p class="text-sm text-slate-600 font-semibold"><?= e($r['espace_nom']) ?></p>
-          <span class="text-[10px] font-mono font-black text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">#RESA-<?= $r['id'] ?></span>
-          <span class="text-[10px] font-black px-2 py-0.5 rounded-full border <?= $etatCls ?>"><?= e($etatLib) ?></span>
+          <span class="text-[10px] font-mono font-black text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">#RESA-<?= $rid ?></span>
         </div>
-        <div class="flex items-center gap-3 mt-1 text-xs text-slate-500 flex-wrap">
+        <div class="flex items-center gap-2 mt-1 text-xs text-slate-500 flex-wrap">
           <?php if ($estSejourResa): ?>
           <span><i class="fas fa-calendar text-accent text-[10px] mr-1"></i><?= date('d/m/Y',strtotime($r['date_resa'])) ?> → <?= date('d/m/Y',strtotime($r['date_depart'])) ?> (<?= $nuitees ?> nuitée<?= $nuitees>1?'s':'' ?>)</span>
+          <?php if ($quantiteResa > 1): ?><span class="text-indigo-600 font-bold"><i class="fas fa-door-open text-[10px] mr-1"></i><?= $quantiteResa ?> chambres</span><?php endif; ?>
+          <?php if (!empty($r['petit_dejeuner'])): ?><span class="text-amber-600 font-bold"><i class="fas fa-coffee text-[10px] mr-1"></i>Petit-déj inclus</span><?php endif; ?>
           <?php else: ?>
           <span><i class="fas fa-calendar text-accent text-[10px] mr-1"></i><?= date('d/m/Y',strtotime($r['date_resa'])) ?></span>
           <span><i class="fas fa-clock text-accent text-[10px] mr-1"></i><?= substr($r['heure_debut'],0,5) ?> → <?= substr($r['heure_fin'],0,5) ?></span>
@@ -538,164 +562,169 @@ require __DIR__ . '/_admin_header.php';
           <?php if ($r['telephone']): ?>
           <span><i class="fas fa-phone text-accent text-[10px] mr-1"></i><?= e($r['telephone']) ?></span>
           <?php endif; ?>
-        </div>
-        <!-- Situation financière -->
-        <div class="flex items-center gap-2 mt-2 flex-wrap text-[11px]">
-          <span class="font-bold text-slate-500">Initial <span class="font-black text-primary"><?= $fcfa($s['montant_initial']) ?></span></span>
-          <?php if ($s['montant_reduction'] > 0): ?>
-          <span class="font-bold text-orange-600">− réduction <?= $fcfa($s['montant_reduction']) ?></span>
-          <span class="font-bold text-slate-500">= net <span class="font-black text-primary"><?= $fcfa($s['net_du']) ?></span></span>
-          <?php endif; ?>
-          <span class="font-bold text-sky-700 bg-sky-50 px-2 py-0.5 rounded-full">Payé <?= $fcfa($s['paye_net']) ?></span>
-          <span class="font-black text-accent bg-red-50 px-2 py-0.5 rounded-full">Reste <?= $fcfa($s['solde']) ?> FCFA</span>
-          <?php if ($echeance): ?>
-          <span class="font-bold <?= $s['en_retard'] ? 'text-red-600 bg-red-50' : ($heuresRestantes <= 24 ? 'text-amber-600 bg-amber-50' : 'text-slate-500 bg-slate-50') ?> px-2 py-0.5 rounded-full">
-            <i class="fas fa-clock text-[10px] mr-1"></i>
-            <?= $s['echeance_solde'] ? 'Solde avant le ' : 'Premier paiement avant le ' ?><?= date('d/m/Y H:i', $echeance) ?>
-            <?= $s['en_retard'] ? '— en retard' : '' ?>
+          <span class="font-black text-primary"><i class="fas fa-tag text-accent text-[10px] mr-1"></i><?= $fcfa($s['net_du']) ?> FCFA<?= $red ? ' <span class="font-bold text-orange-600">(réduction ' . $fcfa($s['montant_reduction']) . ')</span>' : '' ?></span>
+          <?php if ($s['total_paye'] > 0): ?>
+          <span class="font-black <?= $s['en_retard'] ? 'text-red-600 bg-red-50' : 'text-sky-700 bg-sky-50' ?> px-2 py-0.5 rounded-full">
+            <i class="fas fa-coins text-[10px] mr-1"></i>Acompte versé : <?= $fcfa($s['paye_net']) ?> FCFA — <?= $s['en_retard'] ? 'solde en retard' : 'solde' ?> : <?= $fcfa($s['solde']) ?> FCFA<?= $s['echeance_solde'] ? ($s['en_retard'] ? ' — échéance dépassée (' . date('d/m/Y H:i', $s['echeance_solde']) . ')' : ' — à régler avant le ' . date('d/m/Y H:i', $s['echeance_solde'])) : '' ?>
           </span>
+          <?php endif; ?>
+          <?php if ($heuresRestantes !== null && $heuresRestantes <= 6): ?>
+          <span class="font-black text-red-600 bg-red-50 px-2 py-0.5 rounded-full"><i class="fas fa-clock text-[10px] mr-1"></i><?= $heuresRestantes > 0 ? 'Expire dans ' . max(1, round($heuresRestantes)) . 'h' : 'Expiration imminente' ?></span>
+          <?php elseif ($heuresRestantes !== null && $heuresRestantes <= 24): ?>
+          <span class="font-black text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full"><i class="fas fa-clock text-[10px] mr-1"></i>Expire dans <?= round($heuresRestantes) ?>h</span>
           <?php endif; ?>
         </div>
       </div>
+
       <?php if (!$readonly): ?>
-      <div class="flex-shrink-0 flex items-center gap-2">
-        <a href="../generer_bon.php?id=<?= $r['id'] ?>&from=paiements" target="_blank" onclick="event.stopPropagation()"
-           class="flex items-center gap-2 bg-slate-100 text-slate-600 text-xs font-black uppercase px-4 py-2.5 rounded-xl hover:bg-slate-200 transition">
-          <i class="fas fa-file-invoice"></i> Document
+      <div class="flex-shrink-0 grid grid-cols-2 md:flex items-center gap-2">
+        <a href="../generer_bon.php?id=<?= $rid ?>&from=paiements" target="_blank" onclick="event.stopPropagation()"
+           class="flex items-center justify-center gap-2 bg-slate-100 text-slate-600 text-xs font-black uppercase px-4 py-2.5 rounded-xl hover:bg-slate-200 transition">
+          <i class="fas fa-file-invoice"></i> Voir le bon
         </a>
-        <button onclick="event.stopPropagation(); togglePayForm(<?= $r['id'] ?>)"
-                class="flex items-center gap-2 bg-accent text-white text-xs font-black uppercase px-4 py-2.5 rounded-xl hover:bg-accent-dark transition shadow-sm">
-          <i class="fas fa-plus-circle"></i> Encaisser
+        <button type="button" onclick="event.stopPropagation(); togglePayForm(<?= $rid ?>)"
+                class="flex items-center justify-center gap-2 bg-accent text-white text-xs font-black uppercase px-4 py-2.5 rounded-xl hover:bg-accent-dark transition shadow-sm">
+          <i class="fas fa-plus-circle"></i> Enregistrer le paiement
         </button>
       </div>
       <?php endif; ?>
     </div>
 
     <?php if (!$readonly): ?>
-    <div id="payForm-<?= $r['id'] ?>" class="<?= $ouvert ? '' : 'hidden' ?> px-5 pb-5 space-y-4">
-
-      <!-- Récapitulatif -->
-      <div class="grid grid-cols-2 sm:grid-cols-5 gap-2 text-center">
-        <?php foreach ([
-            ['Montant initial', $s['montant_initial'], 'text-primary'],
-            ['Réduction appliquée', $s['montant_reduction'], 'text-orange-600'],
-            ['Net à payer', $s['net_du'], 'text-primary'],
-            ['Déjà payé', $s['paye_net'], 'text-sky-700'],
-            ['Reste à payer', $s['solde'], 'text-accent'],
-        ] as [$lib, $val, $cls]): ?>
-        <div class="bg-slate-50 rounded-xl border border-slate-100 p-3">
-          <p class="text-[9px] font-black uppercase tracking-widest text-slate-400"><?= $lib ?></p>
-          <p class="text-sm font-black <?= $cls ?> mt-1"><?= $fcfa($val) ?> <span class="text-[9px]">FCFA</span></p>
-        </div>
-        <?php endforeach; ?>
-      </div>
-
-      <!-- A. Réduction éventuelle -->
-      <div class="bg-orange-50/60 rounded-2xl border border-orange-100 p-4">
-        <p class="text-[10px] font-black uppercase tracking-widest text-orange-700 mb-3"><i class="fas fa-percent mr-1"></i>A. Réduction éventuelle</p>
-
-        <?php if ($s['reduction_appliquee']): $red = $s['reduction_appliquee']; ?>
-          <div class="flex flex-col md:flex-row md:items-start gap-3">
-            <div class="flex-1 text-xs text-orange-800">
-              <p class="font-black">Réduction appliquée : <?= $fcfa($red['montant_reduction']) ?> FCFA<?= $red['pourcentage'] !== null ? ' (' . rtrim(rtrim($red['pourcentage'], '0'), '.') . ' %)' : '' ?></p>
-              <?php if ($red['motif']): ?><p class="mt-0.5">Motif : <?= e($red['motif']) ?></p><?php endif; ?>
-              <?php if ($red['autorise_par']): ?><p class="mt-0.5">Accord : <?= e($red['autorise_par']) ?><?= $red['reference_accord'] ? ' — réf. ' . e($red['reference_accord']) : '' ?></p><?php endif; ?>
-              <p class="mt-0.5 text-orange-600">Enregistrée par <?= e($red['saisi_par_nom'] ?? '—') ?> le <?= date('d/m/Y H:i', strtotime($red['created_at'])) ?></p>
-            </div>
-            <form method="POST" class="flex flex-wrap items-center gap-2" onsubmit="return confirm('Confirmer le changement de cette réduction ?')">
-              <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
-              <input type="hidden" name="jeton" value="<?= paiement_jeton() ?>">
-              <input type="hidden" name="action" value="statut_reduction">
-              <input type="hidden" name="reservation_id" value="<?= $r['id'] ?>">
-              <input type="hidden" name="reduction_id" value="<?= (int)$red['id'] ?>">
-              <select name="nouveau_statut" class="text-xs font-bold rounded-xl border-2 border-orange-200 bg-white px-3 py-2">
-                <option value="annulee">Annuler la réduction</option>
-                <option value="non_appliquee">Réduction non utilisée</option>
-              </select>
-              <input type="text" name="motif_statut" required minlength="3" placeholder="Raison"
-                     class="text-xs font-semibold rounded-xl border-2 border-orange-200 bg-white px-3 py-2 w-44">
-              <button class="text-xs font-black uppercase bg-white border-2 border-orange-300 text-orange-700 px-3 py-2 rounded-xl hover:bg-orange-100 transition">Valider</button>
-            </form>
-          </div>
-        <?php else: ?>
-          <form method="POST" class="grid sm:grid-cols-2 lg:grid-cols-5 gap-3 items-end" onsubmit="return confirm('Enregistrer cette réduction ?')">
-            <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
-            <input type="hidden" name="jeton" value="<?= paiement_jeton() ?>">
-            <input type="hidden" name="action" value="accorder_reduction">
-            <input type="hidden" name="reservation_id" value="<?= $r['id'] ?>">
-            <div>
-              <label class="block text-[10px] font-black uppercase tracking-widest text-orange-700 mb-1">Montant (FCFA)</label>
-              <input type="number" name="montant_reduction" min="1" step="1" placeholder="Ex : 20000"
-                     class="w-full rounded-xl border-2 border-orange-200 bg-white px-3 py-2 font-bold text-primary text-sm">
-            </div>
-            <div>
-              <label class="block text-[10px] font-black uppercase tracking-widest text-orange-700 mb-1">ou %</label>
-              <input type="number" name="pourcentage" min="0.01" max="99.99" step="0.01" placeholder="Ex : 20"
-                     class="w-full rounded-xl border-2 border-orange-200 bg-white px-3 py-2 font-bold text-primary text-sm">
-            </div>
-            <div>
-              <label class="block text-[10px] font-black uppercase tracking-widest text-orange-700 mb-1">Motif</label>
-              <input type="text" name="motif" list="motifsReductionSuggestions" placeholder="Motif"
-                     class="w-full rounded-xl border-2 border-orange-200 bg-white px-3 py-2 font-semibold text-primary text-sm">
-            </div>
-            <div>
-              <label class="block text-[10px] font-black uppercase tracking-widest text-orange-700 mb-1">Accordée par / réf.</label>
-              <input type="text" name="autorise_par" placeholder="Ex : Directeur Général"
-                     class="w-full rounded-xl border-2 border-orange-200 bg-white px-3 py-2 font-semibold text-primary text-sm mb-1">
-              <input type="text" name="reference_accord" placeholder="Réf. (facultatif)"
-                     class="w-full rounded-xl border-2 border-orange-200 bg-white px-3 py-2 font-semibold text-primary text-sm">
-            </div>
-            <button type="submit" class="bg-orange-500 hover:bg-orange-600 text-white text-xs font-black uppercase px-4 py-2.5 rounded-xl transition">
-              Enregistrer la réduction
-            </button>
-          </form>
-          <p class="text-[10px] text-orange-600 mt-2">Facultatif. La réduction diminue le montant net à payer ; elle est tracée et notifiée à la Direction et au Ministre. Elle ne peut pas dépasser le reste à payer (<?= $fcfa($s['montant_initial'] - $s['paye_net']) ?> FCFA).</p>
-        <?php endif; ?>
-
-        <?php foreach (array_merge($s['reductions_non_appliquees'], $s['reductions_annulees']) as $old): ?>
-          <p class="text-[10px] text-slate-500 mt-2">
-            <i class="fas fa-history mr-1"></i>Réduction de <?= $fcfa($old['montant_reduction']) ?> FCFA —
-            <?= $old['statut'] === 'annulee' ? 'annulée' : 'non utilisée' ?><?= $old['motif_statut'] ? ' (' . e($old['motif_statut']) . ')' : '' ?>
-          </p>
-        <?php endforeach; ?>
-      </div>
-
-      <!-- B. Paiement -->
-      <form method="POST" class="bg-slate-50 rounded-2xl border border-slate-100 p-4 space-y-4" onsubmit="return confirmerPaiement(<?= $r['id'] ?>)">
+    <!-- Formulaire de paiement (déplié au clic) -->
+    <div id="payForm-<?= $rid ?>" class="<?= $ouvert ? '' : 'hidden' ?> px-5 pb-5">
+      <!-- Formulaires : les champs affichés plus bas y sont rattachés par l'attribut form -->
+      <form id="fPay-<?= $rid ?>" method="POST" class="hidden" onsubmit="return confirmerPaiement(<?= $rid ?>)" data-solde="<?= (int)round($s['solde']) ?>">
         <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
         <input type="hidden" name="jeton" value="<?= paiement_jeton() ?>">
         <input type="hidden" name="action" value="enregistrer_paiement">
-        <input type="hidden" name="reservation_id" value="<?= $r['id'] ?>">
-        <p class="text-[10px] font-black uppercase tracking-widest text-slate-500"><i class="fas fa-money-bill-wave mr-1"></i>B. Paiement réellement encaissé</p>
+        <input type="hidden" name="reservation_id" value="<?= $rid ?>">
+        <input type="hidden" name="type_paiement" id="typePaiement-<?= $rid ?>" value="complet">
+      </form>
+      <?php if (!$red): ?>
+      <form id="fRed-<?= $rid ?>" method="POST" class="hidden" onsubmit="return confirm('Enregistrer cette réduction ?')">
+        <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
+        <input type="hidden" name="jeton" value="<?= paiement_jeton() ?>">
+        <input type="hidden" name="action" value="accorder_reduction">
+        <input type="hidden" name="reservation_id" value="<?= $rid ?>">
+      </form>
+      <?php else: ?>
+      <form id="fRedM-<?= $rid ?>" method="POST" class="hidden" onsubmit="return confirm('Confirmer le changement de cette réduction ?')">
+        <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
+        <input type="hidden" name="jeton" value="<?= paiement_jeton() ?>">
+        <input type="hidden" name="action" value="statut_reduction">
+        <input type="hidden" name="reservation_id" value="<?= $rid ?>">
+        <input type="hidden" name="reduction_id" value="<?= (int)$red['id'] ?>">
+      </form>
+      <?php endif; ?>
 
-        <div class="grid grid-cols-2 lg:grid-cols-4 gap-2" id="typesPaiement-<?= $r['id'] ?>">
-          <?php
-            $choix = [['complet', 'Paiement complet', $s['solde']]];
-            if ($s['total_paye'] <= 0 && $acompte25 < $s['solde']) $choix[] = ['acompte_25', 'Acompte 25 %', $acompte25];
-            if ($s['total_paye'] <= 0 && $acompte50 < $s['solde']) $choix[] = ['acompte_50', 'Acompte 50 %', $acompte50];
-            $choix[] = ['personnalise', 'Montant personnalisé', null];
-            foreach ($choix as $i => [$val, $lib, $mt]):
-          ?>
-          <label class="flex items-start gap-2 p-3 rounded-xl border-2 border-slate-200 bg-white cursor-pointer hover:border-primary transition">
-            <input type="radio" name="type_paiement" value="<?= $val ?>" <?= $i === 0 ? 'checked' : '' ?> onchange="majTypePaiement(<?= $r['id'] ?>)" class="mt-0.5 w-4 h-4 accent-primary"
-                   data-montant="<?= $mt !== null ? (int)$mt : '' ?>">
-            <span>
-              <span class="block text-xs font-black text-slate-700"><?= $lib ?></span>
-              <span class="block text-[11px] font-bold text-accent"><?= $mt !== null ? $fcfa($mt) . ' FCFA' : 'saisi ci-dessous' ?></span>
-            </span>
-          </label>
-          <?php endforeach; ?>
+      <div class="bg-slate-50 rounded-2xl border border-slate-100 p-4 sm:p-5 space-y-4">
+        <div class="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Montant encaissé</p>
+            <p id="montantAffiche-<?= $rid ?>" class="text-lg font-black text-accent"><?= $fcfa($s['solde']) ?> FCFA</p>
+          </div>
+            <div class="flex flex-wrap gap-2">
+              <button type="button" onclick="basculerAcompte(<?= $rid ?>)" class="text-xs font-black px-3 py-2 rounded-xl border-2 border-sky-200 bg-white text-sky-700 hover:bg-slate-50 transition">
+                <i class="fas fa-coins mr-1"></i>Acompte
+              </button>
+              <?php if (!$red): ?>
+              <button type="button" onclick="basculer('reduction-<?= $rid ?>')" class="text-xs font-black px-3 py-2 rounded-xl border-2 border-orange-200 bg-white text-orange-700 hover:bg-slate-50 transition">
+                <i class="fas fa-percent mr-1"></i>Appliquer une réduction
+              </button>
+              <?php else: ?>
+              <button type="button" onclick="basculer('reductionModif-<?= $rid ?>')" class="text-xs font-bold px-3 py-2 rounded-xl border-2 border-orange-200 bg-white text-orange-700 hover:bg-slate-50 transition">
+                Réduction de <?= $fcfa($s['montant_reduction']) ?> appliquée · <span class="underline">modifier</span>
+              </button>
+              <?php endif; ?>
+            </div>
         </div>
 
-        <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          <div id="montantPerso-<?= $r['id'] ?>" class="hidden">
-            <label class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Montant encaissé FCFA <span class="text-accent">*</span></label>
-            <input type="number" name="montant" min="1" max="<?= (int)ceil($s['solde']) ?>" step="1" placeholder="Max <?= $fcfa($s['solde']) ?>"
-                   class="w-full rounded-xl border-2 border-slate-200 bg-white px-3 py-2.5 font-black text-accent outline-none focus:border-accent text-sm">
+        <?php if (!$red): ?>
+        <!-- Réduction : visible seulement après clic sur « Appliquer une réduction » -->
+        <div id="reduction-<?= $rid ?>" class="hidden bg-orange-50 border-2 border-orange-200 rounded-xl p-4 space-y-3">
+        <p class="text-[10px] font-black uppercase tracking-widest text-orange-700"><i class="fas fa-percent mr-1"></i>Réduction</p>
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div>
+            <label class="block text-[10px] font-black uppercase tracking-widest text-orange-700 mb-1">Montant (FCFA)</label>
+            <input form="fRed-<?= $rid ?>" type="number" name="montant_reduction" min="1" step="1" placeholder="Ex : 20000"
+                   class="w-full rounded-xl border-2 border-orange-200 bg-white px-3 py-2 font-bold text-primary text-sm outline-none focus:border-orange-400">
           </div>
           <div>
+            <label class="block text-[10px] font-black uppercase tracking-widest text-orange-700 mb-1">ou %</label>
+            <input form="fRed-<?= $rid ?>" type="number" name="pourcentage" min="0.01" max="99.99" step="0.01" placeholder="Ex : 20"
+                   class="w-full rounded-xl border-2 border-orange-200 bg-white px-3 py-2 font-bold text-primary text-sm outline-none focus:border-orange-400">
+          </div>
+          <div class="col-span-2">
+            <label class="block text-[10px] font-black uppercase tracking-widest text-orange-700 mb-1">Motif <span class="text-accent">*</span></label>
+            <input form="fRed-<?= $rid ?>" type="text" name="motif" list="motifsReductionSuggestions" required placeholder="Ex : accord de la Direction"
+                   class="w-full rounded-xl border-2 border-orange-200 bg-white px-3 py-2 font-semibold text-primary text-sm outline-none focus:border-orange-400">
+          </div>
+          <div class="col-span-2">
+            <label class="block text-[10px] font-black uppercase tracking-widest text-orange-700 mb-1">Accordée par</label>
+            <input form="fRed-<?= $rid ?>" type="text" name="autorise_par" placeholder="Ex : Directeur Général"
+                   class="w-full rounded-xl border-2 border-orange-200 bg-white px-3 py-2 font-semibold text-primary text-sm outline-none focus:border-orange-400">
+          </div>
+          <div class="col-span-2">
+            <label class="block text-[10px] font-black uppercase tracking-widest text-orange-700 mb-1">Référence de l'accord</label>
+            <input form="fRed-<?= $rid ?>" type="text" name="reference_accord" placeholder="Facultatif"
+                   class="w-full rounded-xl border-2 border-orange-200 bg-white px-3 py-2 font-semibold text-primary text-sm outline-none focus:border-orange-400">
+          </div>
+        </div>
+        <div class="flex items-center justify-between gap-3">
+          <button type="button" onclick="basculer('reduction-<?= $rid ?>')" class="text-xs font-bold text-slate-400 hover:text-primary transition px-2 py-2">Annuler</button>
+          <button type="submit" form="fRed-<?= $rid ?>" class="bg-amber-600 hover:bg-amber-700 text-white text-xs font-black uppercase px-5 py-2.5 rounded-xl transition">Appliquer la réduction</button>
+        </div>
+        </div>
+        <?php else: ?>
+        <!-- Modification de la réduction : visible seulement après clic sur « modifier » -->
+        <div id="reductionModif-<?= $rid ?>" class="hidden bg-orange-50 border-2 border-orange-200 rounded-xl p-4 space-y-3">
+        <p class="text-xs text-orange-800">
+          Réduction de <strong><?= $fcfa($red['montant_reduction']) ?> FCFA</strong><?= $red['motif'] ? ' — ' . e($red['motif']) : '' ?><?= $red['autorise_par'] ? ' (accord : ' . e($red['autorise_par']) . ')' : '' ?>
+        </p>
+        <div class="grid sm:grid-cols-2 gap-3">
+          <select form="fRedM-<?= $rid ?>" name="nouveau_statut" class="w-full text-xs font-bold rounded-xl border-2 border-orange-200 bg-white px-3 py-2.5">
+            <option value="annulee">Annuler la réduction</option>
+            <option value="non_appliquee">Réduction non utilisée</option>
+          </select>
+          <input form="fRedM-<?= $rid ?>" type="text" name="motif_statut" required minlength="3" placeholder="Raison"
+                 class="w-full text-xs font-semibold rounded-xl border-2 border-orange-200 bg-white px-3 py-2.5">
+        </div>
+        <div class="flex items-center justify-between gap-3">
+          <button type="button" onclick="basculer('reductionModif-<?= $rid ?>')" class="text-xs font-bold text-slate-400 hover:text-primary transition px-2 py-2">Fermer</button>
+          <button type="submit" form="fRedM-<?= $rid ?>" class="bg-amber-600 hover:bg-amber-700 text-white text-xs font-black uppercase px-5 py-2.5 rounded-xl transition">Valider</button>
+        </div>
+        </div>
+        <?php endif; ?>
+
+        <!-- Acompte : visible seulement après clic sur « Acompte » -->
+        <div id="acompte-<?= $rid ?>" class="hidden bg-sky-50 border-2 border-sky-200 rounded-xl p-4 space-y-3">
+          <p class="text-[10px] font-black uppercase tracking-widest text-sky-700"><i class="fas fa-coins mr-1"></i>Acompte</p>
+          <div class="flex flex-wrap gap-2">
+            <?php if ($proposer25): ?>
+            <button type="button" data-type="acompte_25" data-montant="<?= (int)$acompte25 ?>" onclick="choisirAcompte(<?= $rid ?>, this)"
+                    class="choix-acompte-<?= $rid ?> text-xs font-black px-3 py-2 rounded-xl border-2 border-sky-200 bg-white text-sky-700">25 % — <?= $fcfa($acompte25) ?> FCFA</button>
+            <?php endif; ?>
+            <?php if ($proposer50): ?>
+            <button type="button" data-type="acompte_50" data-montant="<?= (int)$acompte50 ?>" onclick="choisirAcompte(<?= $rid ?>, this)"
+                    class="choix-acompte-<?= $rid ?> text-xs font-black px-3 py-2 rounded-xl border-2 border-sky-200 bg-white text-sky-700">50 % — <?= $fcfa($acompte50) ?> FCFA</button>
+            <?php endif; ?>
+            <button type="button" data-type="personnalise" onclick="choisirAcompte(<?= $rid ?>, this)"
+                    class="choix-acompte-<?= $rid ?> text-xs font-black px-3 py-2 rounded-xl border-2 border-sky-200 bg-white text-sky-700">Autre montant</button>
+          </div>
+          <div id="montantPerso-<?= $rid ?>" class="hidden">
+            <label class="block text-[10px] font-black uppercase tracking-widest text-sky-700 mb-1">Montant de l'acompte (FCFA)</label>
+            <input form="fPay-<?= $rid ?>" type="number" name="montant" min="1" max="<?= max(1, (int)floor($s['solde'])) ?>" step="1" placeholder="Maximum <?= $fcfa($s['solde']) ?>"
+                   oninput="majMontantPerso(<?= $rid ?>)"
+                   class="w-full sm:max-w-xs rounded-xl border-2 border-sky-200 bg-white px-3 py-2.5 font-black text-accent outline-none focus:border-primary text-sm">
+          </div>
+          <p class="text-[10px] text-sky-600">Le solde sera à régler au plus tard 24 h avant le début de la réservation.</p>
+        </div>
+
+        <div class="grid sm:grid-cols-3 gap-4">
+          <div>
             <label class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Mode de paiement <span class="text-accent">*</span></label>
-            <select name="mode" required class="w-full rounded-xl border-2 border-slate-200 bg-white px-3 py-2.5 font-bold text-primary outline-none text-sm">
+            <select form="fPay-<?= $rid ?>" name="mode" required class="w-full rounded-xl border-2 border-slate-200 bg-white px-3 py-2.5 font-bold text-primary outline-none text-sm">
               <?php foreach ($modeLabels as $val=>[$lab,$ico,$cls]): ?>
                 <option value="<?= $val ?>"><?= $lab ?></option>
               <?php endforeach; ?>
@@ -703,38 +732,38 @@ require __DIR__ . '/_admin_header.php';
           </div>
           <div>
             <label class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Référence / N° reçu</label>
-            <input type="text" name="reference" maxlength="100" placeholder="Ex: OM-123456"
+            <input form="fPay-<?= $rid ?>" type="text" name="reference" maxlength="100" placeholder="Ex: OM-123456"
                    class="w-full rounded-xl border-2 border-slate-200 bg-white px-3 py-2.5 font-bold text-primary outline-none focus:border-primary text-sm">
           </div>
           <div>
             <label class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Note</label>
-            <input type="text" name="note" placeholder="Observation..."
+            <input form="fPay-<?= $rid ?>" type="text" name="note" placeholder="Observation..."
                    class="w-full rounded-xl border-2 border-slate-200 bg-white px-3 py-2.5 font-bold text-primary outline-none focus:border-primary text-sm">
           </div>
         </div>
 
-        <?php if ($s['reduction_appliquee']): ?>
+        <?php if ($red): ?>
         <label class="flex items-start gap-2 text-xs text-orange-800 bg-orange-50 border border-orange-200 rounded-xl p-3 cursor-pointer">
-          <input type="checkbox" name="plein_tarif" value="1" onchange="majTypePaiement(<?= $r['id'] ?>)" class="mt-0.5 w-4 h-4 accent-orange-600" id="pleinTarif-<?= $r['id'] ?>"
+          <input form="fPay-<?= $rid ?>" type="checkbox" name="plein_tarif" value="1" onchange="majAffichage(<?= $rid ?>)" class="mt-0.5 w-4 h-4 accent-amber-600" id="pleinTarif-<?= $rid ?>"
                  data-solde-plein="<?= (int)round($s['montant_initial'] - $s['paye_net']) ?>" data-net-plein="<?= (int)round($s['montant_initial']) ?>">
-          <span><strong>Le client paie le plein tarif</strong> : la réduction accordée reste tracée mais ne sera pas utilisée
-          (reste à payer au plein tarif : <?= $fcfa($s['montant_initial'] - $s['paye_net']) ?> FCFA).</span>
+          <span>Le client paie le plein tarif (la réduction ne sera pas utilisée).</span>
         </label>
         <?php endif; ?>
 
-        <div class="flex items-center justify-between flex-wrap gap-3">
-          <label class="flex items-center gap-2 text-[11px] text-slate-500">
-            <input type="checkbox" name="confirmer_doublon" value="1" class="w-3.5 h-3.5">
-            Second versement distinct (si un paiement identique vient d'être enregistré)
-          </label>
-          <div class="flex items-center gap-3">
-            <button type="button" onclick="togglePayForm(<?= $r['id'] ?>)" class="text-xs font-bold text-slate-400 hover:text-primary transition">Fermer</button>
-            <button type="submit" class="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white text-xs font-black uppercase px-6 py-2.5 rounded-xl transition shadow-sm">
-              <i class="fas fa-check"></i> Confirmer le paiement
-            </button>
-          </div>
+        <?php if ($doublonSignale && $ouvert): ?>
+        <label class="flex items-start gap-2 text-xs text-slate-600 bg-white border border-slate-200 rounded-xl p-3 cursor-pointer">
+          <input form="fPay-<?= $rid ?>" type="checkbox" name="confirmer_doublon" value="1" class="mt-0.5 w-4 h-4 accent-primary">
+          <span>Second versement distinct : il s'agit bien d'un nouveau paiement.</span>
+        </label>
+        <?php endif; ?>
+
+        <div class="flex items-center justify-between gap-3">
+          <button type="button" onclick="togglePayForm(<?= $rid ?>)" class="text-xs font-bold text-slate-400 hover:text-primary transition px-2 py-2">Annuler</button>
+          <button type="submit" form="fPay-<?= $rid ?>" id="confirmer-<?= $rid ?>" class="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white text-xs font-black uppercase px-5 py-2.5 rounded-xl transition shadow-sm">
+            <i class="fas fa-check"></i> Confirmer le paiement
+          </button>
         </div>
-      </form>
+      </div>
     </div>
     <?php endif; ?>
     </div>
@@ -744,41 +773,51 @@ require __DIR__ . '/_admin_header.php';
 <?php endif; ?>
 
 <!-- Historique paiements -->
-<div class="grid lg:grid-cols-5 gap-5">
+<div id="historique" class="grid lg:grid-cols-5 gap-5">
   <!-- Liste -->
-  <div class="lg:col-span-3">
+  <div class="lg:col-span-3 min-w-0">
     <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-      <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-slate-50">
+      <div class="px-5 py-4 border-b border-slate-100 bg-slate-50 space-y-3">
         <h2 class="font-black text-[10px] uppercase tracking-widest text-slate-400 flex items-center gap-2">
           <i class="fas fa-history text-accent"></i> Historique des paiements
         </h2>
-        <!-- Filtre mode + recherche -->
-        <form method="GET" class="flex flex-wrap gap-2">
-          <div class="relative">
+        <!-- Recherche -->
+        <form method="GET" action="paiements.php#historique" class="grid grid-cols-2 md:grid-cols-4 gap-2">
+          <div class="relative col-span-2 md:col-span-2">
             <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-[10px]"></i>
-            <input type="text" name="q" value="<?= e($search) ?>" placeholder="N° facture, client, espace..."
-                   class="text-xs font-bold rounded-xl border border-slate-200 pl-8 pr-3 py-1.5 outline-none focus:border-primary text-primary w-48">
+            <input type="search" name="q" value="<?= e($search) ?>" placeholder="Client, n° réservation, n° reçu, référence…"
+                   class="w-full text-xs font-bold rounded-xl border border-slate-200 bg-white pl-8 pr-3 py-2 outline-none focus:border-primary text-primary">
           </div>
-          <div class="relative">
-            <select name="mode" onchange="this.form.submit()" class="text-xs font-bold rounded-xl border border-slate-200 px-3 py-1.5 outline-none appearance-none pr-7 text-primary">
-              <option value="">Tous modes</option>
-              <?php foreach ($modeLabels as $val=>[$lab,$ico,$cls]): ?>
-                <option value="<?= $val ?>" <?= $filterMode===$val?'selected':''?>><?= $lab ?></option>
-              <?php endforeach; ?>
-            </select>
-            <i class="fas fa-chevron-down absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 text-[9px] pointer-events-none"></i>
+          <input type="date" name="date" value="<?= e($filterDate) ?>" title="Date d'encaissement"
+                 class="w-full text-xs font-bold rounded-xl border border-slate-200 bg-white px-3 py-2 outline-none focus:border-primary text-primary">
+          <select name="espace" class="w-full text-xs font-bold rounded-xl border border-slate-200 bg-white px-3 py-2 outline-none text-primary">
+            <option value="0">Toutes les salles</option>
+            <?php foreach ($espacesListe as $esp): ?>
+              <option value="<?= (int)$esp['id'] ?>" <?= $filterEspace === (int)$esp['id'] ? 'selected' : '' ?>><?= e($esp['nom']) ?></option>
+            <?php endforeach; ?>
+          </select>
+          <select name="mode" class="w-full text-xs font-bold rounded-xl border border-slate-200 bg-white px-3 py-2 outline-none text-primary">
+            <option value="">Tous modes</option>
+            <?php foreach ($modeLabels as $val=>[$lab,$ico,$cls]): ?>
+              <option value="<?= $val ?>" <?= $filterMode===$val?'selected':''?>><?= $lab ?></option>
+            <?php endforeach; ?>
+          </select>
+          <div class="flex items-center gap-2">
+            <button type="submit" class="flex-1 text-xs font-black bg-primary text-white px-3 py-2 rounded-xl hover:bg-slate-800 transition">Rechercher</button>
+            <?php if ($filtreActif): ?>
+            <a href="paiements.php#historique" class="text-xs font-bold text-slate-400 px-2 py-2 hover:text-accent transition" title="Réinitialiser"><i class="fas fa-times"></i></a>
+            <?php endif; ?>
           </div>
-          <button type="submit" class="text-xs font-black bg-primary text-white px-3 py-1.5 rounded-xl hover:bg-slate-800 transition">OK</button>
-          <?php if ($search || $filterMode): ?>
-          <a href="paiements.php" class="text-xs font-bold text-slate-400 px-2 py-1.5 hover:text-accent transition">Réinitialiser</a>
-          <?php endif; ?>
         </form>
+        <?php if ($filtreActif): ?>
+        <p class="text-[11px] font-bold text-slate-500"><?= count($paiements) ?> résultat(s)</p>
+        <?php endif; ?>
       </div>
 
       <?php if (empty($paiements)): ?>
         <div class="py-16 text-center">
           <i class="fas fa-receipt text-4xl text-slate-200 mb-3"></i>
-          <p class="text-slate-400 font-semibold">Aucun paiement enregistré.</p>
+          <p class="text-slate-400 font-semibold"><?= $filtreActif ? 'Aucun paiement ne correspond à la recherche.' : 'Aucun paiement enregistré.' ?></p>
         </div>
       <?php else: ?>
       <div class="divide-y divide-slate-50">
@@ -787,30 +826,30 @@ require __DIR__ . '/_admin_header.php';
           $isOpen = ($openPaiement && $openPaiement['id']==$p['id']);
         ?>
         <a href="paiements.php?id=<?= $p['id'] ?>"
-           class="flex items-start gap-4 px-5 py-3.5 hover:bg-slate-50 transition <?= $isOpen?'bg-primary/5 border-l-4 border-primary':'' ?>">
+           class="flex items-start gap-3 px-4 sm:px-5 py-3.5 hover:bg-slate-50 transition <?= $isOpen?'bg-primary/5 border-l-4 border-primary':'' ?>">
           <div class="w-9 h-9 <?= $mcls ?> rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5">
             <i class="fas <?= $mico ?> text-xs"></i>
           </div>
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 flex-wrap">
-              <p class="font-black text-primary text-sm"><?= e($p['nom_complet']) ?></p>
+              <p class="font-black text-primary text-sm truncate"><?= e($p['nom_complet']) ?></p>
               <span class="text-xs font-black text-green-600">+<?= $fcfa($p['montant']) ?> FCFA</span>
             </div>
             <p class="text-[9px] font-mono font-bold text-slate-400 mt-0.5">
-              <?= ref_recu((int)$p['id'], $p['created_at']) ?>
+              <?= ref_recu((int)$p['id'], $p['created_at']) ?> · #RESA-<?= (int)$p['reservation_id'] ?>
               <?php if (!empty($p['motif_reduction'])): ?>
-                <span class="ml-1 inline-block bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded-full"><i class="fas fa-percent"></i> Réduction (ancien format)</span>
+                <span class="ml-1 inline-block bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded-full"><i class="fas fa-percent"></i> Réduction</span>
               <?php endif; ?>
             </p>
             <p class="text-xs text-slate-500 truncate mt-0.5"><?= e($p['espace_nom']) ?> · <?= date('d/m/Y',strtotime($p['date_resa'])) ?></p>
-            <div class="flex items-center gap-2 mt-1">
+            <div class="flex items-center gap-2 mt-1 flex-wrap">
               <span class="text-[9px] font-black px-2 py-0.5 rounded-full <?= $mcls ?>"><?= $mlab ?></span>
               <?php if ($p['reference']): ?>
-                <span class="text-[9px] text-slate-400 font-mono"><?= e($p['reference']) ?></span>
+                <span class="text-[9px] text-slate-400 font-mono truncate"><?= e($p['reference']) ?></span>
               <?php endif; ?>
+              <span class="text-[10px] text-slate-400 ml-auto whitespace-nowrap"><?= date('d/m/Y H:i',strtotime($p['created_at'])) ?></span>
             </div>
           </div>
-          <p class="text-[10px] text-slate-400 flex-shrink-0 whitespace-nowrap"><?= date('d/m H:i',strtotime($p['created_at'])) ?></p>
         </a>
         <?php endforeach; ?>
       </div>
@@ -819,20 +858,19 @@ require __DIR__ . '/_admin_header.php';
   </div>
 
   <!-- Détail -->
-  <div class="lg:col-span-2">
+  <div class="lg:col-span-2 min-w-0">
     <?php if ($openPaiement):
       [$mlab,$mico,$mcls] = $modeLabels[$openPaiement['mode']] ?? ['—','fa-circle','bg-slate-100'];
       $so = $openPaiement['situation'];
     ?>
     <div id="detail-paiement" class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden sticky top-24">
-      <div class="px-6 py-5 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+      <div class="px-6 py-5 border-b border-slate-100 bg-slate-50 flex items-center justify-between gap-3">
         <h2 class="font-black text-primary text-sm uppercase italic">Paiement <?= e(ref_recu((int)$openPaiement['id'], $openPaiement['created_at'])) ?></h2>
-        <a href="paiements.php" class="w-7 h-7 flex items-center justify-center rounded-full bg-white border border-slate-200 text-slate-400 hover:text-accent transition">
+        <a href="paiements.php" class="w-7 h-7 flex-shrink-0 flex items-center justify-center rounded-full bg-white border border-slate-200 text-slate-400 hover:text-accent transition">
           <i class="fas fa-times text-xs"></i>
         </a>
       </div>
       <div class="p-6 space-y-5">
-        <!-- Montant -->
         <div class="text-center py-4 bg-green-50 rounded-2xl border border-green-100">
           <p class="text-3xl font-black text-green-600"><?= $fcfa($openPaiement['montant']) ?></p>
           <p class="text-sm font-black text-green-700 mt-0.5">FCFA</p>
@@ -846,33 +884,19 @@ require __DIR__ . '/_admin_header.php';
           <i class="fas fa-file-invoice"></i> Voir / Imprimer la facture
         </a>
 
-        <?php if ($so): ?>
-        <div class="bg-slate-50 rounded-xl border border-slate-100 p-3 text-xs space-y-1">
-          <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Situation de la réservation #<?= (int)$openPaiement['reservation_id'] ?></p>
-          <p class="flex justify-between"><span>Montant initial</span><strong><?= $fcfa($so['montant_initial']) ?> FCFA</strong></p>
-          <?php if ($so['montant_reduction'] > 0): ?>
-          <p class="flex justify-between text-orange-700"><span>Réduction appliquée</span><strong>− <?= $fcfa($so['montant_reduction']) ?> FCFA</strong></p>
-          <?php endif; ?>
-          <p class="flex justify-between"><span>Net dû</span><strong><?= $fcfa($so['net_du']) ?> FCFA</strong></p>
-          <p class="flex justify-between text-sky-700"><span>Total payé</span><strong><?= $fcfa($so['total_paye']) ?> FCFA</strong></p>
-          <?php if ($so['total_rembourse'] > 0): ?>
-          <p class="flex justify-between text-emerald-700"><span>Remboursé</span><strong>− <?= $fcfa($so['total_rembourse']) ?> FCFA</strong></p>
-          <?php endif; ?>
-          <p class="flex justify-between text-accent"><span>Reste à payer</span><strong><?= $fcfa($so['solde']) ?> FCFA</strong></p>
+        <?php if ($so && $so['montant_reduction'] > 0): ?>
+        <div class="bg-orange-50 border border-orange-200 rounded-xl p-3">
+          <p class="text-[10px] font-black uppercase tracking-widest text-orange-700 mb-1"><i class="fas fa-percent mr-1"></i> Réduction accordée</p>
+          <p class="text-sm font-black text-orange-800">-<?= $fcfa($so['montant_reduction']) ?> FCFA</p>
+          <?php $motifRed = $so['reduction_appliquee']['motif'] ?? $openPaiement['motif_reduction'] ?? ''; ?>
+          <?php if ($motifRed): ?><p class="text-xs text-orange-700 mt-1"><?= e($motifRed) ?></p><?php endif; ?>
         </div>
         <?php endif; ?>
 
-        <?php if (!empty($openPaiement['motif_reduction'])): ?>
-        <div class="bg-orange-50 border-2 border-orange-200 rounded-xl p-3">
-          <p class="text-[10px] font-black uppercase tracking-widest text-orange-700 mb-1">
-            <i class="fas fa-percent mr-1"></i> Réduction (ancien format, saisie sur le paiement)
-          </p>
-          <p class="text-sm font-black text-orange-800">
-            -<?= $fcfa((float)$openPaiement['montant_reference'] - (float)$openPaiement['montant']) ?> FCFA
-            <span class="font-normal text-xs text-orange-600">(tarif <?= $fcfa($openPaiement['montant_reference']) ?> FCFA)</span>
-          </p>
-          <p class="text-xs text-orange-700 mt-1"><?= e($openPaiement['motif_reduction']) ?></p>
-        </div>
+        <?php if ($so && $so['solde'] > 0 && $so['statut_reservation'] === 'validee'): ?>
+        <p class="text-xs font-bold text-sky-700 bg-sky-50 rounded-xl px-3 py-2">
+          <i class="fas fa-coins mr-1"></i>Solde restant : <?= $fcfa($so['solde']) ?> FCFA<?= $so['echeance_solde'] ? ' — avant le ' . date('d/m/Y H:i', $so['echeance_solde']) : '' ?>
+        </p>
         <?php endif; ?>
 
         <?php foreach ([
@@ -889,7 +913,7 @@ require __DIR__ . '/_admin_header.php';
           <div class="w-7 h-7 bg-slate-50 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5 border border-slate-100">
             <i class="fas <?= $ico ?> text-accent text-[10px]"></i>
           </div>
-          <div>
+          <div class="min-w-0">
             <p class="text-[10px] font-black uppercase tracking-widest text-slate-400"><?= $label ?></p>
             <p class="text-sm font-bold text-primary mt-0.5"><?= e($val) ?></p>
           </div>
@@ -912,7 +936,7 @@ require __DIR__ . '/_admin_header.php';
       </div>
     </div>
     <?php else: ?>
-    <div class="bg-white rounded-2xl border border-slate-100 py-20 text-center">
+    <div class="hidden lg:block bg-white rounded-2xl border border-slate-100 py-20 text-center">
       <i class="fas fa-hand-pointer text-3xl text-slate-200 mb-3"></i>
       <p class="font-black text-slate-400 text-sm uppercase">Sélectionnez un paiement</p>
     </div>
@@ -921,33 +945,76 @@ require __DIR__ . '/_admin_header.php';
 </div>
 
 <script>
+const fmtFcfa = n => new Intl.NumberFormat('fr-FR').format(Math.round(n || 0)) + ' FCFA';
 function togglePayForm(id) {
     const f = document.getElementById('payForm-'+id);
     if (!f) return;
     f.classList.toggle('hidden');
     if (!f.classList.contains('hidden')) f.scrollIntoView({behavior:'smooth',block:'center'});
 }
-function majTypePaiement(id) {
-    const choix = document.querySelector(`#typesPaiement-${id} input[name="type_paiement"]:checked`);
+function basculer(idBloc) {
+    const b = document.getElementById(idBloc);
+    if (b) b.classList.toggle('hidden');
+}
+// Montant qui sera réellement encaissé (même calcul que le serveur)
+function montantChoisi(id) {
+    const form = document.getElementById('typePaiement-'+id).form;
+    const type = document.getElementById('typePaiement-'+id).value;
+    const plein = document.getElementById('pleinTarif-'+id);
+    const pleinCoche = plein && plein.checked;
+    if (type === 'personnalise') return parseFloat(document.querySelector(`#montantPerso-${id} input`).value) || 0;  // 0 = à saisir
+    if (type === 'acompte_25' || type === 'acompte_50') {
+        const taux = type === 'acompte_25' ? 0.25 : 0.50;
+        if (pleinCoche) return Math.round(plein.dataset.netPlein * taux);
+        return parseFloat(document.querySelector(`#acompte-${id} [data-type="${type}"]`).dataset.montant) || 0;
+    }
+    return pleinCoche ? parseFloat(plein.dataset.soldePlein) : parseFloat(form.dataset.solde);
+}
+function majAffichage(id) {
+    const m = montantChoisi(id);
+    document.getElementById('montantAffiche-'+id).textContent = m > 0 ? fmtFcfa(m) : 'Montant à saisir';
+}
+function selectionnerType(id, type) {
+    document.getElementById('typePaiement-'+id).value = type;
+    document.querySelectorAll('.choix-acompte-'+id).forEach(b => {
+        const actif = b.dataset.type === type;
+        b.classList.toggle('bg-sky-100', actif);
+        b.classList.toggle('ring-1', actif);
+        b.classList.toggle('ring-accent/50', actif);
+        b.classList.toggle('bg-white', !actif);
+    });
     const perso = document.getElementById('montantPerso-'+id);
-    const estPerso = choix && choix.value === 'personnalise';
+    const estPerso = type === 'personnalise';
     perso.classList.toggle('hidden', !estPerso);
     perso.querySelector('input').required = estPerso;
+    majAffichage(id);
 }
-function confirmerPaiement(id) {
-    const choix = document.querySelector(`#typesPaiement-${id} input[name="type_paiement"]:checked`);
-    if (!choix) { alert('Choisissez le type de paiement.'); return false; }
-    const plein = document.getElementById('pleinTarif-'+id);
-    let montant = choix.value === 'personnalise'
-        ? document.querySelector(`#montantPerso-${id} input`).value
-        : choix.dataset.montant;
-    if (plein && plein.checked) {
-        // Montants recalculés au plein tarif (comme côté serveur)
-        if (choix.value === 'complet') montant = plein.dataset.soldePlein;
-        if (choix.value === 'acompte_25') montant = Math.round(plein.dataset.netPlein * 0.25);
-        if (choix.value === 'acompte_50') montant = Math.round(plein.dataset.netPlein * 0.50);
+function basculerAcompte(id) {
+    const bloc = document.getElementById('acompte-'+id);
+    bloc.classList.toggle('hidden');
+    if (bloc.classList.contains('hidden')) {
+        selectionnerType(id, 'complet');           // fermeture : retour au paiement complet
+    } else {
+        const premier = bloc.querySelector('[data-type]');
+        if (premier) selectionnerType(id, premier.dataset.type);
     }
-    return confirm('Confirmer l\'encaissement de ' + new Intl.NumberFormat('fr-FR').format(montant || 0) + ' FCFA ?');
+}
+function choisirAcompte(id, bouton) { selectionnerType(id, bouton.dataset.type); }
+function majMontantPerso(id) { majAffichage(id); }
+function confirmerPaiement(id) {
+    const montant = montantChoisi(id);
+    if (!montant || montant <= 0) { alert('Indiquez le montant encaissé.'); return false; }
+    return confirm('Confirmer l\'encaissement de ' + fmtFcfa(montant) + ' ?');
+}
+function filtrerAttente(texte) {
+    const t = texte.trim().toLowerCase();
+    let visibles = 0;
+    document.querySelectorAll('.ligne-attente').forEach(l => {
+        const ok = !t || l.dataset.recherche.includes(t);
+        l.classList.toggle('hidden', !ok);
+        if (ok) visibles++;
+    });
+    document.getElementById('attenteVide').classList.toggle('hidden', visibles > 0);
 }
 document.addEventListener('DOMContentLoaded', function() {
 <?php if ($openPaiement): ?>

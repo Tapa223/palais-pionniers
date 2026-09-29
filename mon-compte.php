@@ -1589,31 +1589,10 @@ require __DIR__ . '/includes/header.php';
               <?php if ($r['statut'] === 'validee'): ?>
 
 
-                <?php if ($sfc && $sfc['net_du'] > 0): ?>
-
-                <div class="text-[10px] text-slate-500 font-bold sm:text-right leading-relaxed">
-
-                  <?php if ($sfc['montant_reduction'] > 0): ?>
-                    Montant : <?= $fmtC($sfc['montant_initial']) ?> FCFA
-                    − réduction <?= $fmtC($sfc['montant_reduction']) ?> FCFA
-                    = <span class="text-primary"><?= $fmtC($sfc['net_du']) ?> FCFA</span>
-                  <?php else: ?>
-                    Montant : <span class="text-primary"><?= $fmtC($sfc['net_du']) ?> FCFA</span>
-                  <?php endif; ?>
-
-                  <?php if ($sfc['total_paye'] > 0): ?>
-                    <br>Payé : <span class="text-emerald-600"><?= $fmtC($sfc['paye_net']) ?> FCFA</span>
-                    <?php if ($sfc['solde'] > 0): ?>
-                      · Reste : <span class="text-accent"><?= $fmtC($sfc['solde']) ?> FCFA</span>
-                    <?php endif; ?>
-                  <?php endif; ?>
-
-                  <?php if ($sfc['trop_percu'] > 0): ?>
-                    <br><span class="text-orange-600">Trop-perçu de <?= $fmtC($sfc['trop_percu']) ?> FCFA : remboursement par le service comptable</span>
-                  <?php endif; ?>
-
-                </div>
-
+                <?php if ($sfc && $sfc['trop_percu'] > 0): ?>
+                <span class="text-[10px] text-orange-600 font-bold text-right">
+                  Trop-perçu de <?= $fmtC($sfc['trop_percu']) ?> FCFA : remboursement par le service comptable
+                </span>
                 <?php endif; ?>
 
 
@@ -1679,8 +1658,8 @@ require __DIR__ . '/includes/header.php';
                   <i class="fas fa-clock"></i>
 
                   <?= $sfc['en_retard']
-                      ? 'Échéance du solde dépassée (' . date('d/m/Y à H:i', $sfc['echeance_solde']) . ') : merci de régler au guichet'
-                      : 'Solde à régler avant le ' . date('d/m/Y à H:i', $sfc['echeance_solde']) ?>
+                      ? 'Solde de ' . $fmtC($sfc['solde']) . ' FCFA à régler au guichet (échéance dépassée : ' . date('d/m/Y à H:i', $sfc['echeance_solde']) . ')'
+                      : 'Solde de ' . $fmtC($sfc['solde']) . ' FCFA à régler avant le ' . date('d/m/Y à H:i', $sfc['echeance_solde']) ?>
 
                 </span>
 

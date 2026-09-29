@@ -183,11 +183,11 @@ if ($role === 'admin_comptable' || is_superadmin()) {
 }
 
 if (isset($stats['attente']))
-    $cards[] = ['Demandes en attente',  $stats['attente'],           'fa-clock',         'text-amber-500',   'bg-amber-50',    'reservations.php'];
+    $cards[] = ['Demandes en attente',  $stats['attente'],           'fa-clock',         'text-amber-500',   'bg-amber-50',    'reservations.php?statut=en_attente'];
 if (isset($stats['validees']))
-    $cards[] = ['Réservations validées', $stats['validees'],         'fa-check-circle',  'text-emerald-500', 'bg-emerald-50',  'reservations.php'];
+    $cards[] = ['Réservations validées', $stats['validees'],         'fa-check-circle',  'text-emerald-500', 'bg-emerald-50',  'reservations.php?statut=validee'];
 if (isset($stats['canal_en_ligne']))
-    $cards[] = ['Réservations en ligne', $stats['canal_en_ligne'],   'fa-globe',         'text-sky-600',     'bg-sky-50',      'reservations.php'];
+    $cards[] = ['Réservations en ligne', $stats['canal_en_ligne'],   'fa-globe',         'text-sky-600',     'bg-sky-50',      'reservations.php?canal=en_ligne'];
 if (isset($stats['canal_guichet']))
     $cards[] = ['Réservations au guichet', $stats['canal_guichet'],  'fa-store',         'text-orange-600',  'bg-orange-50',   'rapport.php?type=guichet'];
 if (isset($stats['espaces']))
@@ -201,7 +201,7 @@ if (isset($stats['admins']))
 if (isset($stats['paye']))
     $cards[] = ['Total encaissé net (FCFA)', number_format($stats['paye'],0,',',' '), 'fa-cash-register','text-teal-600','bg-teal-50','rapport.php?type=encaisse'];
 if (isset($stats['en_attente_paiement']))
-    $cards[] = ['Paiements en attente',  $stats['en_attente_paiement'],'fa-clock',       'text-amber-600',   'bg-amber-50',    'paiements.php'];
+    $cards[] = ['Paiements en attente',  $stats['en_attente_paiement'],'fa-clock',       'text-amber-600',   'bg-amber-50',    'paiements.php#a-encaisser'];
 if (!empty($nb_reductions))
     $cards[] = ['Réductions appliquées', $nb_reductions,          'fa-tags',          'text-orange-600',  'bg-orange-50',   'rapport.php?type=reductions'];
 if (isset($stats['loyers_encaisses']))
