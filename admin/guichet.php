@@ -106,14 +106,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 
             $resaId = (int)$pdo->lastInsertId();
+            // Tarif normal (avant toute réduction) figé dès la saisie guichet
+            figer_montant_initial($pdo, $resaId);
             $estComptable = (($_SESSION['role'] ?? '') === 'admin_comptable');
             if (!$estComptable) {
-                notify('admin_comptable', 'guichet_resa', "Réservation guichet #$resaId — paiement à encaisser", "paiements.php");
+                notify('admin_comptable', 'guichet_resa', "Réservation guichet #$resaId — paiement à encaisser", "paiements.php?resa=$resaId");
             }
             notify('superadmin', 'guichet_resa', "Réservation guichet #$resaId créée — paiement à encaisser", "reservations.php");
             log_activity('resa_guichet', 'reservations', "Réservation guichet #$resaId créée pour user #$userId");
             $msg = ['ok', $estComptable
-                ? "Réservation #$resaId créée. Vous pouvez encaisser dès maintenant."
+                ? "Réservation #$resaId créée. Vous pouvez encaisser dès maintenant (acompte ou paiement complet)."
                 : "Réservation #$resaId créée et transmise au comptable."];
         }
         end:;

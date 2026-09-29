@@ -206,7 +206,8 @@ if ($type === 'remboursement') {
     /*
      * Numéro du bon.
      */
-    $numeroBon = 'BR-' . date('Y') . '-' . str_pad(
+    // Année du remboursement (et non l'année en cours)
+    $numeroBon = 'BR-' . date('Y', strtotime($remboursement['date_traitement'] ?? $remboursement['created_at'] ?? 'now')) . '-' . str_pad(
         (string) $remboursement['id'],
         6,
         '0',
@@ -835,12 +836,20 @@ if (!$bon) {
 
 $forceBon = isset($_GET['type']) && $_GET['type'] === 'bon';
 
+/*
+ * Situation financière centrale : montant initial, réduction réellement
+ * appliquée, net dû, payé, remboursé, solde et échéance. Une réduction
+ * « non appliquée » ou « annulée » n'apparaît jamais sur les documents.
+ */
+$sf = situation_financiere_reservation($pdo, $id);
+
 $estPaye = (
-    $bon['statut_paiement'] === 'paye'
+    $sf['statut_paiement_calcule'] === 'paye'
+    && $sf['total_paye'] > 0
 ) && !$forceBon;
 
 $estPartiel = (
-    $bon['statut_paiement'] === 'partiellement_paye'
+    $sf['statut_paiement_calcule'] === 'partiellement_paye'
 ) && !$forceBon;
 
 $from = $_GET['from'] ?? '';
@@ -917,30 +926,25 @@ $quantiteResa = max(
     (int) ($bon['quantite'] ?? 1)
 );
 
-$montantReferenceComplet =
-    isset($bon['montant'])
-        ? (float) $bon['montant'] * $nuitees * $quantiteResa
-        + (
-            $estSejour && !empty($bon['petit_dejeuner'])
-                ? 5000 * $nuitees * $quantiteResa
-                : 0
-        )
-        + (
-            !$estSejour && !empty($bon['vip'])
-                ? (float) ($bon['prix_vip'] ?? 0)
-                : 0
-        )
-        : 0;
+// Montant initial (tarif normal figé), réduction appliquée et net dû
+$montantReferenceComplet = $sf['montant_initial'];
 
-$soldeRestantFacture = max(
-    0,
-    $montantReferenceComplet - $totalVerseFacture
-);
+$montantReductionFacture = $sf['montant_reduction'];
 
-$montantFinal =
-    ($estPaye || $estPartiel) && $paiement
-        ? $totalVerseFacture
-        : $montantReferenceComplet;
+$motifReductionFacture = $sf['reduction_appliquee']['motif'] ?? null;
+
+if ($motifReductionFacture === null && $sf['reduction_historique'] > 0) {
+    // Ancien fonctionnement : motif porté par le paiement
+    foreach ($tousLesPaiements as $pz) {
+        if (!empty($pz['motif_reduction'])) {
+            $motifReductionFacture = $pz['motif_reduction'];
+        }
+    }
+}
+
+$soldeRestantFacture = $sf['solde'];
+
+$montantFinal = $sf['net_du'];
 
 ?>
 
@@ -1152,7 +1156,7 @@ $montantFinal =
 <?php
 
 $numeroFacture = function_exists('ref_recu')
-    ? ref_recu((int) ($paiement['id'] ?? 0))
+    ? ref_recu((int) ($paiement['id'] ?? 0), $paiement['created_at'] ?? null)
     : 'FACT-' . (int) $bon['id'];
 
 $dateFacture = $paiement
@@ -1175,13 +1179,9 @@ $objetPeriode = $estSejour
     : "pour la journée du "
         . date('d/m/Y', strtotime($bon['date_resa']));
 
-$sousTotal =
-    $paiement &&
-    $paiement['montant_reference'] !== null
-        ? (float) $paiement['montant_reference']
-        : $montantFinal;
+$sousTotal = $montantReferenceComplet;
 
-$remiseMontant = $sousTotal - $montantFinal;
+$remiseMontant = $montantReductionFacture;
 
 $qteLigne = $estSejour
     ? ($nuitees * $quantiteResa)
@@ -1362,8 +1362,8 @@ $qteLigne = $estSejour
 
                 Remise accordée
 
-                <?= !empty($paiement['motif_reduction'])
-                    ? ' — ' . e($paiement['motif_reduction'])
+                <?= !empty($motifReductionFacture)
+                    ? ' — ' . e($motifReductionFacture)
                     : '' ?>
 
             </td>
@@ -1424,6 +1424,26 @@ $qteLigne = $estSejour
     </span>.
 
 </p>
+
+<?php if ($sf['nb_paiements'] > 1 || $sf['total_rembourse'] > 0 || $sf['trop_percu'] > 0): ?>
+
+<p class="text-xs text-slate-600 -mt-6 mb-10">
+
+    Montant encaissé :
+    <strong><?= number_format($sf['total_paye'], 0, ',', ' ') ?> F CFA</strong>
+    en <?= (int) $sf['nb_paiements'] ?> versement<?= $sf['nb_paiements'] > 1 ? 's' : '' ?>
+
+    <?php if ($sf['total_rembourse'] > 0): ?>
+        · remboursé : <strong><?= number_format($sf['total_rembourse'], 0, ',', ' ') ?> F CFA</strong>
+    <?php endif; ?>
+
+    <?php if ($sf['trop_percu'] > 0): ?>
+        · trop-perçu à rembourser : <strong><?= number_format($sf['trop_percu'], 0, ',', ' ') ?> F CFA</strong>
+    <?php endif; ?>
+
+</p>
+
+<?php endif; ?>
 
 <div class="flex justify-between items-end mt-16 mb-6 text-sm">
 
@@ -1502,16 +1522,14 @@ $qteLigne = $estSejour
     <div class="text-right">
 
         <span class="bg-amber-500 text-white px-3 py-1 rounded-md text-[10px] font-black uppercase tracking-widest">
-            À PAYER AU GUICHET
+            <?= $estPartiel ? 'ACOMPTE VERSÉ — SOLDE AU GUICHET' : 'À PAYER AU GUICHET' ?>
         </span>
 
         <p class="text-sm mt-2 text-slate-900 font-mono font-bold italic">
             ID: #RESA-<?= (int) $bon['id'] ?>
         </p>
 
-        <?php if (!empty($bon['date_validation'])): ?>
-
-            <?php if (function_exists('limite_paiement')): ?>
+        <?php if (!empty($sf['echeance_premier_paiement'])): ?>
 
                 <p class="text-xs text-amber-700 font-black mt-2">
 
@@ -1521,14 +1539,12 @@ $qteLigne = $estSejour
 
                     <?= date(
                         'd/m/Y à H:i',
-                        limite_paiement($bon['date_validation'])
+                        $sf['echeance_premier_paiement']
                     ) ?>
 
                 </p>
 
             <?php endif; ?>
-
-        <?php endif; ?>
 
     </div>
 
@@ -1726,7 +1742,7 @@ $qteLigne = $estSejour
                 <tr class="border-b border-slate-200">
 
                     <td class="py-3 text-sm text-slate-600 font-bold">
-                        Montant total du forfait
+                        Montant initial
                     </td>
 
                     <td class="py-3 font-black text-right text-slate-800">
@@ -1744,6 +1760,34 @@ $qteLigne = $estSejour
 
                 </tr>
 
+                <?php if ($montantReductionFacture > 0): ?>
+
+                <tr class="border-b border-slate-200">
+
+                    <td class="py-3 text-sm text-orange-700 font-bold">
+                        Réduction accordée
+                    </td>
+
+                    <td class="py-3 font-black text-right text-orange-700">
+                        - <?= number_format($montantReductionFacture, 0, ',', ' ') ?> F CFA
+                    </td>
+
+                </tr>
+
+                <tr class="border-b border-slate-200">
+
+                    <td class="py-3 text-sm text-slate-600 font-bold">
+                        Net à payer
+                    </td>
+
+                    <td class="py-3 font-black text-right text-slate-800">
+                        <?= number_format($sf['net_du'], 0, ',', ' ') ?> F CFA
+                    </td>
+
+                </tr>
+
+                <?php endif; ?>
+
                 <tr class="border-b border-slate-200">
 
                     <td class="py-3 text-sm text-sky-700 font-bold">
@@ -1759,7 +1803,7 @@ $qteLigne = $estSejour
                         -
 
                         <?= number_format(
-                            $totalVerseFacture,
+                            $sf['paye_net'],
                             0,
                             ',',
                             ' '
@@ -1794,7 +1838,7 @@ $qteLigne = $estSejour
 
                 </tr>
 
-                <?php if (!empty($bon['date_limite_solde'])): ?>
+                <?php if (!empty($sf['echeance_solde'])): ?>
 
                     <tr>
 
@@ -1804,12 +1848,12 @@ $qteLigne = $estSejour
 
                                 <i class="fas fa-clock mr-1.5"></i>
 
-                                À régler avant le
+                                <?= $sf['en_retard'] ? 'Échéance du solde dépassée — à régler au guichet (échéance :' : 'Solde à régler avant le' ?>
 
                                 <?= date(
-                                    'd/m/Y',
-                                    strtotime($bon['date_limite_solde'])
-                                ) ?>
+                                    'd/m/Y à H:i',
+                                    $sf['echeance_solde']
+                                ) ?><?= $sf['en_retard'] ? ')' : '' ?>
 
                             </p>
 
@@ -1820,6 +1864,34 @@ $qteLigne = $estSejour
                 <?php endif; ?>
 
             <?php else: ?>
+
+                <?php if ($montantReductionFacture > 0): ?>
+
+                <tr class="border-b border-slate-200">
+
+                    <td class="py-3 text-sm text-slate-600 font-bold">
+                        Montant initial
+                    </td>
+
+                    <td class="py-3 font-black text-right text-slate-800">
+                        <?= number_format($montantReferenceComplet, 0, ',', ' ') ?> F CFA
+                    </td>
+
+                </tr>
+
+                <tr class="border-b border-slate-200">
+
+                    <td class="py-3 text-sm text-orange-700 font-bold">
+                        Réduction accordée
+                    </td>
+
+                    <td class="py-3 font-black text-right text-orange-700">
+                        - <?= number_format($montantReductionFacture, 0, ',', ' ') ?> F CFA
+                    </td>
+
+                </tr>
+
+                <?php endif; ?>
 
                 <tr>
 

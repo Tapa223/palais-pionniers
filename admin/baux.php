@@ -287,7 +287,7 @@ require __DIR__ . '/_admin_header.php';
             <?= e($h['espace_nom']) ?> — <?= periode_label($h['periode_debut'], (int)$h['duree_mois']) ?>
             <?php if (!empty($h['motif_reduction'])): ?><span class="ml-1 text-[9px] font-black uppercase bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded-full"><i class="fas fa-percent"></i> Réduction</span><?php endif; ?>
           </p>
-          <p class="text-[10px] text-slate-400"><?= ref_recu((int)$h['id']) ?> · <?= e($modeLabels[$h['mode']] ?? $h['mode']) ?><?= $h['reference'] ? ' · '.e($h['reference']) : '' ?> · encaissé par <?= e($h['enregistre_par_nom']) ?></p>
+          <p class="text-[10px] text-slate-400"><?= ref_recu((int)$h['id'], $h['created_at']) ?> · <?= e($modeLabels[$h['mode']] ?? $h['mode']) ?><?= $h['reference'] ? ' · '.e($h['reference']) : '' ?> · encaissé par <?= e($h['enregistre_par_nom']) ?></p>
         </div>
         <span class="font-black text-emerald-600 text-sm"><?= number_format((float)$h['montant'],0,',',' ') ?> FCFA</span>
       </div>

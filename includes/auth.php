@@ -454,9 +454,10 @@ if (!function_exists('annuler_reservations_concurrentes')) {
                   AND r.id != ?
                   AND r.statut = 'validee'
                   AND r.statut_paiement != 'paye'
-                  AND NOT (
-                      r.requisition_id IS NOT NULL
-                      AND r.statut_paiement = 'partiellement_paye'
+                  -- une réservation qui a déjà reçu un paiement (acompte)
+                  -- conserve son créneau : elle n'est jamais annulée ici
+                  AND NOT EXISTS (
+                      SELECT 1 FROM paiements p WHERE p.reservation_id = r.id
                   )
                   AND r.date_resa < ?
                   AND r.date_depart > ?
@@ -485,9 +486,10 @@ if (!function_exists('annuler_reservations_concurrentes')) {
                   AND r.id != ?
                   AND r.statut = 'validee'
                   AND r.statut_paiement != 'paye'
-                  AND NOT (
-                      r.requisition_id IS NOT NULL
-                      AND r.statut_paiement = 'partiellement_paye'
+                  -- une réservation qui a déjà reçu un paiement (acompte)
+                  -- conserve son créneau : elle n'est jamais annulée ici
+                  AND NOT EXISTS (
+                      SELECT 1 FROM paiements p WHERE p.reservation_id = r.id
                   )
                   AND r.date_resa = ?
                   AND r.heure_debut < ?
@@ -851,7 +853,8 @@ if (!function_exists('admin_nav_badges')) {
                 (int) $pdo->query("
                     SELECT COUNT(*)
                     FROM reservations
-                    WHERE statut_paiement =
+                    WHERE statut = 'validee'
+                      AND statut_paiement =
                         'partiellement_paye'
                 ")->fetchColumn();
 
@@ -934,12 +937,21 @@ if (!function_exists('e')) {
 if (!function_exists('ref_recu')) {
     /**
      * Référence lisible et unique d'un reçu de paiement.
+     *
+     * L'année est celle du paiement ($dateCreation) : le numéro d'un reçu
+     * ne change donc plus au passage à une nouvelle année. Sans date
+     * fournie, l'année en cours est utilisée (comportement historique).
      */
     function ref_recu(
-        int $paiementId
+        int $paiementId,
+        ?string $dateCreation = null
     ): string {
 
-        return date('y')
+        $annee = $dateCreation
+            ? date('y', strtotime($dateCreation))
+            : date('y');
+
+        return $annee
             . '-'
             . str_pad(
                 (string) $paiementId,
@@ -1144,14 +1156,14 @@ if (!function_exists('expirer_reservations_non_payees')) {
                   AND r.statut_paiement != 'paye'
                   AND r.date_validation IS NOT NULL
                   /*
-                   * Une réservation issue d'une réquisition qui porte déjà
-                   * des paiements transférés (solde restant à régler) n'est
-                   * jamais annulée automatiquement : l'argent encaissé
-                   * resterait sinon rattaché à une réservation expirée.
+                   * Seules les réservations validées SANS AUCUN paiement
+                   * expirent après 48 h. Dès qu'un paiement (acompte,
+                   * paiement transféré...) existe, la réservation n'est
+                   * plus « totalement impayée » : elle reste en place et
+                   * son solde éventuel est suivi par le comptable.
                    */
-                  AND NOT (
-                      r.requisition_id IS NOT NULL
-                      AND r.statut_paiement = 'partiellement_paye'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM paiements p WHERE p.reservation_id = r.id
                   )
             ");
 
@@ -1277,20 +1289,50 @@ if (!function_exists('horaire_reservation_erreur')) {
     }
 }
 
-if (!function_exists('montant_attendu_reservation')) {
+/*
+|--------------------------------------------------------------------------
+| SITUATION FINANCIÈRE D'UNE RÉSERVATION — SOURCE UNIQUE
+|--------------------------------------------------------------------------
+| Toutes les pages (paiements, acomptes, réservations, mon-compte, bons et
+| factures, statistiques, réquisitions) utilisent ces fonctions au lieu de
+| recalculer chacune leurs montants.
+|
+|   montant initial   = tarif normal AVANT toute réduction
+|                       (reservations.montant_initial, figé à la validation ;
+|                        recalculé depuis le tarif pour les anciennes lignes)
+| − réduction appliquée (reductions_accordees, statut « appliquee »)
+| = montant net dû
+|   total payé        = somme des paiements réellement encaissés
+| − total remboursé   = remboursements effectués imputables à la réservation
+| = payé net
+|   solde             = net dû − payé net (jamais négatif)
+|   trop-perçu        = payé net − net dû (jamais négatif)
+*/
+
+if (!defined('HEURE_DEBUT_SEJOUR')) {
     /**
-     * Montant attendu d'une réservation, calculé à partir de son tarif
-     * et de son espace.
-     *
-     * Formule strictement identique à celle déjà utilisée dans
-     * admin/paiements.php et generer_bon.php :
-     * tarif × nuitées × quantité (+ petit-déjeuner 5 000 / nuit / chambre
-     * en séjour, + supplément VIP en créneau).
-     *
-     * Retourne 0 si le tarif n'est plus connu (même comportement que
-     * admin/paiements.php, qui ne fixe alors aucun montant de référence).
+     * Heure conventionnelle de début d'un séjour (arrivée).
+     * Les séjours n'ont pas d'heure de début en base : l'échéance du solde
+     * (24 h avant le début) est calculée à partir de cette heure le jour
+     * d'arrivée. Exemple : arrivée le 12/10 → échéance le 11/10 à 12:00.
      */
-    function montant_attendu_reservation(
+    define('HEURE_DEBUT_SEJOUR', '12:00:00');
+}
+
+if (!defined('DELAI_SOLDE_HEURES')) {
+    /** Le solde d'un acompte doit être réglé 24 h avant le début réel. */
+    define('DELAI_SOLDE_HEURES', 24);
+}
+
+if (!function_exists('montant_tarif_reservation')) {
+    /**
+     * Tarif normal calculé à partir du tarif et de l'espace (sans réduction).
+     *
+     * Formule historique de admin/paiements.php et generer_bon.php :
+     * tarif × nuitées × quantité (+ petit-déjeuner 5 000 / nuit / chambre
+     * en séjour, + supplément VIP en créneau). 0 si le tarif n'existe plus.
+     */
+    function montant_tarif_reservation(
         PDO $pdo,
         int $reservationId
     ): float {
@@ -1348,6 +1390,308 @@ if (!function_exists('montant_attendu_reservation')) {
         }
 
         return round($montant, 2);
+    }
+}
+
+if (!function_exists('montant_attendu_reservation')) {
+    /**
+     * Montant initial (tarif normal avant réduction) d'une réservation :
+     * valeur figée si elle existe, sinon calcul depuis le tarif.
+     */
+    function montant_attendu_reservation(
+        PDO $pdo,
+        int $reservationId
+    ): float {
+
+        $stmt = $pdo->prepare("SELECT montant_initial FROM reservations WHERE id = ?");
+        $stmt->execute([$reservationId]);
+        $fige = $stmt->fetchColumn();
+
+        if ($fige !== false && $fige !== null) {
+            return round((float) $fige, 2);
+        }
+
+        return montant_tarif_reservation($pdo, $reservationId);
+    }
+}
+
+if (!function_exists('figer_montant_initial')) {
+    /**
+     * Fige le montant initial d'une réservation s'il ne l'est pas encore.
+     * Appelée à la validation, à la saisie guichet et, pour les anciennes
+     * réservations, lors de la première opération comptable.
+     * Ne modifie jamais un montant déjà figé.
+     */
+    function figer_montant_initial(
+        PDO $pdo,
+        int $reservationId
+    ): float {
+
+        $montant = montant_attendu_reservation($pdo, $reservationId);
+
+        $pdo->prepare("
+            UPDATE reservations
+            SET montant_initial = ?
+            WHERE id = ?
+              AND montant_initial IS NULL
+        ")->execute([$montant, $reservationId]);
+
+        return $montant;
+    }
+}
+
+if (!function_exists('debut_reservation')) {
+    /**
+     * Début réel d'une réservation (timestamp) :
+     * - créneau : date + heure de début ;
+     * - séjour  : date d'arrivée + HEURE_DEBUT_SEJOUR.
+     */
+    function debut_reservation(array $r): int
+    {
+        $heure = !empty($r['heure_debut'])
+            ? $r['heure_debut']
+            : HEURE_DEBUT_SEJOUR;
+
+        return (int) strtotime($r['date_resa'] . ' ' . $heure);
+    }
+}
+
+if (!function_exists('situation_financiere_reservation')) {
+    /**
+     * Situation financière complète d'une réservation.
+     *
+     * Avec $verrouiller = true, la réservation est verrouillée
+     * (SELECT ... FOR UPDATE) : à appeler dans une transaction.
+     *
+     * Retourne null si la réservation n'existe pas.
+     */
+    function situation_financiere_reservation(
+        PDO $pdo,
+        int $reservationId,
+        bool $verrouiller = false
+    ): ?array {
+
+        $stmt = $pdo->prepare("
+            SELECT id, statut, statut_paiement, date_resa, date_depart,
+                   heure_debut, heure_fin, date_validation, date_limite_solde,
+                   montant_initial, requisition_id
+            FROM reservations
+            WHERE id = ?
+        " . ($verrouiller ? ' FOR UPDATE' : ''));
+        $stmt->execute([$reservationId]);
+        $r = $stmt->fetch();
+
+        if (!$r) {
+            return null;
+        }
+
+        $initialFige = $r['montant_initial'] !== null;
+        $montantInitial = $initialFige
+            ? round((float) $r['montant_initial'], 2)
+            : montant_tarif_reservation($pdo, $reservationId);
+
+        // --- Réductions ---
+        $stmt = $pdo->prepare("
+            SELECT ra.*, u.nom_complet AS saisi_par_nom
+            FROM reductions_accordees ra
+            LEFT JOIN users u ON u.id = ra.saisi_par
+            WHERE ra.reservation_id = ?
+            ORDER BY ra.id ASC
+        ");
+        $stmt->execute([$reservationId]);
+        $reductions = $stmt->fetchAll();
+
+        $reductionAppliquee = null;
+        $reductionsNonAppliquees = [];
+        $reductionsAnnulees = [];
+
+        foreach ($reductions as $red) {
+            if ($red['statut'] === 'appliquee') {
+                $reductionAppliquee = $red;
+            } elseif ($red['statut'] === 'non_appliquee') {
+                $reductionsNonAppliquees[] = $red;
+            } else {
+                $reductionsAnnulees[] = $red;
+            }
+        }
+
+        $montantReduction = $reductionAppliquee
+            ? min($montantInitial, (float) $reductionAppliquee['montant_reduction'])
+            : 0.0;
+
+        // --- Paiements ---
+        $stmt = $pdo->prepare("
+            SELECT COALESCE(SUM(montant), 0),
+                   COUNT(*),
+                   MAX(CASE WHEN motif_reduction IS NOT NULL AND TRIM(motif_reduction) <> '' THEN 1 ELSE 0 END)
+            FROM paiements
+            WHERE reservation_id = ?
+        ");
+        $stmt->execute([$reservationId]);
+        [$totalPaye, $nbPaiements, $reductionHistorique] = $stmt->fetch(PDO::FETCH_NUM);
+        $totalPaye = round((float) $totalPaye, 2);
+        $nbPaiements = (int) $nbPaiements;
+
+        // Ancien fonctionnement (avant reductions_accordees) : un paiement
+        // portant un motif_reduction soldait la réservation au montant versé.
+        // Ces réservations restent considérées comme réglées, sans modifier
+        // l'historique.
+        $montantReductionHistorique = 0.0;
+        if (!$reductionAppliquee && (int) $reductionHistorique === 1) {
+            $montantReductionHistorique = round(max(0.0, $montantInitial - $totalPaye), 2);
+            $montantReduction = $montantReductionHistorique;
+        }
+
+        $netDu = round(max(0.0, $montantInitial - $montantReduction), 2);
+
+        // --- Remboursements imputables ---
+        // - réquisition avec choix « remboursement » (ou autre choix sans
+        //   nouvelle réservation) : l'argent est sur la réservation d'origine ;
+        // - nouvelle date / autre espace : les paiements ont été transférés
+        //   vers la nouvelle réservation, le remboursement (trop-perçu) lui
+        //   est donc imputé, même s'il est rattaché à la réservation d'origine.
+        $stmt = $pdo->prepare("
+            SELECT COALESCE(SUM(COALESCE(rb.montant_rembourse, rb.montant_a_rembourser)), 0)
+            FROM remboursements rb
+            JOIN requisitions_ministerielles rm ON rm.id = rb.requisition_id
+            WHERE rb.resultat = 'effectue'
+              AND (
+                    (rb.reservation_id = ? AND rm.choix_client NOT IN ('nouvelle_date', 'autre_espace'))
+                 OR (? IS NOT NULL AND rb.requisition_id = ? AND rm.choix_client IN ('nouvelle_date', 'autre_espace'))
+              )
+        ");
+        $stmt->execute([
+            $reservationId,
+            $r['requisition_id'],
+            $r['requisition_id'],
+        ]);
+        $totalRembourse = round((float) $stmt->fetchColumn(), 2);
+
+        $payeNet = round($totalPaye - $totalRembourse, 2);
+        $solde = round(max(0.0, $netDu - $payeNet), 2);
+        $tropPercu = round(max(0.0, $payeNet - $netDu), 2);
+
+        // --- Statut de paiement correspondant à la situation réelle ---
+        if ($payeNet <= 0) {
+            $statutCalcule = $r['statut_paiement'] === 'attente_paiement'
+                ? 'attente_paiement'
+                : 'non_paye';
+        } elseif ($payeNet < $netDu) {
+            $statutCalcule = 'partiellement_paye';
+        } else {
+            $statutCalcule = 'paye';
+        }
+
+        // --- Échéances ---
+        $maintenant = time();
+        $echeancePremierPaiement = null;
+        $echeanceSolde = null;
+
+        if ($r['statut'] === 'validee' && $totalPaye <= 0 && !empty($r['date_validation'])) {
+            // Délai de 48 h existant (report au lundi si week-end)
+            $echeancePremierPaiement = limite_paiement($r['date_validation']);
+        }
+
+        if ($r['statut'] === 'validee' && $statutCalcule === 'partiellement_paye') {
+            // Solde : 24 h avant le début réel de la réservation
+            $echeanceSolde = debut_reservation($r) - DELAI_SOLDE_HEURES * 3600;
+        }
+
+        $enRetard = ($echeancePremierPaiement !== null && $echeancePremierPaiement < $maintenant)
+            || ($echeanceSolde !== null && $echeanceSolde < $maintenant);
+
+        // --- État lisible ---
+        if (in_array($r['statut'], ['requisitionnee', 'annulee', 'refusee', 'expiree'], true)) {
+            $etat = 'clos';
+        } elseif ($r['statut'] === 'en_attente') {
+            $etat = 'en_attente_validation';
+        } elseif ($tropPercu > 0) {
+            $etat = 'trop_percu';
+        } elseif ($statutCalcule === 'paye') {
+            $etat = 'paye';
+        } elseif ($statutCalcule === 'partiellement_paye') {
+            $etat = $enRetard ? 'solde_en_retard' : 'acompte';
+        } else {
+            $etat = 'a_payer';
+        }
+
+        return [
+            'reservation_id'            => (int) $r['id'],
+            'statut_reservation'        => $r['statut'],
+            'statut_paiement_stocke'    => $r['statut_paiement'],
+            'statut_paiement_calcule'   => $statutCalcule,
+            'montant_initial'           => $montantInitial,
+            'montant_initial_fige'      => $initialFige,
+            'reduction_appliquee'       => $reductionAppliquee,
+            'montant_reduction'         => round($montantReduction, 2),
+            'reduction_historique'      => $montantReductionHistorique,
+            'reductions_non_appliquees' => $reductionsNonAppliquees,
+            'reductions_annulees'       => $reductionsAnnulees,
+            'reductions'                => $reductions,
+            'net_du'                    => $netDu,
+            'total_paye'                => $totalPaye,
+            'nb_paiements'              => $nbPaiements,
+            'total_rembourse'           => $totalRembourse,
+            'paye_net'                  => $payeNet,
+            'solde'                     => $solde,
+            'trop_percu'                => $tropPercu,
+            'echeance_premier_paiement' => $echeancePremierPaiement,
+            'echeance_solde'            => $echeanceSolde,
+            'en_retard'                 => $enRetard,
+            'etat'                      => $etat,
+            'encaissable'               => $r['statut'] === 'validee' && $solde > 0,
+        ];
+    }
+}
+
+if (!function_exists('synchroniser_statut_paiement')) {
+    /**
+     * Enregistre dans reservations.statut_paiement (et date_limite_solde)
+     * le statut correspondant à la situation financière calculée.
+     * Uniquement pour les réservations en cours (en_attente / validee) :
+     * les réservations closes (réquisitionnées, expirées...) gardent leur
+     * historique tel quel.
+     */
+    function synchroniser_statut_paiement(
+        PDO $pdo,
+        int $reservationId
+    ): ?array {
+
+        $s = situation_financiere_reservation($pdo, $reservationId);
+
+        if (!$s || !in_array($s['statut_reservation'], ['en_attente', 'validee'], true)) {
+            return $s;
+        }
+
+        $pdo->prepare("
+            UPDATE reservations
+            SET statut_paiement = ?,
+                date_limite_solde = ?,
+                paiement_notifie = 0
+            WHERE id = ?
+        ")->execute([
+            $s['statut_paiement_calcule'],
+            $s['echeance_solde'] ? date('Y-m-d', $s['echeance_solde']) : null,
+            $reservationId,
+        ]);
+
+        return situation_financiere_reservation($pdo, $reservationId);
+    }
+}
+
+if (!function_exists('libelle_etat_financier')) {
+    /** Libellé et couleur d'un état financier (affichage). */
+    function libelle_etat_financier(string $etat): array
+    {
+        return [
+            'en_attente_validation' => ['En attente de validation', 'bg-slate-100 text-slate-600 border-slate-200'],
+            'a_payer'               => ['À payer', 'bg-amber-50 text-amber-700 border-amber-200'],
+            'acompte'               => ['Acompte versé', 'bg-sky-50 text-sky-700 border-sky-200'],
+            'solde_en_retard'       => ['Solde en retard', 'bg-red-50 text-red-700 border-red-200'],
+            'paye'                  => ['Payé', 'bg-emerald-50 text-emerald-700 border-emerald-200'],
+            'trop_percu'            => ['Trop-perçu à rembourser', 'bg-orange-50 text-orange-700 border-orange-200'],
+            'clos'                  => ['Clos', 'bg-slate-100 text-slate-500 border-slate-200'],
+        ][$etat] ?? [$etat, 'bg-slate-100 text-slate-600 border-slate-200'];
     }
 }
 
@@ -1694,6 +2038,18 @@ if (!function_exists('transferer_paiements_requisition')) {
             return $resultat;
         }
 
+        /*
+         * Une réduction appliquée sur la réservation d'origine est reportée
+         * sur la nouvelle réservation (plafonnée à son montant initial) :
+         * le client conserve les conditions accordées au guichet.
+         */
+        $resultat['reduction_reportee'] = reporter_reduction_requisition(
+            $pdo,
+            $origineId,
+            $nouvelleReservationId,
+            $requisitionId
+        );
+
         $stmt = $pdo->prepare("
             SELECT id, montant
             FROM paiements
@@ -1733,38 +2089,18 @@ if (!function_exists('transferer_paiements_requisition')) {
             $origineId,
         ]);
 
-        $stmt = $pdo->prepare("
-            SELECT COALESCE(SUM(montant), 0)
-            FROM paiements
-            WHERE reservation_id = ?
-        ");
-        $stmt->execute([$nouvelleReservationId]);
-        $total = (float) $stmt->fetchColumn();
-
-        $du = montant_attendu_reservation($pdo, $nouvelleReservationId);
-
         /*
-         * Même règle que admin/paiements.php : sans montant de référence
-         * connu, la réservation est considérée comme payée.
+         * Statut, solde et trop-perçu de la nouvelle réservation : calculés
+         * par la situation financière centrale (montant initial figé,
+         * réduction appliquée, paiements, remboursements).
          */
-        $statut = ($du > 0 && $total < $du)
-            ? 'partiellement_paye'
-            : 'paye';
+        $situation = synchroniser_statut_paiement($pdo, $nouvelleReservationId);
 
-        $solde = $du > 0 ? max(0.0, $du - $total) : 0.0;
-        $tropPercu = $du > 0 ? max(0.0, $total - $du) : 0.0;
-
-        $pdo->prepare("
-            UPDATE reservations
-            SET
-                statut_paiement = ?,
-                date_limite_solde = NULL,
-                paiement_notifie = 0
-            WHERE id = ?
-        ")->execute([
-            $statut,
-            $nouvelleReservationId,
-        ]);
+        $total = $situation['total_paye'];
+        $du = $situation['net_du'];
+        $statut = $situation['statut_paiement_calcule'];
+        $solde = $situation['solde'];
+        $tropPercu = $situation['trop_percu'];
 
         $pdo->prepare("
             UPDATE reservations
@@ -1787,7 +2123,7 @@ if (!function_exists('transferer_paiements_requisition')) {
 
         $description = 'Paiements transférés vers la réservation #' . $nouvelleReservationId
             . ' : ' . number_format($transfere, 0, ',', ' ') . ' FCFA'
-            . ' — montant attendu : ' . number_format($du, 0, ',', ' ') . ' FCFA'
+            . ' — montant net dû : ' . number_format($du, 0, ',', ' ') . ' FCFA'
             . ($solde > 0 ? ' — solde à régler : ' . number_format($solde, 0, ',', ' ') . ' FCFA' : '')
             . ($tropPercu > 0 ? ' — trop-perçu à rembourser : ' . number_format($tropPercu, 0, ',', ' ') . ' FCFA' : '')
             . '.';
@@ -1887,7 +2223,15 @@ if (!function_exists('requisition_suivi_nouvelle_reservation')) {
             LIMIT 1
         ");
         $stmt->execute([$requisitionId]);
-        $tropPercu = $validee ? (float)$stmt->fetchColumn() : 0.0;
+        // Trop-perçu constaté lors du transfert (historique, pour affichage)
+        $tropPercuConstate = $validee ? (float)$stmt->fetchColumn() : 0.0;
+
+        // Trop-perçu restant : calculé par la situation financière centrale
+        // (paiements − remboursements effectués − montant net dû)
+        $situationValidee = $validee
+            ? situation_financiere_reservation($pdo, (int)$validee['id'])
+            : null;
+        $tropPercu = $situationValidee ? $situationValidee['trop_percu'] : 0.0;
 
         $stmt = $pdo->prepare("
             SELECT COUNT(*)
@@ -1902,8 +2246,94 @@ if (!function_exists('requisition_suivi_nouvelle_reservation')) {
             'liste'      => $liste,
             'validee'    => $validee,
             'trop_percu' => $tropPercu,
+            'trop_percu_constate' => max($tropPercuConstate, $tropPercu),
+            'situation'  => $situationValidee,
             'rembourse'  => $rembourse,
             'a_rembourser' => $validee !== null && $tropPercu > 0 && !$rembourse,
         ];
+    }
+}
+
+if (!function_exists('reporter_reduction_requisition')) {
+    /**
+     * Reporte la réduction appliquée d'une réservation réquisitionnée vers
+     * la nouvelle réservation qui la remplace (nouvelle date / autre espace).
+     *
+     * - le montant reporté est plafonné au montant initial de la nouvelle
+     *   réservation ;
+     * - la réduction d'origine reste inchangée (historique) ;
+     * - rien n'est fait si la nouvelle réservation a déjà une réduction
+     *   appliquée, ou si l'origine n'en a pas.
+     *
+     * DOIT être appelée à l'intérieur d'une transaction.
+     */
+    function reporter_reduction_requisition(
+        PDO $pdo,
+        int $origineId,
+        int $nouvelleReservationId,
+        int $requisitionId
+    ): float {
+
+        $stmt = $pdo->prepare("
+            SELECT *
+            FROM reductions_accordees
+            WHERE reservation_id = ?
+              AND statut = 'appliquee'
+            LIMIT 1
+        ");
+        $stmt->execute([$origineId]);
+        $origine = $stmt->fetch();
+
+        if (!$origine) {
+            return 0.0;
+        }
+
+        $stmt = $pdo->prepare("
+            SELECT COUNT(*)
+            FROM reductions_accordees
+            WHERE reservation_id = ?
+              AND statut = 'appliquee'
+        ");
+        $stmt->execute([$nouvelleReservationId]);
+
+        if ((int) $stmt->fetchColumn() > 0) {
+            return 0.0;
+        }
+
+        $montant = min(
+            (float) $origine['montant_reduction'],
+            montant_attendu_reservation($pdo, $nouvelleReservationId)
+        );
+
+        if ($montant <= 0) {
+            return 0.0;
+        }
+
+        $pdo->prepare("
+            INSERT INTO reductions_accordees
+                (reservation_id, montant_reduction, pourcentage, motif, autorise_par,
+                 reference_accord, statut, reportee_de, saisi_par)
+            VALUES (?, ?, NULL, ?, ?, ?, 'appliquee', ?, ?)
+        ")->execute([
+            $nouvelleReservationId,
+            $montant,
+            'Report de la réduction de la réservation #' . $origineId
+                . ' (réquisition #' . $requisitionId . ')'
+                . (!empty($origine['motif']) ? ' — ' . $origine['motif'] : ''),
+            $origine['autorise_par'],
+            $origine['reference_accord'],
+            (int) $origine['id'],
+            (int) ($_SESSION['user_id'] ?? $origine['saisi_par']),
+        ]);
+
+        log_activity(
+            'reduction_reportee',
+            'reservations',
+            'Réduction de ' . number_format($montant, 0, ',', ' ') . ' FCFA reportée de la réservation #'
+                . $origineId . ' vers la réservation #' . $nouvelleReservationId
+                . ' (réquisition #' . $requisitionId . ')'
+        );
+
+        return $montant;
     }
 }

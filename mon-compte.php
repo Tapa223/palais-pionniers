@@ -1536,9 +1536,18 @@ require __DIR__ . '/includes/header.php';
               <div class="flex flex-wrap sm:justify-end gap-1.5">
 
 
+                <?php
+                  // Situation financière centrale (montants, réduction, échéances)
+                  $sfc = $r['statut'] === 'validee'
+                      ? situation_financiere_reservation($pdo, (int) $r['id'])
+                      : null;
+                  $fmtC = fn($m) => number_format((float) $m, 0, ',', ' ');
+                ?>
+
                 <?php if (
-                    $r['statut'] === 'validee'
-                    && $r['statut_paiement'] === 'paye'
+                    $sfc
+                    && $sfc['statut_paiement_calcule'] === 'paye'
+                    && $sfc['total_paye'] > 0
                 ): ?>
 
                 <span class="text-[10px] font-black px-3 py-1.5 rounded-full border bg-emerald-100 text-emerald-700 border-emerald-200">
@@ -1551,33 +1560,17 @@ require __DIR__ . '/includes/header.php';
 
 
                 <?php elseif (
-                    $r['statut'] === 'validee'
-                    && $r['statut_paiement'] === 'partiellement_paye'
+                    $sfc
+                    && $sfc['statut_paiement_calcule'] === 'partiellement_paye'
                 ): ?>
 
-                <span class="text-[10px] font-black px-3 py-1.5 rounded-full border bg-sky-100 text-sky-700 border-sky-200">
+                <span class="text-[10px] font-black px-3 py-1.5 rounded-full border <?= $sfc['en_retard'] ? 'bg-red-100 text-red-700 border-red-200' : 'bg-sky-100 text-sky-700 border-sky-200' ?>">
 
                   <i class="fas fa-coins mr-0.5"></i>
 
-                  Acompte versé
+                  <?= $sfc['en_retard'] ? 'Solde en retard' : 'Acompte versé' ?>
 
                 </span>
-
-
-                <?php if (!empty($r['date_limite_solde'])): ?>
-
-                <span class="text-[9px] font-bold text-sky-600 sm:text-right">
-
-                  Solde à régler avant le
-
-                  <?= date(
-                      'd/m/Y',
-                      strtotime($r['date_limite_solde'])
-                  ) ?>
-
-                </span>
-
-                <?php endif; ?>
 
 
                 <?php else: ?>
@@ -1596,7 +1589,35 @@ require __DIR__ . '/includes/header.php';
               <?php if ($r['statut'] === 'validee'): ?>
 
 
-                <?php if ($r['statut_paiement'] === 'paye'): ?>
+                <?php if ($sfc && $sfc['net_du'] > 0): ?>
+
+                <div class="text-[10px] text-slate-500 font-bold sm:text-right leading-relaxed">
+
+                  <?php if ($sfc['montant_reduction'] > 0): ?>
+                    Montant : <?= $fmtC($sfc['montant_initial']) ?> FCFA
+                    − réduction <?= $fmtC($sfc['montant_reduction']) ?> FCFA
+                    = <span class="text-primary"><?= $fmtC($sfc['net_du']) ?> FCFA</span>
+                  <?php else: ?>
+                    Montant : <span class="text-primary"><?= $fmtC($sfc['net_du']) ?> FCFA</span>
+                  <?php endif; ?>
+
+                  <?php if ($sfc['total_paye'] > 0): ?>
+                    <br>Payé : <span class="text-emerald-600"><?= $fmtC($sfc['paye_net']) ?> FCFA</span>
+                    <?php if ($sfc['solde'] > 0): ?>
+                      · Reste : <span class="text-accent"><?= $fmtC($sfc['solde']) ?> FCFA</span>
+                    <?php endif; ?>
+                  <?php endif; ?>
+
+                  <?php if ($sfc['trop_percu'] > 0): ?>
+                    <br><span class="text-orange-600">Trop-perçu de <?= $fmtC($sfc['trop_percu']) ?> FCFA : remboursement par le service comptable</span>
+                  <?php endif; ?>
+
+                </div>
+
+                <?php endif; ?>
+
+
+                <?php if ($sfc && $sfc['statut_paiement_calcule'] === 'paye' && $sfc['total_paye'] > 0): ?>
 
                 <div class="flex flex-col sm:flex-row gap-1.5">
 
@@ -1632,17 +1653,14 @@ require __DIR__ . '/includes/header.php';
 
                   <i class="fas fa-download"></i>
 
-                  Bon de réservation
+                  <?= $sfc && $sfc['statut_paiement_calcule'] === 'partiellement_paye' ? "Facture d'acompte" : 'Bon de réservation' ?>
 
                 </a>
 
                 <?php endif; ?>
 
 
-                <?php if (
-                    $r['statut_paiement'] !== 'paye'
-                    && !empty($r['date_validation'])
-                ): ?>
+                <?php if ($sfc && !empty($sfc['echeance_premier_paiement'])): ?>
 
                 <span class="text-[10px] text-amber-600 font-bold text-right">
 
@@ -1650,13 +1668,19 @@ require __DIR__ . '/includes/header.php';
 
                   À régler avant le
 
-                  <?= date(
-                      'd/m/Y à H:i',
-                      strtotime(
-                          $r['date_validation']
-                          . ' +48 hours'
-                      )
-                  ) ?>
+                  <?= date('d/m/Y à H:i', $sfc['echeance_premier_paiement']) ?>
+
+                </span>
+
+                <?php elseif ($sfc && !empty($sfc['echeance_solde']) && $sfc['solde'] > 0): ?>
+
+                <span class="text-[10px] <?= $sfc['en_retard'] ? 'text-red-600' : 'text-sky-600' ?> font-bold text-right">
+
+                  <i class="fas fa-clock"></i>
+
+                  <?= $sfc['en_retard']
+                      ? 'Échéance du solde dépassée (' . date('d/m/Y à H:i', $sfc['echeance_solde']) . ') : merci de régler au guichet'
+                      : 'Solde à régler avant le ' . date('d/m/Y à H:i', $sfc['echeance_solde']) ?>
 
                 </span>
 
@@ -2141,8 +2165,8 @@ require __DIR__ . '/includes/header.php';
                      REMBOURSEMENT : UNIQUEMENT LE BON SI EFFECTUÉ
                      ================================================= -->
                 <?php if (
-                    $r['choix_client'] === 'remboursement'
-                    && $remboursementEffectue
+                    $remboursementEffectue
+                    && !empty($r['remboursement_id'])
                 ): ?>
 
                 <div class="mt-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2.5">
@@ -2150,7 +2174,9 @@ require __DIR__ . '/includes/header.php';
 
                   <p class="text-xs font-bold text-emerald-700">
 
-                    Remboursement effectué :
+                    <?= $r['choix_client'] === 'remboursement'
+                        ? 'Remboursement effectué :'
+                        : 'Trop-perçu remboursé :' ?>
 
                     <strong>
                       <?= number_format(
@@ -2165,7 +2191,7 @@ require __DIR__ . '/includes/header.php';
                   </p>
 
 
-                  <a href="generer_bon.php?id=<?= $r['id'] ?>&type=remboursement&from=mon-compte.php"
+                  <a href="generer_bon.php?id=<?= (int) $r['remboursement_id'] ?>&type=remboursement&from=mon-compte.php"
                      target="_blank"
                      class="inline-flex items-center justify-center gap-1.5 bg-emerald-600 text-white text-[10px] font-black uppercase px-3 py-2 rounded-xl hover:bg-emerald-700 transition flex-shrink-0">
 

@@ -71,6 +71,9 @@ if (!$readonly && isset($_POST['action'])) {
                 $pdo->prepare("UPDATE reservations SET statut = 'validee', date_validation = NOW(), notification_vue = 0 WHERE id = ?")
                     ->execute([$id]);
 
+                // Tarif normal figé avant le rattachement des paiements
+                figer_montant_initial($pdo, $id);
+
                 $transfert = transferer_paiements_requisition($pdo, $id);
 
                 // Comme après un encaissement : les autres demandes validées non payées
@@ -134,8 +137,15 @@ if (!$readonly && isset($_POST['action'])) {
 
         $estSejourResaVal = !empty($resa['date_depart']);
 
-        $stmt = $pdo->prepare("UPDATE reservations SET statut = 'validee', date_validation = NOW(), notification_vue = 0 WHERE id = ?");
-        $stmt->execute([$id]); log_activity('reservation_validee','reservations','Réservation #'.($id??0).' validée');
+        $stmt = $pdo->prepare("UPDATE reservations SET statut = 'validee', date_validation = NOW(), notification_vue = 0 WHERE id = ? AND statut = 'en_attente'");
+        $stmt->execute([$id]);
+        if ($stmt->rowCount() === 0) {
+            $msg = ['error', 'Cette demande n\'est plus en attente de validation.'];
+            goto finValider;
+        }
+        // Tarif normal (avant toute réduction) figé à la validation
+        figer_montant_initial($pdo, $id);
+        log_activity('reservation_validee','reservations','Réservation #'.($id??0).' validée');
 
         if ($resa) {
             notify('admin_comptable', 'reservation_validee',
@@ -370,9 +380,13 @@ require __DIR__ . '/_admin_header.php';
                         <span class="px-3 py-1 rounded-full text-[9px] font-black uppercase border <?= $statusStyles[$res['statut']] ?? 'bg-slate-100' ?>">
                             <?= $label ?>
                         </span>
-                        <?php if ($res['statut'] === 'validee' && $res['statut_paiement'] !== 'paye' && !empty($res['date_validation'])): ?>
+                        <?php if ($res['statut'] === 'validee' && in_array($res['statut_paiement'], ['non_paye', 'attente_paiement'], true) && !empty($res['date_validation'])): ?>
                         <p class="text-[9px] text-amber-600 font-bold mt-1">
-                            <i class="fas fa-clock"></i> avant <?= date('d/m H:i', strtotime($res['date_validation'] . ' +48 hours')) ?>
+                            <i class="fas fa-clock"></i> 1er paiement avant <?= date('d/m H:i', limite_paiement($res['date_validation'])) ?>
+                        </p>
+                        <?php elseif ($res['statut'] === 'validee' && $res['statut_paiement'] === 'partiellement_paye'): ?>
+                        <p class="text-[9px] text-sky-600 font-bold mt-1">
+                            <i class="fas fa-coins"></i> Acompte versé — solde au comptable
                         </p>
                         <?php endif; ?>
                     </td>

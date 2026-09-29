@@ -32,7 +32,10 @@ if (in_array($role, ['superadmin','ministre'])) {
 
 // Stats comptable + ministre
 if (in_array($role, ['superadmin','admin_comptable','ministre'])) {
-    $stats['paye']       = (float)$pdo->query("SELECT COALESCE(SUM(montant),0) FROM paiements")->fetchColumn();
+    // Encaissé net = paiements reçus − remboursements effectués
+    $stats['paye_brut']  = (float)$pdo->query("SELECT COALESCE(SUM(montant),0) FROM paiements")->fetchColumn();
+    $stats['rembourse']  = (float)$pdo->query("SELECT COALESCE(SUM(COALESCE(montant_rembourse, montant_a_rembourser)),0) FROM remboursements WHERE resultat = 'effectue'")->fetchColumn();
+    $stats['paye']       = $stats['paye_brut'] - $stats['rembourse'];
     $stats['en_attente_paiement'] = (int)$pdo->query("SELECT COUNT(*) FROM reservations WHERE statut='validee' AND statut_paiement IN ('non_paye','attente_paiement','partiellement_paye')")->fetchColumn();
     $stats['loyers_encaisses'] = (float)$pdo->query("SELECT COALESCE(SUM(montant),0) FROM bail_paiements")->fetchColumn();
     $stmtLoyersAttente = $pdo->query("
@@ -78,16 +81,39 @@ $recent_messages = $pdo->query("
 $paiements_reduction = [];
 $nb_reductions = 0;
 if (in_array($role, ['superadmin','ministre','admin_comptable'])) {
-    $nb_reductions = (int)$pdo->query("SELECT COUNT(*) FROM paiements WHERE motif_reduction IS NOT NULL AND motif_reduction != ''")->fetchColumn();
-    $paiements_reduction = $pdo->query("
-        SELECT p.*, r.date_resa, e.nom AS espace_nom, u.nom_complet
+    /*
+     * Réductions réellement appliquées : nouvelles (reductions_accordees,
+     * statut « appliquee ») + anciennes saisies sur un paiement. Une réduction
+     * non utilisée ou annulée n'est pas comptée.
+     */
+    $nb_reductions = (int)$pdo->query("SELECT COUNT(*) FROM reductions_accordees WHERE statut = 'appliquee'")->fetchColumn()
+        + (int)$pdo->query("SELECT COUNT(DISTINCT reservation_id) FROM paiements WHERE motif_reduction IS NOT NULL AND motif_reduction != ''")->fetchColumn();
+    $reductionsRecentes = $pdo->query("
+        SELECT ra.reservation_id, ra.created_at, ra.motif AS motif_reduction, ra.montant_reduction, e.nom AS espace_nom, u.nom_complet
+        FROM reductions_accordees ra
+        JOIN reservations r ON r.id = ra.reservation_id
+        JOIN espaces e ON e.id = r.espace_id
+        JOIN users u ON u.id = r.user_id
+        WHERE ra.statut = 'appliquee'
+        ORDER BY ra.created_at DESC LIMIT 6
+    ")->fetchAll();
+    $anciennes = $pdo->query("
+        SELECT p.reservation_id, MAX(p.created_at) AS created_at, MAX(p.motif_reduction) AS motif_reduction, e.nom AS espace_nom, u.nom_complet
         FROM paiements p
         JOIN reservations r ON r.id = p.reservation_id
         JOIN espaces e ON e.id = r.espace_id
         JOIN users u ON u.id = r.user_id
         WHERE p.motif_reduction IS NOT NULL AND p.motif_reduction != ''
-        ORDER BY p.created_at DESC LIMIT 6
+        GROUP BY p.reservation_id, e.nom, u.nom_complet
+        ORDER BY created_at DESC LIMIT 6
     ")->fetchAll();
+    foreach ($anciennes as $anc) {
+        $sAnc = situation_financiere_reservation($pdo, (int)$anc['reservation_id']);
+        $anc['montant_reduction'] = $sAnc['reduction_historique'] ?? 0;
+        $reductionsRecentes[] = $anc;
+    }
+    usort($reductionsRecentes, fn($a, $b) => strcmp($b['created_at'], $a['created_at']));
+    $paiements_reduction = array_slice($reductionsRecentes, 0, 6);
 }
 
 $baux_apercu = [];
@@ -152,7 +178,7 @@ $cards = [];
 $cards[] = ['Notifications', count_notifications(), 'fa-bell', 'text-amber-500', 'bg-amber-50', 'notifications.php'];
 
 if ($role === 'admin_comptable' || is_superadmin()) {
-    $nbAcomptesEnCours = (int)$pdo->query("SELECT COUNT(*) FROM reservations WHERE statut_paiement = 'partiellement_paye'")->fetchColumn();
+    $nbAcomptesEnCours = (int)$pdo->query("SELECT COUNT(*) FROM reservations WHERE statut = 'validee' AND statut_paiement = 'partiellement_paye'")->fetchColumn();
     $cards[] = ['Acomptes en cours', $nbAcomptesEnCours, 'fa-coins', 'text-sky-600', 'bg-sky-50', 'acomptes.php'];
 }
 
@@ -173,11 +199,11 @@ if (isset($stats['users']))
 if (isset($stats['admins']))
     $cards[] = ['Administrateurs',       $stats['admins'],           'fa-user-shield',   'text-primary',     'bg-primary/5',   'users.php'];
 if (isset($stats['paye']))
-    $cards[] = ['Total encaissé (FCFA)', number_format($stats['paye'],0,',',' '), 'fa-cash-register','text-teal-600','bg-teal-50','rapport.php?type=encaisse'];
+    $cards[] = ['Total encaissé net (FCFA)', number_format($stats['paye'],0,',',' '), 'fa-cash-register','text-teal-600','bg-teal-50','rapport.php?type=encaisse'];
 if (isset($stats['en_attente_paiement']))
     $cards[] = ['Paiements en attente',  $stats['en_attente_paiement'],'fa-clock',       'text-amber-600',   'bg-amber-50',    'paiements.php'];
 if (!empty($nb_reductions))
-    $cards[] = ['Paiements avec réduction', $nb_reductions,          'fa-tags',          'text-orange-600',  'bg-orange-50',   'rapport.php?type=reductions'];
+    $cards[] = ['Réductions appliquées', $nb_reductions,          'fa-tags',          'text-orange-600',  'bg-orange-50',   'rapport.php?type=reductions'];
 if (isset($stats['loyers_encaisses']))
     $cards[] = ['Loyers encaissés (FCFA)', number_format($stats['loyers_encaisses'],0,',',' '), 'fa-file-signature','text-indigo-600','bg-indigo-50','baux.php'];
 if (isset($stats['nb_baux']))
@@ -267,7 +293,7 @@ foreach ($cards as [$label, $val, $icon, $color, $bg, $link]):
     </div>
     <div class="divide-y divide-slate-50">
       <?php foreach ($paiements_reduction as $pr): ?>
-      <a href="paiements.php?id=<?= (int)$pr['id'] ?>" class="flex items-center gap-4 px-5 py-3 hover:bg-slate-50 transition">
+      <a href="paiements.php?resa=<?= (int)$pr['reservation_id'] ?>" class="flex items-center gap-4 px-5 py-3 hover:bg-slate-50 transition">
         <div class="w-10 h-10 bg-amber-50 rounded-xl flex items-center justify-center flex-shrink-0">
           <i class="fas fa-tags text-amber-500 text-sm"></i>
         </div>
@@ -275,7 +301,7 @@ foreach ($cards as [$label, $val, $icon, $color, $bg, $link]):
           <p class="font-bold text-slate-800 text-sm truncate"><?= e($pr['espace_nom']) ?> — <?= e($pr['nom_complet']) ?></p>
           <p class="text-xs text-slate-400 truncate"><?= e($pr['motif_reduction']) ?></p>
         </div>
-        <span class="text-xs font-black text-amber-600 flex-shrink-0"><?= number_format((float)$pr['montant'],0,',',' ') ?> FCFA</span>
+        <span class="text-xs font-black text-amber-600 flex-shrink-0">− <?= number_format((float)$pr['montant_reduction'],0,',',' ') ?> FCFA</span>
       </a>
       <?php endforeach; ?>
     </div>

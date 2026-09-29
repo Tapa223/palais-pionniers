@@ -41,7 +41,9 @@ $modesRemboursement = [
     'orange_money'  => 'Orange Money',
     'moov_money'    => 'Moov Money',
     'virement'      => 'Virement bancaire',
-    'autre'         => 'Autre',
+    // Mêmes valeurs que l'ENUM remboursements.mode (et paiements.mode) :
+    // l'ancienne valeur « autre » n'existe pas en base.
+    'cheque'        => 'Chèque',
 ];
 
 /* =========================================================
@@ -303,9 +305,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$readonly) {
 
                 } else {
 
-                    $montantVerse = $estTropPercu
-                        ? (float)$suiviTrop['validee']['total_paye']
-                        : (float)($_POST['montant_paye'] ?? 0);
+                    /*
+                     * Montant payé : toujours déterminé côté serveur à partir
+                     * de la situation financière (jamais depuis le formulaire).
+                     */
+                    if ($estTropPercu) {
+                        $montantVerse = (float)$suiviTrop['validee']['total_paye'];
+                    } else {
+                        $situationOrigine = situation_financiere_reservation($pdo, (int)$rqAction['reservation_id']);
+                        $montantVerse = $situationOrigine ? (float)$situationOrigine['paye_net'] : 0.0;
+                    }
                     $montantARembourser = (float)($_POST['montant_a_rembourser'] ?? 0);
                     $motifRemboursement = $estTropPercu
                         ? 'Remboursement du trop-perçu suite à réquisition ministérielle (nouvelle réservation #'
@@ -316,7 +325,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$readonly) {
                     $resultat = trim($_POST['resultat'] ?? '');
                     $note = trim($_POST['note'] ?? '');
 
-                    if ($montantVerse < 0 || $montantARembourser < 0) {
+                    if ($montantVerse < 0 || $montantARembourser <= 0) {
 
                         $msg = [
                             'err',
@@ -1432,11 +1441,11 @@ require __DIR__ . '/_admin_header.php';
 
                         <?php endif; ?>
 
-                        <?php if ($suivi['trop_percu'] > 0): ?>
+                        <?php if ($suivi['trop_percu_constate'] > 0): ?>
 
                             <div class="rounded-2xl p-4 border <?= $suivi['rembourse'] ? 'bg-emerald-50 border-emerald-200' : 'bg-orange-50 border-orange-200' ?>">
                                 <p class="text-sm font-black <?= $suivi['rembourse'] ? 'text-emerald-800' : 'text-orange-800' ?>">
-                                    Trop-perçu : <?= number_format($suivi['trop_percu'], 0, ',', ' ') ?> FCFA
+                                    Trop-perçu : <?= number_format($suivi['trop_percu_constate'], 0, ',', ' ') ?> FCFA
                                     — <?= $suivi['rembourse'] ? 'remboursé' : 'à rembourser' ?>
                                 </p>
                                 <p class="text-xs text-slate-600 mt-1">
@@ -1918,7 +1927,8 @@ require __DIR__ . '/_admin_header.php';
                                         min="0"
                                         step="1"
                                         value="<?= e((string)$montantPayeFormulaire) ?>"
-                                        <?= $tropPercuARembourser ? 'readonly' : '' ?>
+                                        readonly
+                                        title="Montant calculé par le système à partir des paiements enregistrés"
                                         required
                                         class="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-bold text-slate-700 outline-none focus:border-primary"
                                     >

@@ -21,7 +21,7 @@ $debut = $_GET['debut'] ?? '';
 $fin   = $_GET['fin']   ?? '';
 
 $titres = [
-    'reductions' => 'Rapport — Paiements avec réduction',
+    'reductions' => 'Rapport — Réductions accordées',
     'guichet'    => 'Rapport — Réservations saisies au guichet',
     'encaisse'   => 'Rapport — Tous les paiements encaissés',
     'espaces'    => 'Rapport — État des espaces',
@@ -30,30 +30,78 @@ $titres = [
 $lignes = [];
 $colonnes = [];
 $totalGeneral = 0;
+$libelleTotal = 'Total';
 
 if ($type === 'reductions') {
-    $colonnes = ['Réf.', 'Date', 'Espace', 'Client', 'Montant réf.', 'Montant payé', 'Motif', 'Encaissé par'];
-    $where = ["p.motif_reduction IS NOT NULL", "p.motif_reduction != ''"];
+    /*
+     * Réductions accordées (table reductions_accordees, tous statuts) et
+     * anciennes réductions saisies sur un paiement (paiements.motif_reduction).
+     * Seules les réductions réellement appliquées entrent dans le total :
+     * une réduction « non appliquée » ou « annulée » n'est pas un manque à gagner.
+     */
+    $colonnes = ['Réf.', 'Date', 'Espace', 'Client', 'Montant initial', 'Réduction', 'Statut', 'Motif', 'Saisi par'];
+    $libellesStatutRed = ['appliquee' => 'Appliquée', 'non_appliquee' => 'Non utilisée (plein tarif payé)', 'annulee' => 'Annulée'];
     $params = [];
-    if ($debut) { $where[] = 'p.created_at >= ?'; $params[] = $debut . ' 00:00:00'; }
-    if ($fin)   { $where[] = 'p.created_at <= ?'; $params[] = $fin . ' 23:59:59'; }
+    $whereNew = [];
+    if ($debut) { $whereNew[] = 'ra.created_at >= ?'; $params[] = $debut . ' 00:00:00'; }
+    if ($fin)   { $whereNew[] = 'ra.created_at <= ?'; $params[] = $fin . ' 23:59:59'; }
     $stmt = $pdo->prepare("
-        SELECT p.*, e.nom AS espace_nom, u.nom_complet, admin.nom_complet AS admin_nom
+        SELECT ra.*, e.nom AS espace_nom, u.nom_complet, admin.nom_complet AS admin_nom
+        FROM reductions_accordees ra
+        JOIN reservations r ON r.id = ra.reservation_id
+        JOIN espaces e ON e.id = r.espace_id
+        JOIN users u ON u.id = r.user_id
+        JOIN users admin ON admin.id = ra.saisi_par
+        " . ($whereNew ? 'WHERE ' . implode(' AND ', $whereNew) : '') . "
+        ORDER BY ra.created_at DESC
+    ");
+    $stmt->execute($params);
+    $lignesTriees = [];
+    foreach ($stmt->fetchAll() as $r) {
+        $sRed = situation_financiere_reservation($pdo, (int)$r['reservation_id']);
+        $lignesTriees[] = [$r['created_at'], [
+            'RESA-' . (int)$r['reservation_id'], date('d/m/Y', strtotime($r['created_at'])), $r['espace_nom'], $r['nom_complet'],
+            number_format((float)($sRed['montant_initial'] ?? 0), 0, ',', ' '),
+            number_format((float)$r['montant_reduction'], 0, ',', ' '),
+            $libellesStatutRed[$r['statut']] ?? $r['statut'],
+            trim(($r['motif'] ?? '') . ($r['motif_statut'] ? ' — ' . $r['motif_statut'] : '')), $r['admin_nom']]];
+        if ($r['statut'] === 'appliquee') {
+            $totalGeneral += (float)$r['montant_reduction'];
+        }
+    }
+
+    // Anciennes réductions : une ligne par réservation
+    $params = [];
+    $whereOld = ["p.motif_reduction IS NOT NULL", "p.motif_reduction != ''"];
+    if ($debut) { $whereOld[] = 'p.created_at >= ?'; $params[] = $debut . ' 00:00:00'; }
+    if ($fin)   { $whereOld[] = 'p.created_at <= ?'; $params[] = $fin . ' 23:59:59'; }
+    $stmt = $pdo->prepare("
+        SELECT p.reservation_id, MAX(p.created_at) AS created_at, MAX(p.motif_reduction) AS motif_reduction,
+               e.nom AS espace_nom, u.nom_complet, MAX(admin.nom_complet) AS admin_nom
         FROM paiements p
         JOIN reservations r ON r.id = p.reservation_id
         JOIN espaces e ON e.id = r.espace_id
         JOIN users u ON u.id = r.user_id
         JOIN users admin ON admin.id = p.enregistre_par
-        WHERE " . implode(' AND ', $where) . "
-        ORDER BY p.created_at DESC
+        WHERE " . implode(' AND ', $whereOld) . "
+        GROUP BY p.reservation_id, e.nom, u.nom_complet
     ");
     $stmt->execute($params);
     foreach ($stmt->fetchAll() as $r) {
-        $lignes[] = [ref_recu((int)$r['id']), date('d/m/Y', strtotime($r['created_at'])), $r['espace_nom'], $r['nom_complet'],
-            number_format((float)$r['montant_reference'], 0, ',', ' '), number_format((float)$r['montant'], 0, ',', ' '),
-            $r['motif_reduction'], $r['admin_nom']];
-        $totalGeneral += (float)$r['montant'];
+        $sRed = situation_financiere_reservation($pdo, (int)$r['reservation_id']);
+        $montantRed = (float)($sRed['reduction_historique'] ?? 0);
+        $lignesTriees[] = [$r['created_at'], [
+            'RESA-' . (int)$r['reservation_id'], date('d/m/Y', strtotime($r['created_at'])), $r['espace_nom'], $r['nom_complet'],
+            number_format((float)($sRed['montant_initial'] ?? 0), 0, ',', ' '),
+            number_format($montantRed, 0, ',', ' '),
+            'Ancien système (sur paiement)',
+            $r['motif_reduction'], $r['admin_nom']]];
+        $totalGeneral += $montantRed;
     }
+
+    $libelleTotal = 'Total des réductions appliquées';
+    usort($lignesTriees, fn($a, $b) => strcmp($b[0], $a[0]));
+    $lignes = array_column($lignesTriees, 1);
 } elseif ($type === 'guichet') {
     $colonnes = ['Date', 'Espace', 'Client', 'Statut paiement', 'Saisi par'];
     $where = ["r.canal = 'guichet'"];
@@ -69,7 +117,7 @@ if ($type === 'reductions') {
         ORDER BY r.created_at DESC
     ");
     $stmt->execute($params);
-    $labelsPaiement = ['non_paye'=>'Non payé','attente_paiement'=>'En attente','paye'=>'Payé'];
+    $labelsPaiement = ['non_paye'=>'Non payé','attente_paiement'=>'En attente','partiellement_paye'=>'Acompte versé','paye'=>'Payé'];
     foreach ($stmt->fetchAll() as $r) {
         $lignes[] = [date('d/m/Y', strtotime($r['created_at'])), $r['espace_nom'], $r['nom_complet'],
             $labelsPaiement[$r['statut_paiement']] ?? $r['statut_paiement'], $r['nom_complet']];
@@ -93,7 +141,7 @@ if ($type === 'reductions') {
     ");
     $stmt->execute($params);
     foreach ($stmt->fetchAll() as $r) {
-        $lignes[] = [ref_recu((int)$r['id']), date('d/m/Y', strtotime($r['created_at'])), $r['espace_nom'], $r['nom_complet'],
+        $lignes[] = [ref_recu((int)$r['id'], $r['created_at']), date('d/m/Y', strtotime($r['created_at'])), $r['espace_nom'], $r['nom_complet'],
             number_format((float)$r['montant'], 0, ',', ' '), $modeLabels[$r['mode']] ?? $r['mode'], $r['admin_nom']];
         $totalGeneral += (float)$r['montant'];
     }
@@ -164,7 +212,7 @@ if (($_GET['format'] ?? '') === 'pdf') {
     if ($totalGeneral > 0) {
         $pdf->SetFont('Arial', 'B', 9);
         $pdf->SetFillColor(241, 245, 249);
-        $pdf->Cell($largeurCol * ($nbCol - 1), 8, iconv('UTF-8', 'windows-1252', 'TOTAL'), 1, 0, 'R', true);
+        $pdf->Cell($largeurCol * ($nbCol - 1), 8, iconv('UTF-8', 'windows-1252', mb_strtoupper($libelleTotal)), 1, 0, 'R', true);
         $pdf->Cell($largeurCol, 8, iconv('UTF-8', 'windows-1252', number_format($totalGeneral, 0, ',', ' ') . ' FCFA'), 1, 0, 'L', true);
         $pdf->Ln();
     }
@@ -247,7 +295,7 @@ require __DIR__ . '/_admin_header.php';
       <?php if ($totalGeneral > 0): ?>
       <tfoot>
         <tr class="bg-slate-50 border-t-2 border-slate-200">
-          <td colspan="<?= count($colonnes) - 1 ?>" class="px-4 py-3 font-black text-primary text-right uppercase text-xs">Total</td>
+          <td colspan="<?= count($colonnes) - 1 ?>" class="px-4 py-3 font-black text-primary text-right uppercase text-xs"><?= e($libelleTotal) ?></td>
           <td class="px-4 py-3 font-black text-accent"><?= number_format($totalGeneral, 0, ',', ' ') ?> FCFA</td>
         </tr>
       </tfoot>
