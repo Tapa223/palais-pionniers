@@ -202,14 +202,24 @@ if (!$requisition_id) {
         $periode = $estSejour
             ? ('du ' . date('d/m/Y', strtotime($date_resa)) . ' au ' . date('d/m/Y', strtotime($date_depart)) . ($quantite > 1 ? " ($quantite chambres)" : ''))
             : ('le ' . date('d/m/Y', strtotime($date_resa)));
+        // Réservation partenaire : signalée comme prioritaire (même circuit de validation)
+        $partResa  = partenaire_utilisateur($pdo, (int)$user_id);
+        $prefixe   = $partResa ? "[Prioritaire · Partenaire {$partResa['nom']}] " : '';
         notify('admin_espaces', 'nouvelle_reservation',
-            "Nouvelle demande de $nomClient pour « {$espace['nom']} » $periode",
-            "reservations.php"
+            $prefixe . "Nouvelle demande de $nomClient pour « {$espace['nom']} » $periode",
+            "reservations.php" . ($partResa ? "?id=$resaId" : '')
         );
         notify('superadmin', 'nouvelle_reservation',
-            "Nouvelle demande de $nomClient pour « {$espace['nom']} » $periode",
-            "reservations.php"
+            $prefixe . "Nouvelle demande de $nomClient pour « {$espace['nom']} » $periode",
+            "reservations.php" . ($partResa ? "?id=$resaId" : '')
         );
+        if ($partResa) {
+            // Information comptable : le paiement suivra le circuit habituel après validation
+            notify('admin_comptable', 'nouvelle_reservation',
+                $prefixe . "Nouvelle demande partenaire " . ref_resa($resaId) . " pour « {$espace['nom']} » $periode (en attente de validation).",
+                "reservations.php?id=$resaId"
+            );
+        }
 
         // Mise à jour du téléphone si absent
         if (!empty($telephone)) {

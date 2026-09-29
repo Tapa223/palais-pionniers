@@ -142,10 +142,47 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST' && empty($_POST) && (int
     // Suppression espace
     if ($action === 'delete_espace') {
         $id = (int)($_POST['id'] ?? 0);
+        /*
+         * Suppression définitive uniquement pour un espace sans historique.
+         * Les réservations, baux et paiements de bail sont conservés : un
+         * espace utilisé se retire du site en le rendant indisponible.
+         * (Les clés étrangères de bail sont en CASCADE : les vérifier évite
+         * d'effacer des paiements de bail avec l'espace.)
+         */
+        $dependances = [];
+        foreach ([
+            'réservation(s)'        => "SELECT COUNT(*) FROM reservations WHERE espace_id = ?",
+            'demande(s) de bail'    => "SELECT COUNT(*) FROM demandes_bail WHERE espace_id = ?",
+            'paiement(s) de bail'   => "SELECT COUNT(*) FROM bail_paiements WHERE espace_id = ?",
+        ] as $lib => $sqlDep) {
+            try {
+                $stDep = $pdo->prepare($sqlDep);
+                $stDep->execute([$id]);
+                $nbDep = (int)$stDep->fetchColumn();
+            } catch (PDOException $ex) {
+                $nbDep = 0; // table absente sur cette installation
+            }
+            if ($nbDep > 0) {
+                $dependances[] = "$nbDep $lib";
+            }
+        }
+        if ($dependances) {
+            $_SESSION['espaces_flash'] = ['err', 'Suppression impossible : cet espace est lié à ' . implode(', ', $dependances)
+                . '. Pour le retirer du site sans perdre l\'historique, décochez « Disponible » dans sa fiche.'];
+            header("Location: espaces.php");
+            exit;
+        }
         $imgs = $pdo->prepare("SELECT chemin FROM espace_images WHERE espace_id = ?");
         $imgs->execute([$id]);
-        foreach ($imgs->fetchAll() as $i) @unlink(__DIR__ . '/../uploads/' . basename($i['chemin']));
-        $pdo->prepare("DELETE FROM espaces WHERE id = ?")->execute([$id]); log_activity("espace_supprime","espaces","Espace ID $id supprimé"); header("Location: espaces.php?success=1"); exit;
+        $fichiers = array_column($imgs->fetchAll(), 'chemin');
+        $del = $pdo->prepare("DELETE FROM espaces WHERE id = ?");
+        $del->execute([$id]);
+        if ($del->rowCount() === 1) {
+            // Photos effacées du disque seulement après la suppression effective en base
+            foreach ($fichiers as $f) @unlink(__DIR__ . '/../uploads/' . basename($f));
+            log_activity("espace_supprime","espaces","Espace ID $id supprimé");
+        }
+        header("Location: espaces.php?success=1"); exit;
     }
 
     // Terminer le bail (efface d'un coup tous les champs gestionnaire, sans avoir à vider chaque champ)
@@ -227,7 +264,14 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST' && empty($_POST) && (int
         }
         // Suppression de tarifs
         if (!empty($_POST['tarif_delete'])) {
+            // Un tarif déjà utilisé par une réservation est conservé (sinon la réservation perd son tarif)
+            $tarifUtilise = $pdo->prepare("SELECT COUNT(*) FROM reservations WHERE tarif_id = ?");
             foreach ($_POST['tarif_delete'] as $tid) {
+                $tarifUtilise->execute([(int)$tid]);
+                if ((int)$tarifUtilise->fetchColumn() > 0) {
+                    $tarifsConserves = ($tarifsConserves ?? 0) + 1;
+                    continue;
+                }
                 $pdo->prepare("DELETE FROM tarifs WHERE id = ? AND espace_id = ?")->execute([(int)$tid, $id]);
             }
         }
@@ -238,6 +282,11 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST' && empty($_POST) && (int
                 . '. Photo(s) non ajoutée(s) : ' . implode(' ; ', $photosRefusees) . '.'];
         } elseif ($photosAjoutees) {
             $_SESSION['espaces_flash'] = ['ok', "Espace enregistré, $photosAjoutees photo(s) ajoutée(s)."];
+        }
+        if (!empty($tarifsConserves)) {
+            $flash = $_SESSION['espaces_flash'] ?? ['ok', 'Espace enregistré.'];
+            $flash[1] .= " $tarifsConserves tarif(s) non supprimé(s) : déjà utilisé(s) par des réservations (historique conservé).";
+            $_SESSION['espaces_flash'] = $flash;
         }
         header("Location: espaces.php?edit={$id}&success=1"); exit;
     }
@@ -682,7 +731,7 @@ require __DIR__ . '/_admin_header.php';
                  title="Modifier">
                 <i class="fas fa-edit"></i>
               </a>
-              <form method="POST" onsubmit="return confirm('Supprimer cet espace et toutes ses photos ?')">
+              <form method="POST" onsubmit="return confirm('Supprimer définitivement cet espace et ses photos ? (Refusé s\'il a des réservations ou un bail : rendez-le alors indisponible.)')">
                 <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
                 <input type="hidden" name="id"     value="<?= $esp['id'] ?>">
                 <input type="hidden" name="action" value="delete_espace">

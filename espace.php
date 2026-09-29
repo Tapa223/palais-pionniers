@@ -253,7 +253,7 @@ require __DIR__ . '/includes/header.php';
                         <i class="fas fa-paper-plane mr-2"></i>Nous contacter
                     </a>
                     <p class="mt-3 text-center text-[10px] text-white/70">Cet espace se loue uniquement sur devis, en direct avec l'administration.</p>
-                <?php elseif (is_logged_in() && ($_SESSION['role'] ?? 'user') === 'user'): ?>
+                <?php elseif (is_logged_in() && in_array($_SESSION['role'] ?? 'user', ['user', 'partenaire'], true)): ?>
                     <a href="reserver.php?espace_id=<?= (int)$espace['id'] ?>"
                        class="block w-full text-center bg-white text-primary py-5 rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-accent hover:text-white transition-all">
                         Réserver cet espace

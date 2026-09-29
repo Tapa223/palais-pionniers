@@ -16,6 +16,10 @@ $roleMeta = [
     'admin_comptable' => ['Comptable',       'bg-teal-100 text-teal-700'],
     'user'            => ['Utilisateur',     'bg-slate-100 text-slate-500'],
 ];
+// Rôle « partenaire » (après migration) : compte rattaché à une fiche partenaire
+if (role_partenaire_disponible($pdo)) {
+    $roleMeta['partenaire'] = ['Partenaire', 'bg-indigo-50 text-indigo-700'];
+}
 $rolesDisponibles = array_keys($roleMeta);
 
 if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -30,9 +34,18 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
             $newRole = in_array($_POST['role'], $rolesDisponibles) ? $_POST['role'] : 'user';
             $old = $pdo->prepare("SELECT nom_complet, role FROM users WHERE id = ?");
             $old->execute([$id]); $old = $old->fetch();
-            $pdo->prepare("UPDATE users SET role = ? WHERE id = ?")->execute([$newRole, $id]);
-            log_activity('user_role_change', 'users', "Rôle de «{$old['nom_complet']}» : {$old['role']} → $newRole");
-            $msg = ['ok', 'Rôle mis à jour.'];
+            if ($newRole === 'partenaire' && ($old['role'] ?? '') !== 'partenaire') {
+                // Un compte partenaire est toujours rattaché à une fiche partenaire
+                $msg = ['err', 'Le rôle « Partenaire » s\'attribue depuis la page Partenaires (création ou association du compte à une organisation).'];
+            } elseif ($old) {
+                $pdo->prepare("UPDATE users SET role = ? WHERE id = ?")->execute([$newRole, $id]);
+                if ($old['role'] === 'partenaire' && $newRole !== 'partenaire' && partenaires_disponibles($pdo)) {
+                    // Plus partenaire : l'association est retirée (les réservations passées restent attribuées)
+                    $pdo->prepare("UPDATE users SET partenaire_id = NULL WHERE id = ?")->execute([$id]);
+                }
+                log_activity('user_role_change', 'users', "Rôle de «{$old['nom_complet']}» : {$old['role']} → $newRole");
+                $msg = ['ok', 'Rôle mis à jour.'];
+            }
         }
 
         if ($action === 'toggle_actif' && $id && $id !== $moi) {
@@ -56,7 +69,9 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
             $role    = in_array($_POST['role'], $rolesDisponibles) ? $_POST['role'] : 'user';
             $mdp     = $_POST['password'] ?? '';
 
-            if (!$prenom || !$nom_fam || !filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($mdp) < 6) {
+            if ($role === 'partenaire') {
+                $msg = ['err', 'Les comptes partenaires se créent depuis la page Partenaires, pour être rattachés à leur organisation.'];
+            } elseif (!$prenom || !$nom_fam || !filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($mdp) < 6) {
                 $msg = ['err', 'Tous les champs sont requis (mot de passe min. 6 caractères).'];
             } else {
                 $exist = $pdo->prepare("SELECT id FROM users WHERE email = ?");
@@ -169,7 +184,7 @@ require __DIR__ . '/_admin_header.php';
       <label class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Rôle *</label>
       <div class="relative">
         <select name="role" class="w-full rounded-xl border-2 border-slate-100 bg-slate-50 px-4 py-2.5 font-bold text-primary outline-none text-sm appearance-none">
-          <?php foreach ($roleMeta as $val => [$label, $_]): ?>
+          <?php foreach ($roleMeta as $val => [$label, $_]): if ($val === 'partenaire') continue; // créé depuis la page Partenaires ?>
             <option value="<?= $val ?>"><?= $label ?></option>
           <?php endforeach; ?>
         </select>
@@ -253,6 +268,9 @@ require __DIR__ . '/_admin_header.php';
               </div>
               <div>
                 <p class="font-black text-primary text-sm"><?= e($u['nom_complet']) ?><?= $isSelf?' <span class="text-[9px] text-accent">(vous)</span>':'' ?></p>
+                <?php if ($u['role'] === 'partenaire' && !empty($u['partenaire_id'])): ?>
+                <a href="partenaires.php?id=<?= (int)$u['partenaire_id'] ?>" class="text-[10px] font-black text-indigo-700 hover:underline"><i class="fas fa-handshake mr-1"></i>Voir le partenaire</a>
+                <?php endif; ?>
                 <p class="text-xs text-slate-400"><?= e($u['email']) ?></p>
               </div>
             </div>
@@ -269,7 +287,7 @@ require __DIR__ . '/_admin_header.php';
                 <div class="relative">
                   <select name="role" onchange="this.form.submit()"
                           class="text-[10px] font-black rounded-xl border-2 px-3 py-1.5 outline-none cursor-pointer appearance-none pr-7 <?= $rc ?> border-slate-200 hover:border-primary transition">
-                    <?php foreach ($roleMeta as $val=>[$label,$_]): ?>
+                    <?php foreach ($roleMeta as $val=>[$label,$_]): if ($val === 'partenaire' && $u['role'] !== 'partenaire') continue; ?>
                       <option value="<?= $val ?>" <?= $u['role']===$val?'selected':''?>><?= $label ?></option>
                     <?php endforeach; ?>
                   </select>

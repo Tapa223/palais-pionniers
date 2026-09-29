@@ -951,6 +951,7 @@ $statutClass =
 ========================================================= */
 
 $pageTitle = 'Détail de la réquisition #' . $id;
+$pageRetour = ['requisitions.php', 'Retour aux réquisitions'];
 
 require __DIR__ . '/_admin_header.php';
 ?>

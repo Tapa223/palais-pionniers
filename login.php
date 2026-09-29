@@ -26,6 +26,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if (!$u || !password_verify($password, $u['password_hash'])) {
                 $errors[] = "Email ou mot de passe incorrect.";
+            } elseif ($u['role'] === 'partenaire' && (!(int)$u['actif'] || !partenaire_utilisateur(db(), (int)$u['id']))) {
+                // Compte partenaire désactivé (compte ou organisation) : accès refusé
+                $errors[] = "Ce compte partenaire est désactivé. Contactez la Direction du Palais.";
             } else {
                 session_regenerate_id(true);
                 $_SESSION['user_id']     = (int)$u['id'];

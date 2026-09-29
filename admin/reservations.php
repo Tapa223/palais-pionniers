@@ -344,7 +344,10 @@ $stmtResa = $pdo->prepare("
     LEFT JOIN tarifs t ON t.id = r.tarif_id
     " . ($partenairesActifs ? "LEFT JOIN partenaires pa ON pa.id = r.partenaire_id" : "") . "
     " . ($whereResa ? 'WHERE ' . implode(' AND ', $whereResa) : '') . "
-    ORDER BY r.created_at DESC
+    ORDER BY " . ($partenairesActifs
+        // Priorité de traitement : les demandes partenaires en attente remontent en tête (même circuit de validation)
+        ? "(r.statut = 'en_attente' AND r.partenaire_id IS NOT NULL) DESC, "
+        : "") . "r.created_at DESC
 ");
 $stmtResa->execute($paramsResa);
 $reservations = $stmtResa->fetchAll();

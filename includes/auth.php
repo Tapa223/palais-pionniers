@@ -124,9 +124,24 @@ if (!function_exists('require_client')) {
             exit;
         }
 
-        if (($_SESSION['role'] ?? 'user') !== 'user') {
+        // Espace client : clients classiques et comptes partenaires
+        // (le partenaire réserve par le circuit normal, sans droit d'administration)
+        if (!in_array($_SESSION['role'] ?? 'user', ['user', 'partenaire'], true)) {
             header('Location: ' . $redirect);
             exit;
+        }
+
+        // Compte partenaire désactivé en cours de session : déconnexion
+        if (($_SESSION['role'] ?? '') === 'partenaire') {
+            $pdoC = db();
+            $actif = $pdoC->prepare("SELECT actif FROM users WHERE id = ?");
+            $actif->execute([(int)$_SESSION['user_id']]);
+            if (!(int)$actif->fetchColumn() || !partenaire_utilisateur($pdoC, (int)$_SESSION['user_id'])) {
+                $_SESSION = [];
+                session_destroy();
+                header('Location: login.php');
+                exit;
+            }
         }
     }
 }
@@ -2338,6 +2353,31 @@ if (!function_exists('partenaires_disponibles')) {
     }
 }
 
+if (!function_exists('role_partenaire_disponible')) {
+    /** Le rôle « partenaire » existe dans users.role (migration exécutée). */
+    function role_partenaire_disponible(PDO $pdo): bool
+    {
+        static $ok = null;
+        if ($ok === null) {
+            try {
+                $col = $pdo->query("SHOW COLUMNS FROM users LIKE 'role'")->fetch();
+                $ok = $col && str_contains((string)$col['Type'], "'partenaire'");
+            } catch (PDOException $e) {
+                $ok = false;
+            }
+        }
+        return $ok;
+    }
+}
+
+if (!function_exists('is_partenaire')) {
+    /** Utilisateur connecté avec le rôle « partenaire ». */
+    function is_partenaire(): bool
+    {
+        return ($_SESSION['role'] ?? '') === 'partenaire';
+    }
+}
+
 if (!function_exists('partenaire_utilisateur')) {
     /**
      * Partenaire ACTIF associé à un compte client (null = client classique).
@@ -2348,11 +2388,14 @@ if (!function_exists('partenaire_utilisateur')) {
         if (!$userId || !partenaires_disponibles($pdo)) {
             return null;
         }
+        // Compte partenaire = rôle « partenaire » + fiche partenaire active
+        // (avant la migration du rôle : compte client associé)
         $st = $pdo->prepare("
             SELECT p.*
             FROM users u
             JOIN partenaires p ON p.id = u.partenaire_id
             WHERE u.id = ? AND p.actif = 1
+            " . (role_partenaire_disponible($pdo) ? "AND u.role = 'partenaire'" : "") . "
         ");
         $st->execute([$userId]);
         return $st->fetch() ?: null;

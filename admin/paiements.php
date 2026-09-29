@@ -404,15 +404,18 @@ $paiementsQuery->execute($params);
 $paiements = $paiementsQuery->fetchAll();
 
 // Réservations validées restant à encaisser (totalement ou en partie)
+$partenairesPaie = partenaires_disponibles($pdo);
 $enAttente = $pdo->query("
     SELECT r.*, e.nom AS espace_nom, u.nom_complet, u.telephone, u.email,
            t.libelle AS tarif_libelle, t.unite
+           " . ($partenairesPaie ? ", pa.nom AS partenaire_nom" : ", NULL AS partenaire_nom") . "
     FROM reservations r
     JOIN espaces e ON e.id = r.espace_id
     JOIN users u ON u.id = r.user_id
     LEFT JOIN tarifs t ON t.id = r.tarif_id
+    " . ($partenairesPaie ? "LEFT JOIN partenaires pa ON pa.id = r.partenaire_id" : "") . "
     WHERE r.statut = 'validee' AND r.statut_paiement IN ('non_paye','attente_paiement','partiellement_paye')
-    ORDER BY r.date_resa ASC
+    ORDER BY " . ($partenairesPaie ? "(r.partenaire_id IS NOT NULL) DESC, " : "") . "r.date_resa ASC
 ")->fetchAll();
 
 foreach ($enAttente as &$ea) {
@@ -571,6 +574,9 @@ require __DIR__ . '/_admin_header.php';
           <span class="text-xs text-slate-400">·</span>
           <p class="text-sm text-slate-600 font-semibold"><?= e($r['espace_nom']) ?></p>
           <span class="text-[10px] font-mono font-black text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full"><?= e(libelle_references_dossier($refsR)) ?></span>
+          <?php if (!empty($r['partenaire_nom'])): ?>
+          <span class="text-[10px] font-black uppercase bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full"><i class="fas fa-handshake mr-1"></i>Partenaire · <?= e($r['partenaire_nom']) ?></span>
+          <?php endif; ?>
         </div>
         <div class="flex items-center gap-2 mt-1 text-xs text-slate-500 flex-wrap">
           <?php if ($estSejourResa): ?>

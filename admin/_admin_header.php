@@ -119,12 +119,21 @@ h1,h2,h3 { font-family:'Plus Jakarta Sans',Inter,sans-serif; letter-spacing:-.02
     <!-- Header top -->
     <header class="flex items-center justify-between border-b border-slate-200 bg-white px-4 md:px-6 py-3 sticky top-0 z-30 shadow-sm">
       <div class="flex items-center gap-2">
+        <?php if (!empty($pageRetour) && is_array($pageRetour)): ?>
+        <!-- Bouton Retour explicite : la page déclare sa liste logique ($pageRetour = [href, libellé]) -->
+        <a href="<?= e($pageRetour[0]) ?>"
+           class="w-9 h-9 flex items-center justify-center rounded-xl bg-slate-100 text-primary hover:bg-slate-200 transition flex-shrink-0"
+           title="<?= e($pageRetour[1] ?? 'Retour') ?>" aria-label="<?= e($pageRetour[1] ?? 'Retour') ?>">
+          <i class="fas fa-arrow-left text-sm"></i>
+        </a>
+        <?php else: ?>
         <!-- Bouton Retour (page admin précédente) -->
         <button onclick="history.back()" type="button"
            class="w-9 h-9 flex items-center justify-center rounded-xl bg-slate-100 text-primary hover:bg-slate-200 transition flex-shrink-0"
            title="Revenir à la page admin précédente">
           <i class="fas fa-arrow-left text-sm"></i>
         </button>
+        <?php endif; ?>
 
         <!-- Bouton Retour au site public (texte explicite pour ne pas confondre les deux) -->
         <a href="../index.php"

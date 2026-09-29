@@ -11,12 +11,28 @@ if (!isset($pdo) || !suggestions_disponibles($pdo)) {
 $_SESSION['suggestion_affichee'] = time();
 $retourSuggestion = $_GET['suggestion'] ?? '';
 ?>
+<style>
+  /* Animation ponctuelle et discrète : un léger balancement de ~1 s toutes les 25 s,
+     uniquement si l'utilisateur n'a pas demandé à réduire les animations. */
+  @media (prefers-reduced-motion: no-preference) {
+    #suggestionOuvrir { animation: suggestionCoucou 25s ease-in-out 6s infinite; }
+    #suggestionOuvrir:hover, #suggestionOuvrir:focus-visible { animation: none; }
+  }
+  @keyframes suggestionCoucou {
+    0%, 96%, 100% { transform: none; }
+    97%   { transform: translateY(-3px) rotate(-4deg); }
+    98%   { transform: translateY(-3px) rotate(4deg); }
+    99%   { transform: translateY(0) rotate(-2deg); }
+  }
+</style>
 <div id="suggestion" class="fixed right-4 z-40" style="bottom:1rem">
-  <button type="button" id="suggestionOuvrir" aria-haspopup="dialog" aria-controls="suggestionModal"
-          class="flex items-center gap-2 bg-primary text-white rounded-full shadow-xl px-4 py-3 text-xs font-black uppercase tracking-wide hover:bg-accent transition">
+  <!-- Lien réel (fonctionne sans JavaScript : la page se recharge avec la fenêtre ouverte) -->
+  <a href="?suggestion=ouvrir#suggestionModal" id="suggestionOuvrir" role="button" aria-haspopup="dialog" aria-controls="suggestionModal"
+     aria-label="Une idée ? Envoyer une suggestion anonyme"
+     class="flex items-center gap-2 bg-primary text-white rounded-full shadow-xl px-4 py-3 text-xs font-black uppercase tracking-wide hover:bg-accent transition">
     <i class="fas fa-comment-dots text-base"></i>
-    <span class="hidden sm:inline">Une suggestion ?</span>
-  </button>
+    <span>Une idée ?</span>
+  </a>
 </div>
 
 <div id="suggestionModal" role="dialog" aria-modal="true" aria-labelledby="suggestionTitre"
@@ -27,10 +43,10 @@ $retourSuggestion = $_GET['suggestion'] ?? '';
         <h2 id="suggestionTitre" class="font-black text-primary text-base uppercase italic">Une suggestion ?</h2>
         <p class="text-xs text-slate-500 mt-0.5">Partagez une idée ou une remarque avec l'équipe du Palais. C'est anonyme : ni nom, ni e-mail, ni compte.</p>
       </div>
-      <button type="button" id="suggestionFermer" aria-label="Fermer"
-              class="w-8 h-8 flex-shrink-0 flex items-center justify-center rounded-full bg-slate-100 text-slate-500 hover:text-accent transition">
+      <a href="index.php" id="suggestionFermer" role="button" aria-label="Fermer"
+         class="w-8 h-8 flex-shrink-0 flex items-center justify-center rounded-full bg-slate-100 text-slate-500 hover:text-accent transition">
         <i class="fas fa-times text-xs"></i>
-      </button>
+      </a>
     </div>
 
     <div id="suggestionMerci" class="<?= $retourSuggestion === 'merci' ? '' : 'hidden' ?> rounded-xl bg-emerald-50 border border-emerald-200 p-4 text-sm font-bold text-emerald-700">
@@ -67,8 +83,8 @@ $retourSuggestion = $_GET['suggestion'] ?? '';
     const err   = document.getElementById('suggestionErreur');
     const ouvrir = () => { modal.classList.remove('hidden'); form.querySelector('textarea')?.focus(); };
     const fermer = () => modal.classList.add('hidden');
-    document.getElementById('suggestionOuvrir').addEventListener('click', ouvrir);
-    document.getElementById('suggestionFermer').addEventListener('click', fermer);
+    document.getElementById('suggestionOuvrir').addEventListener('click', e => { e.preventDefault(); ouvrir(); });
+    document.getElementById('suggestionFermer').addEventListener('click', e => { e.preventDefault(); fermer(); });
     modal.addEventListener('click', e => { if (e.target === modal) fermer(); });
     document.addEventListener('keydown', e => { if (e.key === 'Escape') fermer(); });
 

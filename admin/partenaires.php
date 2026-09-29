@@ -5,18 +5,22 @@ require_role(['ministre', 'admin_comptable', 'admin_espaces']);
 
 /*
  * Partenaires (CICB, ministère, institution…).
- * Un partenaire est une fiche « partenaires » à laquelle on associe un ou
- * plusieurs comptes clients existants : ils réservent par le circuit
- * normal (espaces, tarifs, disponibilités, paiements, bons), leurs
- * réservations étant attribuées au partenaire (reservations.partenaire_id).
+ * Un partenaire est une fiche « partenaires » (l'organisation) et un ou
+ * plusieurs comptes utilisateurs de rôle « partenaire » qui lui sont
+ * rattachés (users.partenaire_id). Ces comptes réservent par le circuit
+ * normal (espaces, tarifs, disponibilités, validation, paiements, bons) ;
+ * leurs réservations sont attribuées au partenaire (reservations.partenaire_id).
  *
- * Gestion (créer, modifier, désactiver, associer des comptes) :
- * Direction (superadmin) et service comptable. Consultation et
- * statistiques : ministre et administration des espaces.
+ * Gestion (fiche, comptes, mots de passe initiaux, désactivation) :
+ * Direction (superadmin). Consultation et statistiques : ministre,
+ * comptabilité, administration des espaces.
  */
 $pdo      = db();
 $role     = $_SESSION['role'] ?? '';
-$peutGerer = is_superadmin() || $role === 'admin_comptable';
+$peutGerer = is_superadmin();
+$pageRetour = isset($_GET['id']) || isset($_GET['nouveau'])
+    ? ['partenaires.php', 'Retour aux partenaires']
+    : ['dashboard.php', 'Retour au tableau de bord'];
 $msg      = $_SESSION['partenaires_flash'] ?? null;
 unset($_SESSION['partenaires_flash']);
 
@@ -77,33 +81,102 @@ if ($installe && $_SERVER['REQUEST_METHOD'] === 'POST') {
             log_activity('partenaire_' . ($actif ? 'active' : 'desactive'), 'users', "Partenaire #$pid " . ($actif ? 'réactivé' : 'désactivé'));
             $_SESSION['partenaires_flash'] = ['ok', $actif
                 ? 'Partenaire réactivé.'
-                : 'Partenaire désactivé : ses comptes réservent désormais comme des clients classiques (l\'historique reste attribué).'];
+                : 'Partenaire désactivé : ses comptes ne peuvent plus se connecter ni réserver (l\'historique reste attribué).'];
+
+        } elseif ($action === 'creer_compte' && $pid) {
+            // Création du compte utilisateur « partenaire » par la Direction
+            if (!role_partenaire_disponible($pdo)) {
+                throw new RuntimeException('Exécutez d\'abord la migration « migration_role_partenaire.sql ».');
+            }
+            $nomC  = trim((string)($_POST['nom_complet'] ?? ''));
+            $email = trim((string)($_POST['email_compte'] ?? ''));
+            $tel   = trim((string)($_POST['telephone_compte'] ?? ''));
+            $mdp   = (string)($_POST['mot_de_passe'] ?? '');
+            if (mb_strlen($nomC) < 2 || mb_strlen($nomC) > 200) {
+                throw new RuntimeException('Le nom du titulaire du compte est obligatoire.');
+            }
+            if (!filter_var($email, FILTER_VALIDATE_EMAIL) || mb_strlen($email) > 190) {
+                throw new RuntimeException('Identifiant (e-mail) invalide.');
+            }
+            if (mb_strlen($mdp) < 8) {
+                throw new RuntimeException('Le mot de passe initial doit contenir au moins 8 caractères.');
+            }
+            if ($mdp !== (string)($_POST['mot_de_passe_confirmation'] ?? '')) {
+                throw new RuntimeException('La confirmation du mot de passe ne correspond pas.');
+            }
+            $exist = $pdo->prepare("SELECT id FROM users WHERE email = ?");
+            $exist->execute([$email]);
+            if ($exist->fetch()) {
+                throw new RuntimeException('Cet identifiant (e-mail) est déjà utilisé par un autre compte.');
+            }
+            if (!$pdo->query("SELECT actif FROM partenaires WHERE id = " . $pid)->fetchColumn()) {
+                throw new RuntimeException('Réactivez le partenaire avant de lui créer un compte.');
+            }
+            $pdo->prepare("INSERT INTO users (nom_complet, email, telephone, password_hash, role, partenaire_id, actif) VALUES (?,?,?,?, 'partenaire', ?, 1)")
+                ->execute([$nomC, $email, $tel !== '' ? $tel : null, password_hash($mdp, PASSWORD_DEFAULT), $pid]);
+            $uidNouveau = (int)$pdo->lastInsertId();
+            log_activity('partenaire_compte_cree', 'users', "Compte partenaire #$uidNouveau ($email) créé pour le partenaire #$pid");
+            $_SESSION['partenaires_flash'] = ['ok', "Compte partenaire créé : identifiant « $email ». Communiquez le mot de passe initial au partenaire, qui pourra le modifier dans son espace."];
 
         } elseif ($action === 'associer' && $pid) {
+            // Rattacher un compte existant (client) : il devient un compte « partenaire »
             $email = trim((string)($_POST['email_compte'] ?? ''));
             $st = $pdo->prepare("SELECT id, nom_complet, role, partenaire_id FROM users WHERE email = ?");
             $st->execute([$email]);
             $u = $st->fetch();
             if (!$u) {
-                throw new RuntimeException('Aucun compte ne correspond à cette adresse e-mail. Le partenaire doit d\'abord créer son compte client (inscription).');
+                throw new RuntimeException('Aucun compte ne correspond à cet identifiant. Créez plutôt le compte partenaire ci-dessus.');
             }
-            if ($u['role'] !== 'user') {
-                throw new RuntimeException('Seul un compte client peut être associé à un partenaire (pas un compte d\'administration).');
+            if (!in_array($u['role'], ['user', 'partenaire'], true)) {
+                throw new RuntimeException('Un compte d\'administration ne peut pas être rattaché à un partenaire.');
             }
             if ($u['partenaire_id'] && (int)$u['partenaire_id'] !== $pid) {
-                throw new RuntimeException('Ce compte est déjà associé à un autre partenaire. Dissociez-le d\'abord.');
+                throw new RuntimeException('Ce compte est déjà rattaché à un autre partenaire. Dissociez-le d\'abord.');
             }
-            $pdo->prepare("UPDATE users SET partenaire_id = ? WHERE id = ?")->execute([$pid, (int)$u['id']]);
+            $nouveauRole = role_partenaire_disponible($pdo) ? 'partenaire' : $u['role'];
+            $pdo->prepare("UPDATE users SET partenaire_id = ?, role = ? WHERE id = ?")->execute([$pid, $nouveauRole, (int)$u['id']]);
             $nomP = (string)$pdo->query("SELECT nom FROM partenaires WHERE id = " . $pid)->fetchColumn();
-            notify('', 'partenaire_associe', "Votre compte est désormais associé au partenaire « $nomP » du Palais des Pionniers.", 'mon-compte.php', (int)$u['id']);
-            log_activity('partenaire_compte_associe', 'users', "Compte #{$u['id']} associé au partenaire #$pid");
-            $_SESSION['partenaires_flash'] = ['ok', "Compte « {$u['nom_complet']} » associé au partenaire."];
+            notify('', 'partenaire_associe', "Votre compte est désormais un compte partenaire « $nomP » du Palais des Pionniers.", 'mon-compte.php', (int)$u['id']);
+            log_activity('partenaire_compte_associe', 'users', "Compte #{$u['id']} rattaché au partenaire #$pid (rôle $nouveauRole)");
+            $_SESSION['partenaires_flash'] = ['ok', "Compte « {$u['nom_complet']} » rattaché au partenaire."];
 
         } elseif ($action === 'dissocier' && $pid) {
+            // Le compte redevient un client classique ; l'historique reste attribué
             $uid = (int)($_POST['user_id'] ?? 0);
-            $pdo->prepare("UPDATE users SET partenaire_id = NULL WHERE id = ? AND partenaire_id = ?")->execute([$uid, $pid]);
-            log_activity('partenaire_compte_dissocie', 'users', "Compte #$uid dissocié du partenaire #$pid");
-            $_SESSION['partenaires_flash'] = ['ok', 'Compte dissocié (les réservations passées restent attribuées au partenaire).'];
+            $st = $pdo->prepare("UPDATE users SET partenaire_id = NULL, role = IF(role = 'partenaire', 'user', role) WHERE id = ? AND partenaire_id = ?");
+            $st->execute([$uid, $pid]);
+            if ($st->rowCount() !== 1) {
+                throw new RuntimeException('Ce compte n\'est pas rattaché à ce partenaire.');
+            }
+            log_activity('partenaire_compte_dissocie', 'users', "Compte #$uid dissocié du partenaire #$pid (redevient client)");
+            $_SESSION['partenaires_flash'] = ['ok', 'Compte dissocié : il redevient un compte client (les réservations passées restent attribuées au partenaire).'];
+
+        } elseif ($action === 'reinitialiser_mot_de_passe' && $pid) {
+            $uid = (int)($_POST['user_id'] ?? 0);
+            $mdp = (string)($_POST['mot_de_passe'] ?? '');
+            if (mb_strlen($mdp) < 8) {
+                throw new RuntimeException('Le nouveau mot de passe doit contenir au moins 8 caractères.');
+            }
+            $st = $pdo->prepare("UPDATE users SET password_hash = ? WHERE id = ? AND partenaire_id = ? AND role IN ('partenaire','user')");
+            $st->execute([password_hash($mdp, PASSWORD_DEFAULT), $uid, $pid]);
+            if ($st->rowCount() !== 1) {
+                throw new RuntimeException('Compte introuvable pour ce partenaire.');
+            }
+            log_activity('partenaire_mot_de_passe_reinitialise', 'users', "Mot de passe du compte partenaire #$uid réinitialisé par la Direction");
+            $_SESSION['partenaires_flash'] = ['ok', 'Mot de passe réinitialisé. Communiquez-le au partenaire, qui pourra le modifier dans son espace.'];
+
+        } elseif ($action === 'supprimer' && $pid) {
+            // Suppression physique uniquement si aucune trace : ni compte, ni réservation
+            $nbComptes = (int)$pdo->query("SELECT COUNT(*) FROM users WHERE partenaire_id = " . $pid)->fetchColumn();
+            $nbResas   = (int)$pdo->query("SELECT COUNT(*) FROM reservations WHERE partenaire_id = " . $pid)->fetchColumn();
+            if ($nbComptes || $nbResas) {
+                throw new RuntimeException("Ce partenaire a des comptes ou des réservations ($nbComptes compte(s), $nbResas réservation(s)) : il ne peut pas être supprimé. Désactivez-le pour conserver l'historique.");
+            }
+            $nomP = (string)$pdo->query("SELECT nom FROM partenaires WHERE id = " . $pid)->fetchColumn();
+            $pdo->prepare("DELETE FROM partenaires WHERE id = ?")->execute([$pid]);
+            log_activity('partenaire_supprime', 'users', "Partenaire #$pid supprimé ($nomP) — aucun compte ni réservation");
+            $_SESSION['partenaires_flash'] = ['ok', "Partenaire « $nomP » supprimé."];
+            $retour = 'partenaires.php';
 
         } else {
             throw new RuntimeException('Action non reconnue.');
@@ -129,6 +202,7 @@ $parEspace = [];
 $detail = null;
 $detailResas = [];
 $detailComptes = [];
+$aDesResasAnnulees = false;
 
 if ($installe) {
     $partenaires = $pdo->query("
@@ -149,13 +223,20 @@ if ($installe) {
         JOIN espaces e ON e.id = r.espace_id
         JOIN users u ON u.id = r.user_id
         WHERE r.partenaire_id IS NOT NULL
-          AND r.statut NOT IN ('refusee', 'annulee', 'expiree')
         ORDER BY r.date_resa DESC
     ")->fetchAll();
 
     $detailId = (int)($_GET['id'] ?? 0);
     foreach ($resas as $r) {
         $s = situation_financiere_reservation($pdo, (int)$r['id']);
+        // Historique complet dans la fiche ; statistiques hors refusées / annulées / expirées
+        if ((int)$r['partenaire_id'] === $detailId) {
+            $r['situation'] = $s;
+            $detailResas[] = $r;
+        }
+        if (in_array($r['statut'], ['refusee', 'annulee', 'expiree'], true)) {
+            continue;
+        }
         $payeNet = $s ? max(0.0, (float)$s['paye_net']) : 0.0;
         $reste   = ($s && $r['statut'] === 'validee') ? (float)$s['solde'] : 0.0;
         $i = $index[(int)$r['partenaire_id']] ?? null;
@@ -171,18 +252,15 @@ if ($installe) {
         $parEspace[$e] ??= ['nom' => $r['espace_nom'], 'nb' => 0, 'revenus' => 0.0];
         $parEspace[$e]['nb']++;
         $parEspace[$e]['revenus'] += $payeNet;
-        if ((int)$r['partenaire_id'] === $detailId) {
-            $r['situation'] = $s;
-            $detailResas[] = $r;
-        }
     }
     uasort($parEspace, fn($a, $b) => $b['nb'] <=> $a['nb'] ?: $b['revenus'] <=> $a['revenus']);
 
     if ($detailId && isset($index[$detailId])) {
         $detail = $partenaires[$index[$detailId]];
-        $st = $pdo->prepare("SELECT id, nom_complet, email, telephone, actif FROM users WHERE partenaire_id = ? ORDER BY nom_complet");
+        $st = $pdo->prepare("SELECT id, nom_complet, email, telephone, actif, role FROM users WHERE partenaire_id = ? ORDER BY nom_complet");
         $st->execute([$detailId]);
         $detailComptes = $st->fetchAll();
+        $aDesResasAnnulees = (int)$pdo->query("SELECT COUNT(*) FROM reservations WHERE partenaire_id = " . $detailId)->fetchColumn() > 0;
     }
 }
 $fcfa = fn($v) => number_format((float)$v, 0, ',', ' ');
@@ -191,6 +269,12 @@ $edition = $detail ?? (isset($_GET['nouveau']) ? [] : null);
 $pageTitle = 'Partenaires';
 require __DIR__ . '/_admin_header.php';
 ?>
+
+<?php if (isset($_GET['id']) || isset($_GET['nouveau'])): ?>
+<a href="partenaires.php" class="inline-flex items-center gap-2 text-xs font-black uppercase tracking-widest text-primary hover:text-accent transition bg-primary/5 hover:bg-accent/10 px-3.5 py-2 rounded-full mb-4">
+  <i class="fas fa-arrow-left"></i> Retour aux partenaires
+</a>
+<?php endif; ?>
 
 <div class="flex items-center justify-between mb-6 flex-wrap gap-3">
   <div>
@@ -283,6 +367,7 @@ require __DIR__ . '/_admin_header.php';
       </p>
     </div>
     <?php if ($peutGerer): ?>
+    <div class="flex flex-wrap gap-2">
     <form method="POST">
       <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
       <input type="hidden" name="action" value="basculer_actif">
@@ -292,6 +377,15 @@ require __DIR__ . '/_admin_header.php';
         <?= $detail['actif'] ? 'Désactiver' : 'Réactiver' ?>
       </button>
     </form>
+    <?php if (!$detailComptes && !(int)$detail['nb_resas'] && !$aDesResasAnnulees): ?>
+    <form method="POST">
+      <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
+      <input type="hidden" name="action" value="supprimer">
+      <input type="hidden" name="partenaire_id" value="<?= (int)$detail['id'] ?>">
+      <button type="submit" onclick="return confirm('Supprimer définitivement ce partenaire ? (aucun compte ni réservation)')" class="text-xs font-black uppercase px-4 py-2 rounded-xl border border-rose-100 text-rose-500 hover:bg-rose-50 transition">Supprimer</button>
+    </form>
+    <?php endif; ?>
+    </div>
     <?php endif; ?>
   </div>
 
@@ -301,38 +395,77 @@ require __DIR__ . '/_admin_header.php';
     <div class="rounded-xl bg-slate-50 p-3"><p class="text-[10px] font-black uppercase text-slate-400">Reste à encaisser</p><p class="text-lg font-black text-amber-600"><?= $fcfa($detail['reste']) ?> FCFA</p></div>
   </div>
 
-  <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Comptes associés</h3>
+  <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Comptes partenaire</h3>
   <div class="space-y-2 mb-4">
     <?php foreach ($detailComptes as $c): ?>
-    <div class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-100 px-3 py-2">
-      <p class="text-sm font-bold text-primary"><?= e($c['nom_complet']) ?> <span class="text-xs font-semibold text-slate-400"><?= e($c['email']) ?></span></p>
+    <div class="rounded-xl border border-slate-100 px-3 py-2">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <p class="text-sm font-bold text-primary"><?= e($c['nom_complet']) ?>
+          <span class="text-xs font-semibold text-slate-400">identifiant : <?= e($c['email']) ?></span>
+          <?php if (!(int)$c['actif']): ?><span class="text-[9px] font-black uppercase text-accent ml-1">compte bloqué</span><?php endif; ?>
+        </p>
+        <?php if ($peutGerer): ?>
+        <form method="POST">
+          <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
+          <input type="hidden" name="action" value="dissocier">
+          <input type="hidden" name="partenaire_id" value="<?= (int)$detail['id'] ?>">
+          <input type="hidden" name="user_id" value="<?= (int)$c['id'] ?>">
+          <button type="submit" onclick="return confirm('Dissocier ce compte ? Il redeviendra un compte client classique.')" class="text-[11px] font-black text-slate-400 hover:text-accent transition">Dissocier</button>
+        </form>
+        <?php endif; ?>
+      </div>
       <?php if ($peutGerer): ?>
-      <form method="POST">
+      <form method="POST" class="flex flex-col sm:flex-row gap-2 mt-2" autocomplete="off">
         <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
-        <input type="hidden" name="action" value="dissocier">
+        <input type="hidden" name="action" value="reinitialiser_mot_de_passe">
         <input type="hidden" name="partenaire_id" value="<?= (int)$detail['id'] ?>">
         <input type="hidden" name="user_id" value="<?= (int)$c['id'] ?>">
-        <button type="submit" onclick="return confirm('Dissocier ce compte du partenaire ?')" class="text-[11px] font-black text-slate-400 hover:text-accent transition">Dissocier</button>
+        <input type="password" name="mot_de_passe" required minlength="8" autocomplete="new-password" placeholder="Nouveau mot de passe (8 caractères min.)"
+               class="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-primary outline-none focus:border-primary">
+        <button type="submit" onclick="return confirm('Réinitialiser le mot de passe de ce compte ?')" class="text-[11px] font-black uppercase px-4 py-2 rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50 transition">Réinitialiser le mot de passe</button>
       </form>
       <?php endif; ?>
     </div>
     <?php endforeach; ?>
-    <?php if (!$detailComptes): ?><p class="text-xs text-slate-400">Aucun compte associé pour le moment.</p><?php endif; ?>
+    <?php if (!$detailComptes): ?><p class="text-xs text-slate-400">Aucun compte pour le moment.</p><?php endif; ?>
   </div>
+
   <?php if ($peutGerer): ?>
+  <!-- Créer le compte utilisateur du partenaire (rôle « partenaire ») -->
+  <form method="POST" class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3 rounded-xl bg-slate-50 p-3" autocomplete="off">
+    <p class="sm:col-span-2 text-[10px] font-black uppercase tracking-widest text-slate-500">Créer un compte partenaire</p>
+    <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
+    <input type="hidden" name="action" value="creer_compte">
+    <input type="hidden" name="partenaire_id" value="<?= (int)$detail['id'] ?>">
+    <input type="text" name="nom_complet" required placeholder="Nom du titulaire"
+           class="rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-bold text-primary outline-none focus:border-primary">
+    <input type="email" name="email_compte" required placeholder="Identifiant de connexion (e-mail)" autocomplete="off"
+           class="rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-bold text-primary outline-none focus:border-primary">
+    <input type="text" name="telephone_compte" placeholder="Téléphone"
+           class="rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-bold text-primary outline-none focus:border-primary">
+    <input type="password" name="mot_de_passe" required minlength="8" autocomplete="new-password" placeholder="Mot de passe initial (8 caractères min.)"
+           class="rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-bold text-primary outline-none focus:border-primary">
+    <input type="password" name="mot_de_passe_confirmation" required minlength="8" autocomplete="new-password" placeholder="Confirmation du mot de passe"
+           class="rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-bold text-primary outline-none focus:border-primary">
+    <button type="submit" class="bg-primary text-white text-xs font-black uppercase px-5 py-2.5 rounded-xl hover:bg-slate-800 transition">Créer le compte</button>
+  </form>
+  <!-- Rattacher un compte existant -->
   <form method="POST" class="flex flex-col sm:flex-row gap-2 mb-5">
     <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
     <input type="hidden" name="action" value="associer">
     <input type="hidden" name="partenaire_id" value="<?= (int)$detail['id'] ?>">
-    <input type="email" name="email_compte" required placeholder="E-mail du compte client à associer"
+    <input type="email" name="email_compte" required placeholder="Ou rattacher un compte existant (e-mail)"
            class="flex-1 rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-bold text-primary outline-none focus:border-primary">
-    <button type="submit" class="bg-primary text-white text-xs font-black uppercase px-5 py-2.5 rounded-xl hover:bg-slate-800 transition">Associer le compte</button>
+    <button type="submit" onclick="return confirm('Ce compte deviendra un compte partenaire. Continuer ?')" class="text-xs font-black uppercase px-5 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-100 transition">Rattacher</button>
   </form>
   <?php endif; ?>
 
   <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Réservations du partenaire</h3>
   <div class="space-y-2">
-    <?php foreach ($detailResas as $r): $s = $r['situation']; [$etatLib, $etatCls] = libelle_etat_financier($s['etat'] ?? ''); ?>
+    <?php foreach ($detailResas as $r): $s = $r['situation'];
+        [$etatLib, $etatCls] = in_array($r['statut'], ['refusee', 'annulee', 'expiree'], true)
+            ? [['refusee' => 'Refusée', 'annulee' => 'Annulée', 'expiree' => 'Expirée'][$r['statut']], 'bg-slate-50 text-slate-500 border-slate-200']
+            : libelle_etat_financier($s['etat'] ?? ''); ?>
     <a href="<?= $role === 'admin_espaces' ? 'reservations.php?q=RESA-' . (int)$r['id'] : 'paiements.php?resa=' . (int)$r['id'] ?>"
        class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-100 px-3 py-2 hover:bg-slate-50 transition">
       <p class="text-sm font-bold text-primary"><span class="font-mono text-xs text-slate-400"><?= e(ref_resa((int)$r['id'])) ?></span> <?= e($r['espace_nom']) ?>

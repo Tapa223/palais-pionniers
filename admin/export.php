@@ -1,7 +1,7 @@
 <?php
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/auth.php';
-require_role(['ministre','admin_comptable','admin_espaces','admin_activites']);
+require_role(['ministre','admin_comptable','admin_espaces','admin_activites','admin_messages']);
 
 $pdo   = db();
 $role  = $_SESSION['role'] ?? '';
@@ -32,6 +32,8 @@ $typesAutorises = [
     'baux'           => $rolesComptables,
     'reservations'   => ['ministre', 'admin_espaces', 'admin_comptable', 'superadmin'],
     'jeunes_engages' => ['ministre', 'admin_activites', 'superadmin'],
+    // Boîte à suggestions anonyme : aucune donnée d'identification de l'auteur
+    'suggestions'    => ['ministre', 'admin_espaces', 'admin_activites', 'admin_messages', 'admin_comptable', 'superadmin'],
 ];
 
 if (!isset($typesAutorises[$type]) || !in_array($role, $typesAutorises[$type], true)) {
@@ -342,6 +344,38 @@ if ($type === 'paiements') {
         return [$r['nom'], $r['prenom'], $r['age'], $r['telephone'], $r['email'], $r['commune'], $r['domaine_interet'], $r['motivation'], $r['statut'], date('d/m/Y H:i', strtotime($r['created_at']))];
     };
 
+} elseif ($type === 'suggestions') {
+    if (!suggestions_disponibles($pdo)) {
+        http_response_code(404);
+        exit('Module suggestions non installé.');
+    }
+    if ($debut) { $where[] = "sg.created_at >= ?"; $params[] = $debut . ' 00:00:00'; }
+    if ($fin)   { $where[] = "sg.created_at <= ?"; $params[] = $fin   . ' 23:59:59'; }
+    // Seules les colonnes de la suggestion elle-même (aucune IP, aucun compte auteur)
+    $sql = "
+        SELECT sg.id, sg.created_at, sg.statut, sg.contenu, sg.statut_modifie_le, u.nom_complet AS traite_par
+        FROM suggestions sg
+        LEFT JOIN users u ON u.id = sg.statut_modifie_par
+        " . ($where ? 'WHERE ' . implode(' AND ', $where) : '') . "
+        ORDER BY sg.created_at DESC
+    ";
+    $filename = 'suggestions_' . date('Y-m-d_His') . '.csv';
+    $headers  = ['Référence', 'Date', 'Statut', 'Contenu', 'Date de traitement', 'Traité par'];
+    $libStatutSug = ['nouvelle' => 'Nouvelle', 'lue' => 'Lue', 'traitee' => 'Traitée'];
+    $mapRow = function ($r) use ($dateH, $libStatutSug) {
+        // Texte saisi publiquement : neutralise les formules à l'ouverture dans un tableur
+        $contenu = (string)$r['contenu'];
+        if ($contenu !== '' && strpbrk($contenu[0], "=+-@\t\r") !== false) {
+            $contenu = "'" . $contenu;
+        }
+        return [
+            'SUG-' . (int)$r['id'], $dateH($r['created_at']),
+            $libStatutSug[$r['statut']] ?? $r['statut'], $contenu,
+            $r['statut'] !== 'nouvelle' ? $dateH($r['statut_modifie_le']) : '',
+            $r['statut'] !== 'nouvelle' ? ($r['traite_par'] ?? '') : '',
+        ];
+    };
+
 } else { // reservations
     $dateCol = 'r.created_at';
     if ($debut) { $where[] = "$dateCol >= ?"; $params[] = $debut . ' 00:00:00'; }
@@ -418,7 +452,7 @@ if ($colonneRefs) {
     $refs = references_dossiers($pdo, $ids) + $refs;
 }
 
-log_activity('export_' . $type, 'reservations', count($rows) . ' ligne(s) exportée(s) (' . $type . ')'
+log_activity('export_' . $type, $type === 'suggestions' ? 'messages' : 'reservations', count($rows) . ' ligne(s) exportée(s) (' . $type . ')'
     . ($debut || $fin ? ' — période ' . ($debut ?: '…') . ' → ' . ($fin ?: '…') : ''));
 
 header('Content-Type: text/csv; charset=utf-8');

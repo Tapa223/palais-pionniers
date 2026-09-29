@@ -27,7 +27,7 @@ if (in_array($role, ['superadmin','ministre','admin_activites'])) {
 // Stats utilisateurs → superadmin uniquement
 if (in_array($role, ['superadmin','ministre'])) {
     $stats['users'] = (int)$pdo->query("SELECT COUNT(*) FROM users WHERE role = 'user'")->fetchColumn();
-    $stats['admins'] = (int)$pdo->query("SELECT COUNT(*) FROM users WHERE role != 'user'")->fetchColumn();
+    $stats['admins'] = (int)$pdo->query("SELECT COUNT(*) FROM users WHERE role NOT IN ('user','partenaire')")->fetchColumn();
 }
 
 // Stats comptable + ministre

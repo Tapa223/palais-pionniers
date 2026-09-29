@@ -118,7 +118,7 @@ foreach ($modules as $mod) {
 $totalLogs = array_sum($statsModules);
 
 // Admins pour filtre
-$admins = $pdo->query("SELECT id, nom_complet, role FROM users WHERE role != 'user' ORDER BY nom_complet")->fetchAll();
+$admins = $pdo->query("SELECT id, nom_complet, role FROM users WHERE role NOT IN ('user','partenaire') ORDER BY nom_complet")->fetchAll();
 
 // Détail d'une action
 $detailId  = isset($_GET['id']) ? (int)$_GET['id'] : 0;

@@ -21,7 +21,21 @@ if ($installe && !$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         $id = (int)($_POST['id'] ?? 0);
         $nouveau = $_POST['statut'] ?? '';
-        if ($id && isset($statuts[$nouveau])) {
+        if ($id && ($_POST['action'] ?? '') === 'supprimer') {
+            // Ménage : Direction uniquement, et seulement une suggestion déjà traitée
+            if (!is_superadmin()) {
+                $msg = ['err', 'Seule la Direction peut supprimer une suggestion.'];
+            } else {
+                $st = $pdo->prepare("DELETE FROM suggestions WHERE id = ? AND statut = 'traitee'");
+                $st->execute([$id]);
+                if ($st->rowCount() === 1) {
+                    log_activity('suggestion_supprimee', 'messages', "Suggestion SUG-$id (traitée) supprimée");
+                    $msg = ['ok', "Suggestion SUG-$id supprimée."];
+                } else {
+                    $msg = ['err', 'Seule une suggestion marquée « Traitée » peut être supprimée.'];
+                }
+            }
+        } elseif ($id && isset($statuts[$nouveau])) {
             $st = $pdo->prepare("UPDATE suggestions SET statut = ?, statut_modifie_par = ?, statut_modifie_le = NOW() WHERE id = ?");
             $st->execute([$nouveau, $_SESSION['user_id'], $id]);
             if ($st->rowCount() === 1) {
@@ -56,6 +70,7 @@ $couleurs = ['nouvelle' => 'bg-amber-100 text-amber-700', 'lue' => 'bg-sky-100 t
 $libelles = ['nouvelle' => 'Nouvelle', 'lue' => 'Lue', 'traitee' => 'Traitée'];
 
 $pageTitle = 'Suggestions';
+$pageRetour = ['dashboard.php', 'Retour au tableau de bord'];
 require __DIR__ . '/_admin_header.php';
 ?>
 
@@ -64,6 +79,11 @@ require __DIR__ . '/_admin_header.php';
     <h1 class="text-2xl font-black text-primary uppercase italic tracking-tight">Suggestions</h1>
     <p class="text-sm text-slate-500 mt-0.5">Boîte à suggestions anonyme du site (aucune donnée sur l'auteur n'est conservée)</p>
   </div>
+  <?php if ($installe): ?>
+  <a href="export.php?type=suggestions" class="flex items-center gap-2 bg-white border border-slate-200 text-primary text-xs font-black uppercase px-5 py-3 rounded-xl hover:bg-slate-50 transition shadow-sm">
+    <i class="fas fa-file-csv"></i> Exporter (CSV)
+  </a>
+  <?php endif; ?>
 </div>
 
 <?php if ($msg): ?>
@@ -90,7 +110,7 @@ require __DIR__ . '/_admin_header.php';
   <?php foreach ($suggestions as $sg): ?>
   <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
     <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
-      <p class="text-[11px] text-slate-400 font-bold">Suggestion #<?= (int)$sg['id'] ?> · reçue le <?= date('d/m/Y à H:i', strtotime($sg['created_at'])) ?></p>
+      <p class="text-[11px] text-slate-400 font-bold">SUG-<?= (int)$sg['id'] ?> · reçue le <?= date('d/m/Y à H:i', strtotime($sg['created_at'])) ?></p>
       <span class="text-[9px] font-black uppercase px-2.5 py-1 rounded-full <?= $couleurs[$sg['statut']] ?? '' ?>"><?= $libelles[$sg['statut']] ?? e($sg['statut']) ?></span>
     </div>
     <p class="text-sm text-slate-700 whitespace-pre-line" style="overflow-wrap:anywhere"><?= e($sg['contenu']) ?></p>
@@ -104,6 +124,10 @@ require __DIR__ . '/_admin_header.php';
       <?php foreach ($libelles as $cle => $lib): if ($cle === $sg['statut']) continue; ?>
       <button type="submit" name="statut" value="<?= $cle ?>" class="text-[11px] font-black uppercase px-3 py-1.5 rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50 transition">Marquer « <?= $lib ?> »</button>
       <?php endforeach; ?>
+      <?php if (is_superadmin() && $sg['statut'] === 'traitee'): ?>
+      <button type="submit" name="action" value="supprimer" onclick="return confirm('Supprimer définitivement cette suggestion traitée ?')"
+              class="text-[11px] font-black uppercase px-3 py-1.5 rounded-xl border border-rose-100 text-rose-500 hover:bg-rose-50 transition">Supprimer</button>
+      <?php endif; ?>
     </form>
     <?php endif; ?>
   </div>

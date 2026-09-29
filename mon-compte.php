@@ -25,6 +25,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
         $telephone  = trim($_POST['telephone'] ?? '');
         $email      = trim($_POST['email'] ?? '');
 
+        // Compte partenaire : l'identifiant de connexion (e-mail) est défini
+        // par la Direction et ne se modifie pas depuis l'espace partenaire.
+        if (is_partenaire()) {
+            $email = (string)($_SESSION['email'] ?? '');
+        }
+
         if (!$nomComplet || !$email || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
 
             $msg = ['err', 'Nom et email valide sont obligatoires.'];
@@ -69,6 +75,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
 
                 $msg = ['ok', 'Profil mis à jour avec succès.'];
             }
+        }
+    }
+}
+
+
+// ============================================================
+// CHANGEMENT DE MOT DE PASSE (clients et partenaires)
+// Mécanisme existant : password_hash() / password_verify().
+// ============================================================
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'changer_mot_de_passe') {
+    if (!csrf_check($_POST['csrf_token'] ?? '')) {
+        $msg = ['err', 'Requête invalide.'];
+    } else {
+        $actuel  = (string)($_POST['mot_de_passe_actuel'] ?? '');
+        $nouveau = (string)($_POST['nouveau_mot_de_passe'] ?? '');
+        $confirm = (string)($_POST['confirmation_mot_de_passe'] ?? '');
+        $hashActuel = $pdo->prepare("SELECT password_hash FROM users WHERE id = ?");
+        $hashActuel->execute([$user_id]);
+        $hashActuel = (string)$hashActuel->fetchColumn();
+
+        if (!password_verify($actuel, $hashActuel)) {
+            $msg = ['err', 'Le mot de passe actuel est incorrect.'];
+        } elseif (mb_strlen($nouveau) < 8) {
+            $msg = ['err', 'Le nouveau mot de passe doit contenir au moins 8 caractères.'];
+        } elseif ($nouveau !== $confirm) {
+            $msg = ['err', 'La confirmation ne correspond pas au nouveau mot de passe.'];
+        } elseif (password_verify($nouveau, $hashActuel)) {
+            $msg = ['err', 'Le nouveau mot de passe doit être différent de l\'actuel.'];
+        } else {
+            $pdo->prepare("UPDATE users SET password_hash = ? WHERE id = ?")
+                ->execute([password_hash($nouveau, PASSWORD_DEFAULT), $user_id]);
+            session_regenerate_id(true);
+            log_activity('mot_de_passe_modifie', 'users', "Compte #$user_id : mot de passe modifié par son titulaire");
+            $msg = ['ok', 'Votre mot de passe a été modifié.'];
         }
     }
 }
@@ -2919,7 +2959,11 @@ require __DIR__ . '/includes/header.php';
             name="email"
             required
             value="<?= e($me['email']) ?>"
+            <?= is_partenaire() ? 'readonly title="Identifiant de connexion défini par la Direction"' : '' ?>
             class="w-full rounded-xl border-2 border-slate-100 bg-slate-50 px-4 py-3 font-bold text-primary outline-none focus:border-primary text-sm">
+          <?php if (is_partenaire()): ?>
+          <p class="text-[10px] text-slate-400 mt-1">Identifiant de connexion : modifiable uniquement par la Direction.</p>
+          <?php endif; ?>
 
         </div>
 
@@ -2979,6 +3023,34 @@ require __DIR__ . '/includes/header.php';
 
         </div>
 
+      </form>
+
+
+      <!-- Mot de passe -->
+      <form method="POST" class="mt-8 pt-6 border-t border-slate-100" autocomplete="off">
+        <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
+        <input type="hidden" name="action" value="changer_mot_de_passe">
+        <p class="font-black text-primary uppercase italic text-sm tracking-tight flex items-center gap-2 mb-4">
+          <i class="fas fa-key text-accent"></i> Modifier mon mot de passe
+        </p>
+        <div class="grid sm:grid-cols-3 gap-4 mb-4">
+        <?php foreach ([
+            ['mot_de_passe_actuel', 'Mot de passe actuel', 'current-password'],
+            ['nouveau_mot_de_passe', 'Nouveau (8 caractères min.)', 'new-password'],
+            ['confirmation_mot_de_passe', 'Confirmation', 'new-password'],
+        ] as [$champMdp, $libMdp, $autoMdp]): ?>
+        <div>
+          <label class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2"><?= $libMdp ?></label>
+          <input type="password" name="<?= $champMdp ?>" required autocomplete="<?= $autoMdp ?>" <?= $champMdp !== 'mot_de_passe_actuel' ? 'minlength="8"' : '' ?>
+                 class="w-full rounded-xl border-2 border-slate-100 bg-slate-50 px-4 py-3 font-bold text-primary outline-none focus:border-primary text-sm">
+        </div>
+        <?php endforeach; ?>
+        </div>
+        <div>
+          <button type="submit" class="flex items-center gap-2 bg-primary text-white text-xs font-black uppercase px-6 py-3 rounded-xl hover:bg-slate-800 transition">
+            <i class="fas fa-lock"></i> Changer le mot de passe
+          </button>
+        </div>
       </form>
 
 
