@@ -5,23 +5,63 @@ require_role(['superadmin','ministre','admin_espaces','admin_activites','admin_m
 
 $pdo  = db();
 $role = $_SESSION['role'] ?? '';
+$moi  = (int)($_SESSION['user_id'] ?? 0);
 $msg  = null;
 
-// Règles de visibilité / réponse par type de cible (superadmin voit et répond toujours à tout)
-$visibiliteParType = [
-    'espace'      => ['admin_espaces','ministre'],
-    'reservation' => ['admin_espaces','ministre'],
-    'paiement'    => ['admin_comptable','ministre'],
-    'activite'    => ['admin_activites','ministre'],
+/*
+ * Règles d'accès (includes/auth.php, observations_regles()) :
+ *  - un rôle ne voit que les observations des types d'objets auxquels
+ *    il a accès (le superadmin voit tout) ;
+ *  - peuvent répondre : le rôle responsable de l'objet et l'auteur de
+ *    l'observation d'origine (fil : observation → réponse → réponse) ;
+ *  - aucune suppression : une observation fait partie de la trace.
+ */
+$regles = observations_regles();
+$typesConnus = ['reservation', 'paiement', 'activite', 'espace', 'requisition', 'remboursement'];
+$typesDispo = array_values(array_intersect($typesConnus, observations_types_disponibles($pdo)));
+$typesVisiblesPourMoi = is_superadmin()
+    ? $typesDispo
+    : array_values(array_filter($typesDispo, fn($t) => in_array($role, $regles['voir'][$t] ?? [], true)));
+
+// L'objet visé existe-t-il ?
+$cibleExiste = function (string $type, int $id) use ($pdo): bool {
+    $tables = [
+        'reservation' => 'reservations', 'paiement' => 'paiements', 'activite' => 'activites',
+        'espace' => 'espaces', 'requisition' => 'requisitions_ministerielles', 'remboursement' => 'remboursements',
+    ];
+    if (!isset($tables[$type]) || $id <= 0) {
+        return false;
+    }
+    $st = $pdo->prepare("SELECT 1 FROM {$tables[$type]} WHERE id = ?");
+    $st->execute([$id]);
+    return (bool)$st->fetchColumn();
+};
+
+$labelsCible = [
+    'reservation' => 'Réservation', 'paiement' => 'Paiement', 'activite' => 'Activité',
+    'espace' => 'Espace', 'requisition' => 'Réquisition', 'remboursement' => 'Remboursement',
 ];
-$reponseParType = [
-    'espace'      => ['admin_espaces'],
-    'reservation' => ['admin_espaces'],
-    'paiement'    => ['admin_comptable'],
-    'activite'    => ['admin_activites'],
-];
-$typesVisiblesPourMoi = is_superadmin() ? ['reservation','paiement','activite','espace']
-    : array_keys(array_filter($visibiliteParType, fn($roles) => in_array($role, $roles, true)));
+// Référence lisible d'un objet (RESA-12, REQ-3, reçu, bon…)
+$refCible = function (string $type, int $id): string {
+    return match ($type) {
+        'reservation'   => ref_resa($id),
+        'requisition'   => ref_req($id),
+        'paiement'      => 'Paiement #' . $id,
+        'remboursement' => 'Remboursement #' . $id,
+        default         => '#' . $id,
+    };
+};
+// Lien vers l'objet, uniquement vers des pages accessibles au rôle
+$lienCible = function (string $type, int $id) use ($role): ?string {
+    $compta = in_array($role, ['superadmin', 'ministre', 'admin_comptable'], true);
+    return match (true) {
+        $type === 'reservation' && $compta                          => 'paiements.php?resa=' . $id,
+        $type === 'reservation'                                     => 'reservations.php?q=RESA-' . $id,
+        $type === 'paiement' && $compta                             => 'paiements.php?id=' . $id,
+        $type === 'requisition' && $compta                          => 'requisition-detail.php?id=' . $id,
+        default                                                     => null,
+    };
+};
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!csrf_check($_POST['csrf_token'] ?? '')) {
@@ -31,50 +71,79 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $cibleType = $_POST['cible_type']?? '';
         $cibleId   = (int)($_POST['cible_id'] ?? 0);
         $contenu   = trim($_POST['contenu']   ?? '');
+        $parentId  = !empty($_POST['parent_id']) ? (int)$_POST['parent_id'] : null;
 
-        $typesValides = ['reservation','paiement','activite','espace'];
-
-        if ($action === 'ajouter' && in_array($cibleType, $typesValides) && $cibleId && mb_strlen($contenu) >= 5) {
-            $parentId = !empty($_POST['parent_id']) ? (int)$_POST['parent_id'] : null;
-
-            $autorise = is_superadmin()
-                || (!$parentId && in_array($cibleType, $typesVisiblesPourMoi, true))
-                || ($parentId && in_array($role, $reponseParType[$cibleType] ?? [], true));
-
-            if (!$autorise) {
-                $msg = ['err', "Vous n'êtes pas autorisé à agir sur ce type d'observation."];
-                goto finAjouter;
-            }
-
-            $pdo->prepare("INSERT INTO observations (auteur_id, cible_type, cible_id, contenu, parent_id) VALUES (?,?,?,?,?)")
-                ->execute([$_SESSION['user_id'], $cibleType, $cibleId, $contenu, $parentId]);
-            $auteurNom = $_SESSION['nom_complet'] ?? 'Administrateur';
-            if ($parentId) {
-                $parentAuteur = $pdo->prepare("SELECT auteur_id FROM observations WHERE id = ?");
-                $parentAuteur->execute([$parentId]);
-                $parentAuteurId = $parentAuteur->fetchColumn();
-                if ($parentAuteurId && $parentAuteurId != $_SESSION['user_id']) {
-                    notify('', 'reponse_observation', "«$auteurNom» a répondu à votre observation sur " . ucfirst($cibleType) . " #$cibleId", "observations.php", (int)$parentAuteurId);
+        if ($action === 'ajouter') {
+            try {
+                if (mb_strlen($contenu) < 5 || mb_strlen($contenu) > 5000) {
+                    throw new RuntimeException('L\'observation doit contenir entre 5 et 5000 caractères.');
                 }
-                log_activity('observation_repondue', 'messages', "Réponse à l'observation #$parentId");
-            } else {
-                notify('superadmin', 'nouvelle_observation', "Nouvelle observation de «$auteurNom» sur " . ucfirst($cibleType) . " #$cibleId", "observations.php");
-                log_activity('observation_ajoutee', 'messages', "Observation sur $cibleType #$cibleId");
-            }
-            $msg = ['ok', $parentId ? 'Réponse envoyée.' : 'Observation enregistrée.'];
-        }
-        finAjouter:
 
-        if ($action === 'supprimer' && is_superadmin()) {
-            $id = (int)($_POST['obs_id'] ?? 0);
-            $pdo->prepare("DELETE FROM observations WHERE id = ?")->execute([$id]);
-            $msg = ['ok', 'Observation supprimée.'];
+                if ($parentId) {
+                    // Réponse : l'objet est celui du fil d'origine (jamais celui envoyé par le navigateur)
+                    $st = $pdo->prepare("SELECT id, auteur_id, cible_type, cible_id FROM observations WHERE id = ? AND parent_id IS NULL");
+                    $st->execute([$parentId]);
+                    $parent = $st->fetch();
+                    if (!$parent) {
+                        throw new RuntimeException('Observation introuvable.');
+                    }
+                    $cibleType = $parent['cible_type'];
+                    $cibleId = (int)$parent['cible_id'];
+                    $autorise = is_superadmin()
+                        || (in_array($cibleType, $typesVisiblesPourMoi, true)
+                            && (in_array($role, $regles['repondre'][$cibleType] ?? [], true) || (int)$parent['auteur_id'] === $moi));
+                } else {
+                    $autorise = in_array($cibleType, $typesVisiblesPourMoi, true);
+                }
+
+                if (!$autorise) {
+                    throw new RuntimeException("Vous n'êtes pas autorisé à agir sur ce type d'observation.");
+                }
+                if (!$cibleExiste($cibleType, $cibleId)) {
+                    throw new RuntimeException('L\'élément concerné est introuvable.');
+                }
+
+                $pdo->prepare("INSERT INTO observations (auteur_id, cible_type, cible_id, contenu, parent_id) VALUES (?,?,?,?,?)")
+                    ->execute([$moi, $cibleType, $cibleId, $contenu, $parentId]);
+
+                $auteurNom = $_SESSION['nom_complet'] ?? 'Administrateur';
+                $objet = ($labelsCible[$cibleType] ?? $cibleType) . ' ' . $refCible($cibleType, $cibleId);
+                $lienObs = 'observations.php?cible_type=' . $cibleType . '&cible_id=' . $cibleId;
+
+                if ($parentId) {
+                    if ((int)$parent['auteur_id'] !== $moi) {
+                        notify('', 'reponse_observation', "«{$auteurNom}» a répondu à votre observation sur $objet", $lienObs, (int)$parent['auteur_id']);
+                    } else {
+                        // L'auteur relance le fil : les rôles responsables sont prévenus
+                        foreach ($regles['repondre'][$cibleType] ?? [] as $r) {
+                            notify($r, 'reponse_observation', "«{$auteurNom}» a complété son observation sur $objet", $lienObs);
+                        }
+                    }
+                    log_activity('observation_repondue', 'messages', "Réponse à l'observation #$parentId ($objet)");
+                } else {
+                    notify('superadmin', 'nouvelle_observation', "Nouvelle observation de «{$auteurNom}» sur $objet", $lienObs);
+                    foreach ($regles['repondre'][$cibleType] ?? [] as $r) {
+                        if ($r !== $role) {
+                            notify($r, 'nouvelle_observation', "Nouvelle observation de «{$auteurNom}» sur $objet", $lienObs);
+                        }
+                    }
+                    log_activity('observation_ajoutee', 'messages', "Observation sur $objet");
+                }
+                $msg = ['ok', $parentId ? 'Réponse envoyée.' : 'Observation enregistrée.'];
+            } catch (RuntimeException $e) {
+                $msg = ['err', $e->getMessage()];
+            }
         }
+        // Aucune action de suppression : les observations sont conservées (traçabilité).
     }
 }
 
 $filterType = $_GET['type'] ?? '';
 $search     = trim($_GET['q'] ?? '');
+
+// Lien « Observer » depuis une fiche : filtre sur l'objet et pré-remplit le formulaire
+$preCibleType = in_array($_GET['cible_type'] ?? '', $typesVisiblesPourMoi, true) ? $_GET['cible_type'] : '';
+$preCibleId   = $preCibleType ? (int)($_GET['cible_id'] ?? 0) : 0;
 
 $where  = [];
 $params = [];
@@ -89,6 +158,11 @@ if (!$typesVisiblesPourMoi) {
 if ($filterType && in_array($filterType, $typesVisiblesPourMoi, true)) {
     $where[]  = 'o.cible_type = ?';
     $params[] = $filterType;
+}
+if ($preCibleType && $preCibleId) {
+    $where[]  = 'o.cible_type = ? AND o.cible_id = ?';
+    $params[] = $preCibleType;
+    $params[] = $preCibleId;
 }
 if ($search) {
     $where[]  = '(o.contenu LIKE ? OR u.nom_complet LIKE ?)';
@@ -117,42 +191,67 @@ if ($observations) {
         FROM observations o
         JOIN users u ON u.id = o.auteur_id
         WHERE o.parent_id IN ($in)
-        ORDER BY o.created_at ASC
+        ORDER BY o.created_at ASC, o.id ASC
     ");
     $rq->execute($ids);
     foreach ($rq->fetchAll() as $rep) { $reponsesParParent[$rep['parent_id']][] = $rep; }
 }
 
-$espaces      = $pdo->query("SELECT id, nom FROM espaces ORDER BY nom")->fetchAll();
-$activites    = $pdo->query("SELECT id, nom FROM activites ORDER BY nom")->fetchAll();
-$reservations = $pdo->query("
-    SELECT r.id, u.nom_complet, e.nom AS espace_nom, r.date_resa
-    FROM reservations r
-    JOIN users u   ON u.id = r.user_id
-    JOIN espaces e ON e.id = r.espace_id
-    ORDER BY r.created_at DESC LIMIT 20
-")->fetchAll();
-
-// Pré-remplissage venant d'un lien externe (dashboard, fiche réservation) —
-// si la cible demandée n'est pas dans les 20 plus récentes, on l'ajoute à part.
-$preCibleType = in_array($_GET['cible_type'] ?? '', ['reservation','paiement','activite','espace'], true) ? $_GET['cible_type'] : '';
-$preCibleId   = (int)($_GET['cible_id'] ?? 0);
-if ($preCibleType && $preCibleId && in_array($preCibleType, ['reservation','paiement'], true)
-    && !in_array($preCibleId, array_column($reservations, 'id'))) {
-    $s = $pdo->prepare("
-        SELECT r.id, u.nom_complet, e.nom AS espace_nom, r.date_resa
-        FROM reservations r JOIN users u ON u.id = r.user_id JOIN espaces e ON e.id = r.espace_id
-        WHERE r.id = ?
-    ");
-    $s->execute([$preCibleId]);
-    if ($extra = $s->fetch()) array_unshift($reservations, $extra);
+// Listes de choix du formulaire (uniquement pour les types visibles)
+$optionsCible = [];
+if (in_array('espace', $typesVisiblesPourMoi, true)) {
+    $optionsCible['espace'] = array_map(fn($x) => ['id' => (int)$x['id'], 'nom' => $x['nom']],
+        $pdo->query("SELECT id, nom FROM espaces ORDER BY nom")->fetchAll());
+}
+if (in_array('activite', $typesVisiblesPourMoi, true)) {
+    $optionsCible['activite'] = array_map(fn($x) => ['id' => (int)$x['id'], 'nom' => $x['nom']],
+        $pdo->query("SELECT id, nom FROM activites ORDER BY nom")->fetchAll());
+}
+if (in_array('reservation', $typesVisiblesPourMoi, true)) {
+    $optionsCible['reservation'] = array_map(fn($x) => ['id' => (int)$x['id'], 'nom' => ref_resa((int)$x['id']) . " — {$x['nom_complet']} · {$x['espace_nom']} (" . date('d/m/Y', strtotime($x['date_resa'])) . ')'],
+        $pdo->query("
+            SELECT r.id, u.nom_complet, e.nom AS espace_nom, r.date_resa
+            FROM reservations r JOIN users u ON u.id = r.user_id JOIN espaces e ON e.id = r.espace_id
+            ORDER BY r.created_at DESC LIMIT 30
+        ")->fetchAll());
+}
+if (in_array('paiement', $typesVisiblesPourMoi, true)) {
+    $optionsCible['paiement'] = array_map(fn($x) => ['id' => (int)$x['id'], 'nom' => ref_recu((int)$x['id'], $x['created_at']) . ' — ' . ref_resa((int)$x['reservation_id']) . " · {$x['nom_complet']} · " . number_format((float)$x['montant'], 0, ',', ' ') . ' FCFA'],
+        $pdo->query("
+            SELECT p.id, p.created_at, p.reservation_id, p.montant, u.nom_complet
+            FROM paiements p JOIN reservations r ON r.id = p.reservation_id JOIN users u ON u.id = r.user_id
+            ORDER BY p.created_at DESC LIMIT 30
+        ")->fetchAll());
+}
+if (in_array('requisition', $typesVisiblesPourMoi, true)) {
+    $optionsCible['requisition'] = array_map(fn($x) => ['id' => (int)$x['id'], 'nom' => ref_req((int)$x['id']) . ' — ' . ref_resa((int)$x['reservation_id']) . " · {$x['nom_complet']}"],
+        $pdo->query("
+            SELECT rm.id, rm.reservation_id, u.nom_complet
+            FROM requisitions_ministerielles rm JOIN reservations r ON r.id = rm.reservation_id JOIN users u ON u.id = r.user_id
+            ORDER BY rm.id DESC LIMIT 30
+        ")->fetchAll());
+}
+if (in_array('remboursement', $typesVisiblesPourMoi, true)) {
+    $optionsCible['remboursement'] = array_map(fn($x) => ['id' => (int)$x['id'], 'nom' => 'Remboursement #' . $x['id'] . ' — ' . ref_req((int)$x['requisition_id']) . " · {$x['nom_complet']} · " . number_format((float)$x['montant_a_rembourser'], 0, ',', ' ') . ' FCFA'],
+        $pdo->query("
+            SELECT rb.id, rb.requisition_id, rb.montant_a_rembourser, u.nom_complet
+            FROM remboursements rb JOIN users u ON u.id = rb.client_id
+            ORDER BY rb.id DESC LIMIT 30
+        ")->fetchAll());
+}
+// Objet demandé par un lien, absent des listes récentes : ajouté en tête
+if ($preCibleType && $preCibleId && !in_array($preCibleId, array_column($optionsCible[$preCibleType] ?? [], 'id'), true)
+    && $cibleExiste($preCibleType, $preCibleId)) {
+    array_unshift($optionsCible[$preCibleType], ['id' => $preCibleId, 'nom' => $refCible($preCibleType, $preCibleId)]);
 }
 
 $typeIcons = [
-    'reservation' => ['fa-calendar-check', 'bg-amber-50 text-amber-600',   'Réservation'],
-    'paiement'    => ['fa-cash-register',  'bg-green-50 text-green-600',   'Paiement'],
-    'activite'    => ['fa-star',           'bg-purple-50 text-purple-600', 'Activité'],
-    'espace'      => ['fa-building',       'bg-blue-50 text-blue-600',     'Espace'],
+    'reservation'   => ['fa-calendar-check',  'bg-amber-50 text-amber-600',   'Réservation'],
+    'paiement'      => ['fa-cash-register',   'bg-green-50 text-green-600',   'Paiement'],
+    'activite'      => ['fa-star',            'bg-purple-50 text-purple-600', 'Activité'],
+    'espace'        => ['fa-building',        'bg-blue-50 text-blue-600',     'Espace'],
+    'requisition'   => ['fa-landmark',        'bg-amber-50 text-amber-600',   'Réquisition'],
+    'remboursement' => ['fa-rotate-left',     'bg-orange-50 text-orange-700', 'Remboursement'],
 ];
 
 $pageTitle = "Observations & Notes";
@@ -199,7 +298,6 @@ require __DIR__ . '/_admin_header.php';
           <select name="cible_type" required onchange="onCibleTypeChange(this.value)"
                   class="w-full rounded-xl border-2 border-slate-100 bg-slate-50 px-4 py-3 font-bold text-primary outline-none focus:border-primary text-sm appearance-none">
             <option value="">— Choisir —</option>
-            <?php $labelsCible = ['reservation'=>'Réservation','paiement'=>'Paiement','activite'=>'Activité','espace'=>'Espace']; ?>
             <?php foreach ($typesVisiblesPourMoi as $tv): ?>
             <option value="<?= $tv ?>"><?= $labelsCible[$tv] ?></option>
             <?php endforeach; ?>
@@ -254,7 +352,7 @@ require __DIR__ . '/_admin_header.php';
       <div class="relative">
         <select name="type" class="rounded-xl border border-slate-200 text-sm font-bold text-primary px-3 py-2.5 outline-none appearance-none pr-8">
           <option value="">Tous</option>
-          <?php foreach ($typeIcons as $k => [$i,$c,$l]): ?>
+          <?php foreach ($typesVisiblesPourMoi as $k): [$i,$c,$l] = $typeIcons[$k]; ?>
             <option value="<?= $k ?>" <?= $filterType===$k?'selected':''?>><?= $l ?></option>
           <?php endforeach; ?>
         </select>
@@ -264,7 +362,7 @@ require __DIR__ . '/_admin_header.php';
     <button class="bg-primary text-white text-xs font-black uppercase px-4 py-2.5 rounded-xl hover:bg-slate-800 transition">
       <i class="fas fa-filter mr-1"></i> Filtrer
     </button>
-    <?php if ($search || $filterType): ?>
+    <?php if ($search || $filterType || $preCibleId): ?>
     <a href="observations.php" class="text-xs font-black text-slate-400 hover:text-primary px-3 py-2.5 rounded-xl border border-slate-200 transition">
       <i class="fas fa-times mr-1"></i> Reset
     </a>
@@ -291,18 +389,15 @@ require __DIR__ . '/_admin_header.php';
       <div class="flex-1 min-w-0">
         <div class="flex items-center justify-between flex-wrap gap-2 mb-3">
           <div class="flex items-center gap-2 flex-wrap">
-            <span class="text-[10px] font-black px-2.5 py-1 rounded-full <?= $ocls ?>"><?= $olabel ?> #<?= $obs['cible_id'] ?></span>
+            <?php $lienObj = $lienCible($obs['cible_type'], (int)$obs['cible_id']); ?>
+            <?php if ($lienObj): ?>
+            <a href="<?= e($lienObj) ?>" class="text-[10px] font-black px-2.5 py-1 rounded-full <?= $ocls ?> hover:underline"><?= $olabel ?> · <?= e($refCible($obs['cible_type'], (int)$obs['cible_id'])) ?></a>
+            <?php else: ?>
+            <span class="text-[10px] font-black px-2.5 py-1 rounded-full <?= $ocls ?>"><?= $olabel ?> · <?= e($refCible($obs['cible_type'], (int)$obs['cible_id'])) ?></span>
+            <?php endif; ?>
             <span class="text-xs font-black text-primary"><?= e($obs['auteur_nom']) ?></span>
             <span class="text-[9px] text-slate-400"><?= date('d/m/Y à H:i', strtotime($obs['created_at'])) ?></span>
           </div>
-          <?php if (is_superadmin()): ?>
-          <form method="POST" class="inline" onsubmit="return confirm('Supprimer cette observation ?')">
-            <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
-            <input type="hidden" name="action"  value="supprimer">
-            <input type="hidden" name="obs_id"  value="<?= $obs['id'] ?>">
-            <button class="text-xs text-slate-300 hover:text-accent transition"><i class="fas fa-trash"></i></button>
-          </form>
-          <?php endif; ?>
         </div>
         <div class="bg-slate-50 rounded-xl p-4 border border-slate-100">
           <p class="text-sm text-slate-700 leading-relaxed font-semibold whitespace-pre-line"><?= e($obs['contenu']) ?></p>
@@ -322,7 +417,7 @@ require __DIR__ . '/_admin_header.php';
         </div>
         <?php endif; ?>
 
-        <?php $peutRepondre = is_superadmin() || in_array($role, $reponseParType[$obs['cible_type']] ?? [], true); ?>
+        <?php $peutRepondre = is_superadmin() || in_array($role, $regles['repondre'][$obs['cible_type']] ?? [], true) || (int)$obs['auteur_id'] === $moi; ?>
         <?php if ($peutRepondre): ?>
         <button onclick="document.getElementById('replyForm<?= $obs['id'] ?>').classList.toggle('hidden')"
                 class="mt-3 text-[11px] font-black text-accent uppercase tracking-widest hover:underline">
@@ -331,8 +426,6 @@ require __DIR__ . '/_admin_header.php';
         <form method="POST" id="replyForm<?= $obs['id'] ?>" class="hidden mt-3 flex gap-2">
           <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
           <input type="hidden" name="action" value="ajouter">
-          <input type="hidden" name="cible_type" value="<?= e($obs['cible_type']) ?>">
-          <input type="hidden" name="cible_id" value="<?= $obs['cible_id'] ?>">
           <input type="hidden" name="parent_id" value="<?= $obs['id'] ?>">
           <input type="text" name="contenu" required minlength="5" placeholder="Votre réponse..."
                  onkeydown="if(event.key==='Enter'){event.preventDefault();}"
@@ -348,15 +441,12 @@ require __DIR__ . '/_admin_header.php';
 </div>
 
 <script>
-const espaces      = <?= json_encode(array_map(fn($e) => ['id'=>$e['id'],'nom'=>$e['nom']], $espaces)) ?>;
-const activites    = <?= json_encode(array_map(fn($a) => ['id'=>$a['id'],'nom'=>$a['nom']], $activites)) ?>;
-const reservations = <?= json_encode(array_map(fn($r) => ['id'=>$r['id'],'nom'=>"#{$r['id']} — {$r['nom_complet']} · {$r['espace_nom']} ({$r['date_resa']})"], $reservations)) ?>;
+const optionsCible = <?= json_encode($optionsCible, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP) ?>;
 
 function onCibleTypeChange(type) {
     const sel  = document.getElementById('cibleSelect');
     sel.innerHTML = '<option value="">— Sélectionner —</option>';
-    const data = type === 'espace' ? espaces : type === 'activite' ? activites : (type === 'reservation' || type === 'paiement') ? reservations : [];
-    data.forEach(item => {
+    (optionsCible[type] || []).forEach(item => {
         const opt = document.createElement('option');
         opt.value = item.id;
         opt.textContent = item.nom;

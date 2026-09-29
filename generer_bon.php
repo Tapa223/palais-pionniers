@@ -194,14 +194,49 @@ if ($type === 'remboursement') {
 
     /*
      * Sécurité :
-     * un client ne peut voir que son propre remboursement.
+     * un client ne peut voir que son propre remboursement ; côté
+     * administration, seuls les rôles ayant accès à la comptabilité.
      */
+    $estAdminAutorise = in_array(
+        $role,
+        ['superadmin', 'admin_dg', 'ministre', 'admin_comptable'],
+        true
+    );
+
     if (
         !$estAdminAutorise &&
         (int) $remboursement['client_id'] !== (int) ($_SESSION['user_id'] ?? 0)
     ) {
         exit('Accès refusé.');
     }
+
+    /*
+     * Références du dossier : réservation initiale (A), réquisition (X)
+     * et, pour un trop-perçu, la nouvelle réservation (B) qui a reçu
+     * les paiements transférés.
+     */
+    $estTropPercuBon = in_array($remboursement['choix_client'] ?? '', ['nouvelle_date', 'autre_espace'], true);
+    $nouvelleBon = null;
+    $situationNouvelleBon = null;
+    if ($estTropPercuBon && !empty($remboursement['requisition_id'])) {
+        $stmtNb = $pdo->prepare("
+            SELECT n.id, n.date_resa, n.date_depart, en.nom AS espace_nom
+            FROM reservations n
+            LEFT JOIN espaces en ON en.id = n.espace_id
+            WHERE n.requisition_id = ?
+              AND n.statut IN ('validee', 'requisitionnee')
+            ORDER BY n.id DESC
+            LIMIT 1
+        ");
+        $stmtNb->execute([(int) $remboursement['requisition_id']]);
+        $nouvelleBon = $stmtNb->fetch() ?: null;
+        if ($nouvelleBon) {
+            $situationNouvelleBon = situation_financiere_reservation($pdo, (int) $nouvelleBon['id']);
+        }
+    }
+    $refResaInitiale = ref_resa((int) $remboursement['reservation_id']);
+    $refReqBon = ref_req(!empty($remboursement['requisition_id']) ? (int) $remboursement['requisition_id'] : null);
+    $refNouvelleBon = $nouvelleBon ? ref_resa((int) $nouvelleBon['id']) : '';
 
     /*
      * Numéro du bon.
@@ -251,17 +286,30 @@ if ($type === 'remboursement') {
         ? $remboursement['reference']
         : 'Non renseignée';
 
-    $objetRemboursement = 'Remboursement relatif à la réservation';
+    if ($estTropPercuBon && $nouvelleBon) {
+        // Trop-perçu : l'argent a été transféré sur la nouvelle réservation B
+        $objetRemboursement = 'Remboursement du trop-perçu de la nouvelle réservation ' . $refNouvelleBon
+            . (!empty($nouvelleBon['espace_nom']) ? ' (' . $nouvelleBon['espace_nom'] . ' du ' . date('d/m/Y', strtotime($nouvelleBon['date_resa'])) . ')' : '')
+            . ', établie suite à la réquisition ' . $refReqBon
+            . ' de la réservation initiale ' . $refResaInitiale
+            . ' : le montant déjà encaissé dépasse le montant dû pour la nouvelle réservation';
+    } else {
+        $objetRemboursement = 'Remboursement relatif à la réservation ' . $refResaInitiale;
 
-    if (!empty($remboursement['espace_nom'])) {
-        $objetRemboursement .= ' de ' . $remboursement['espace_nom'];
-    }
+        if (!empty($remboursement['espace_nom'])) {
+            $objetRemboursement .= ' de ' . $remboursement['espace_nom'];
+        }
 
-    if (!empty($remboursement['date_resa'])) {
-        $objetRemboursement .= ' du ' . date(
-            'd/m/Y',
-            strtotime($remboursement['date_resa'])
-        );
+        if (!empty($remboursement['date_resa'])) {
+            $objetRemboursement .= ' du ' . date(
+                'd/m/Y',
+                strtotime($remboursement['date_resa'])
+            );
+        }
+
+        if ($refReqBon !== '') {
+            $objetRemboursement .= ', suite à la réquisition ' . $refReqBon;
+        }
     }
 
     $retourHref = 'mon-compte.php';
@@ -538,7 +586,9 @@ if ($type === 'remboursement') {
                     <tr>
 
                         <td class="py-3 px-3 border border-slate-800">
-                            Montant initialement payé
+                            <?= $estTropPercuBon && $nouvelleBon
+                                ? 'Montant encaissé (paiements transférés sur ' . e($refNouvelleBon) . ')'
+                                : 'Montant initialement payé' ?>
                         </td>
 
                         <td class="py-3 px-3 text-right font-bold border border-slate-800">
@@ -547,6 +597,23 @@ if ($type === 'remboursement') {
                         </td>
 
                     </tr>
+
+                    <?php if ($estTropPercuBon && $situationNouvelleBon): ?>
+
+                    <tr>
+
+                        <td class="py-3 px-3 border border-slate-800">
+                            Montant dû pour la nouvelle réservation <?= e($refNouvelleBon) ?>
+                        </td>
+
+                        <td class="py-3 px-3 text-right font-bold border border-slate-800">
+                            <?= number_format((float) $situationNouvelleBon['net_du'], 0, ',', ' ') ?>
+                            F CFA
+                        </td>
+
+                    </tr>
+
+                    <?php endif; ?>
 
                     <tr>
 
@@ -590,9 +657,25 @@ if ($type === 'remboursement') {
 
                 <p class="mb-2">
                     <span class="font-black">
-                        Référence :
+                        Référence de la transaction :
                     </span>
                     <?= e($referenceRemboursement) ?>
+                </p>
+
+                <p class="mb-2">
+                    <span class="font-black">
+                        Dossier :
+                    </span>
+                    <?php if ($refNouvelleBon !== ''): ?>
+                        Réservation concernée #<?= e($refNouvelleBon) ?>
+                        · Réquisition #<?= e($refReqBon) ?>
+                        · Réservation initiale #<?= e($refResaInitiale) ?>
+                    <?php else: ?>
+                        Réservation #<?= e($refResaInitiale) ?>
+                        <?php if ($refReqBon !== ''): ?>
+                            · Réquisition #<?= e($refReqBon) ?>
+                        <?php endif; ?>
+                    <?php endif; ?>
                 </p>
 
                 <p class="mb-2">
@@ -676,9 +759,13 @@ if ($type === 'remboursement') {
 
                 <?php if (!empty($remboursement['requisition_id'])): ?>
 
-                    Réservation n°<?= (int) $remboursement['reservation_id'] ?>
+                    <?php if ($refNouvelleBon !== ''): ?>
+                        <?= e($refNouvelleBon) ?> ·
+                    <?php endif; ?>
 
-                    · Réquisition n°<?= (int) $remboursement['requisition_id'] ?>
+                    <?= e($refReqBon) ?>
+
+                    · Réservation initiale <?= e($refResaInitiale) ?>
 
                     <?php if (!empty($remboursement['operation_id'])): ?>
 
@@ -842,6 +929,11 @@ $forceBon = isset($_GET['type']) && $_GET['type'] === 'bon';
  * « non appliquée » ou « annulée » n'apparaît jamais sur les documents.
  */
 $sf = situation_financiere_reservation($pdo, $id);
+
+// Références du dossier : RESA-B, et pour une réservation issue d'une
+// réquisition, REQ-X et la réservation initiale RESA-A.
+$refsBon = references_dossier($pdo, $id);
+$refsBonRequisition = $refsBon['origine_id'] !== null;
 
 $estPaye = (
     $sf['statut_paiement_calcule'] === 'paye'
@@ -1283,6 +1375,14 @@ $qteLigne = $estSejour
 
 </p>
 
+<p class="text-xs mb-6 font-mono font-bold text-slate-700">
+    Dossier : #<?= e($refsBon['resa']) ?>
+    <?php if ($refsBonRequisition): ?>
+        · Réquisition : #<?= e($refsBon['req']) ?>
+        · Réservation initiale : #<?= e($refsBon['origine']) ?>
+    <?php endif; ?>
+</p>
+
 <table class="w-full text-left text-sm border-collapse border border-slate-800 mb-4">
 
     <thead>
@@ -1536,6 +1636,15 @@ $qteLigne = $estSejour
         <p class="text-sm mt-2 text-slate-900 font-mono font-bold italic">
             ID: #RESA-<?= (int) $bon['id'] ?>
         </p>
+
+        <?php if ($refsBonRequisition): ?>
+            <p class="text-xs text-slate-700 font-mono font-bold">
+                Réquisition : #<?= e($refsBon['req']) ?>
+            </p>
+            <p class="text-xs text-slate-700 font-mono font-bold">
+                Réservation initiale : #<?= e($refsBon['origine']) ?>
+            </p>
+        <?php endif; ?>
 
         <?php if (!empty($sf['echeance_premier_paiement'])): ?>
 

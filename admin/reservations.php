@@ -113,10 +113,19 @@ if (!$readonly && isset($_POST['action'])) {
                     "requisition-detail.php?id=$reqIdVal"
                 );
             } else {
-                $suiteClient = " Merci de régler au guichet avant le " . date('d/m/Y à H:i', limite_paiement(date('Y-m-d H:i:s'))) . " — en cas de créneau partagé avec une autre demande, la salle revient au premier qui règle le paiement.";
+                // Réservation initiale non payée : aucun transfert, aucun
+                // remboursement ; paiement attendu dans le délai habituel de 48 h.
+                $sfB = situation_financiere_reservation($pdo, $id);
+                $montantAPayer = $sfB ? $sfB['solde'] : 0.0;
+                $mentionTarif = ($sfB && $sfB['prise_en_charge_requisition'])
+                    ? " (tarif de votre réservation initiale maintenu)"
+                    : '';
+                $suiteClient = " Montant à régler : {$fmt($montantAPayer)} FCFA$mentionTarif, au guichet avant le "
+                    . date('d/m/Y à H:i', limite_paiement(date('Y-m-d H:i:s')))
+                    . " (48 h) — en cas de créneau partagé avec une autre demande, la salle revient au premier qui règle le paiement.";
                 notify('admin_comptable', 'reservation_validee',
-                    "Réservation validée pour «{$resa['espace_nom']}» le $dateTxt — {$resa['nom_complet']} (réquisition #$reqIdVal) : paiement à encaisser",
-                    "paiements.php"
+                    "Réservation " . ref_resa($id) . " validée pour «{$resa['espace_nom']}» le $dateTxt — {$resa['nom_complet']} (" . ref_req($reqIdVal) . ", réservation initiale non payée) : {$fmt($montantAPayer)} FCFA à encaisser sous 48 h",
+                    "paiements.php?resa=$id"
                 );
             }
 
@@ -130,7 +139,9 @@ if (!$readonly && isset($_POST['action'])) {
             );
 
             $msg = ['ok', 'Réservation confirmée (réquisition #' . $reqIdVal . ').'
-                . ($transfert['transfere'] > 0 ? ' ' . $fmt($transfert['transfere']) . ' FCFA déjà encaissés y ont été rattachés.' : ' Le comptable a été notifié pour l\'encaissement.')
+                . ($transfert['transfere'] > 0
+                    ? ' ' . $fmt($transfert['transfere']) . ' FCFA déjà encaissés y ont été rattachés.'
+                    : ' Aucun paiement sur la réservation initiale : ' . $fmt($montantAPayer) . ' FCFA à régler sous 48 h. Le comptable a été notifié pour l\'encaissement.')
                 . ($annulees ? ' ' . count($annulees) . ' demande(s) concurrente(s) annulée(s).' : '')];
             goto finValider;
         }
@@ -305,6 +316,8 @@ $stmtResa = $pdo->prepare("
 ");
 $stmtResa->execute($paramsResa);
 $reservations = $stmtResa->fetchAll();
+// Références de dossier (RESA-B · REQ-X · issue de RESA-A) en une requête
+$refsListe = references_dossiers($pdo, array_column($reservations, 'id'));
 
 $espacesFiltre = $pdo->query("SELECT id, nom FROM espaces ORDER BY nom")->fetchAll();
 
@@ -389,10 +402,12 @@ require __DIR__ . '/_admin_header.php';
 
                     <td class="p-6">
                         <div class="font-black text-primary uppercase text-sm"><?= htmlspecialchars($res['espace_nom']) ?></div>
+                        <?php $refsRes = $refsListe[(int)$res['id']] ?? references_dossier($pdo, (int)$res['id']); ?>
+                        <div class="mt-1 text-[10px] font-mono font-black text-slate-400">
+                            <?php if ($refsRes['req'] !== ''): ?><i class="fas fa-landmark text-amber-600 mr-1"></i><?php endif; ?>
+                            <?= e(libelle_references_dossier($refsRes)) ?>
+                        </div>
                         <?php if (!empty($res['requisition_id'])): ?>
-                            <div class="mt-1 text-[9px] font-black uppercase tracking-widest text-amber-600">
-                                <i class="fas fa-landmark mr-1"></i>Suite à la réquisition #<?= (int)$res['requisition_id'] ?>
-                            </div>
                             <?php
                             // Tarif garanti : ce que le client paiera réellement si cette demande est acceptée
                             $maintienTarif = $res['statut'] === 'en_attente' ? estimation_maintien_tarif($pdo, (int)$res['id']) : null;

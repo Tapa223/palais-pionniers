@@ -400,8 +400,13 @@ require __DIR__ . '/_admin_header.php';
                   <?php endif; ?>
                 </p>
               </div>
-              <span class="text-[9px] font-black px-2 py-0.5 rounded-full flex-shrink-0 <?= $r['statut_paiement']==='paye' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700' ?>">
-                <?= $r['statut_paiement']==='paye' ? 'Payée' : 'En attente' ?>
+              <?php
+                // État financier calculé (même libellé que la comptabilité)
+                $sfG = situation_financiere_reservation($pdo, (int)$r['id']);
+                [$etatG, $clsG] = libelle_etat_financier($sfG['etat'] ?? '');
+              ?>
+              <span class="text-[9px] font-black px-2 py-0.5 rounded-full border flex-shrink-0 <?= $clsG ?>">
+                <?= e($etatG) ?>
               </span>
               <a href="../generer_bon.php?id=<?= $r['id'] ?>&from=guichet" target="_blank" title="Voir la facture"
                  class="w-7 h-7 flex-shrink-0 flex items-center justify-center rounded-lg bg-slate-100 text-slate-500 hover:bg-primary hover:text-white transition">

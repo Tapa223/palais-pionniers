@@ -2223,16 +2223,13 @@ if (!function_exists('requisition_suivi_nouvelle_reservation')) {
             }
         }
 
-        $stmt = $pdo->prepare("
-            SELECT montant_concerne
-            FROM operations_requisition
-            WHERE requisition_id = ?
-            ORDER BY id DESC
-            LIMIT 1
-        ");
-        $stmt->execute([$requisitionId]);
-        // Trop-perçu constaté lors du transfert (historique, pour affichage)
-        $tropPercuConstate = $validee ? (float)$stmt->fetchColumn() : 0.0;
+        /*
+         * Un trop-perçu n'existe que sur une base financière réelle :
+         * paiements effectivement rattachés à la nouvelle réservation et
+         * remboursements effectivement effectués. La valeur historique
+         * operations_requisition.montant_concerne n'est jamais utilisée
+         * seule pour afficher ou autoriser un remboursement.
+         */
 
         // Trop-perçu restant : calculé par la situation financière centrale
         // (paiements − remboursements effectués − montant net dû)
@@ -2242,23 +2239,416 @@ if (!function_exists('requisition_suivi_nouvelle_reservation')) {
         $tropPercu = $situationValidee ? $situationValidee['trop_percu'] : 0.0;
 
         $stmt = $pdo->prepare("
-            SELECT COUNT(*)
+            SELECT COUNT(*), COALESCE(SUM(COALESCE(montant_rembourse, montant_a_rembourser)), 0)
             FROM remboursements
             WHERE requisition_id = ?
               AND resultat = 'effectue'
         ");
         $stmt->execute([$requisitionId]);
-        $rembourse = (int)$stmt->fetchColumn() > 0;
+        [$nbRembourses, $montantRembourse] = $stmt->fetch(PDO::FETCH_NUM);
+        $rembourse = (int)$nbRembourses > 0;
+        $montantRembourse = round((float)$montantRembourse, 2);
+
+        // Trop-perçu constaté = restant + déjà remboursé, uniquement si la
+        // nouvelle réservation a réellement reçu des paiements.
+        $aDesPaiements = $situationValidee && $situationValidee['total_paye'] > 0;
+        $tropPercuConstate = $aDesPaiements ? round($tropPercu + $montantRembourse, 2) : 0.0;
 
         return [
             'liste'      => $liste,
             'validee'    => $validee,
             'trop_percu' => $tropPercu,
-            'trop_percu_constate' => max($tropPercuConstate, $tropPercu),
+            'trop_percu_constate' => $tropPercuConstate,
+            'montant_rembourse' => $montantRembourse,
             'situation'  => $situationValidee,
             'rembourse'  => $rembourse,
-            'a_rembourser' => $validee !== null && $tropPercu > 0 && !$rembourse,
+            'a_rembourser' => $validee !== null && $aDesPaiements && $tropPercu > 0 && !$rembourse,
         ];
+    }
+}
+
+if (!function_exists('ref_resa')) {
+    /** Référence de dossier d'une réservation : RESA-152. */
+    function ref_resa(?int $reservationId): string
+    {
+        return $reservationId ? 'RESA-' . $reservationId : '';
+    }
+}
+
+if (!function_exists('ref_req')) {
+    /** Référence d'une réquisition : REQ-27. */
+    function ref_req(?int $requisitionId): string
+    {
+        return $requisitionId ? 'REQ-' . $requisitionId : '';
+    }
+}
+
+if (!function_exists('observations_types_disponibles')) {
+    /**
+     * Types d'objets pouvant recevoir une observation, d'après la
+     * colonne observations.cible_type (les types « requisition » et
+     * « remboursement » n'existent qu'après la migration).
+     */
+    function observations_types_disponibles(PDO $pdo): array
+    {
+        static $types = null;
+        if ($types === null) {
+            $types = ['reservation', 'paiement', 'activite', 'espace'];
+            try {
+                $col = $pdo->query("SHOW COLUMNS FROM observations LIKE 'cible_type'")->fetch();
+                if ($col && preg_match_all("/'([^']+)'/", (string)$col['Type'], $m)) {
+                    $types = $m[1];
+                }
+            } catch (PDOException $e) {
+                // Table absente : types par défaut
+            }
+        }
+        return $types;
+    }
+}
+
+if (!function_exists('observations_regles')) {
+    /**
+     * Règles d'accès aux observations, par type d'objet :
+     *  - voir    : rôles qui voient (et peuvent créer) les observations ;
+     *  - repondre: rôles responsables qui peuvent répondre.
+     * Le superadmin voit tout ; l'auteur d'une observation peut toujours
+     * répondre dans son propre fil. Ministre : lecture et observation,
+     * sans autre droit de modification.
+     */
+    function observations_regles(): array
+    {
+        return [
+            'voir' => [
+                'espace'        => ['admin_espaces', 'ministre'],
+                'reservation'   => ['admin_espaces', 'admin_comptable', 'ministre'],
+                'paiement'      => ['admin_comptable', 'ministre'],
+                'activite'      => ['admin_activites', 'ministre'],
+                'requisition'   => ['admin_comptable', 'ministre'],
+                'remboursement' => ['admin_comptable', 'ministre'],
+            ],
+            'repondre' => [
+                'espace'        => ['admin_espaces'],
+                'reservation'   => ['admin_espaces', 'admin_comptable'],
+                'paiement'      => ['admin_comptable'],
+                'activite'      => ['admin_activites'],
+                'requisition'   => ['admin_comptable'],
+                'remboursement' => ['admin_comptable'],
+            ],
+        ];
+    }
+}
+
+if (!function_exists('nb_observations')) {
+    /** Nombre de fils d'observation ouverts sur un objet (0 si type indisponible). */
+    function nb_observations(PDO $pdo, string $type, int $id): int
+    {
+        if (!in_array($type, observations_types_disponibles($pdo), true)) {
+            return 0;
+        }
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM observations WHERE cible_type = ? AND cible_id = ? AND parent_id IS NULL");
+        $stmt->execute([$type, $id]);
+        return (int)$stmt->fetchColumn();
+    }
+}
+
+if (!function_exists('references_dossiers')) {
+    /**
+     * Chaîne de références RESA-A → REQ-X → RESA-B pour une liste de
+     * réservations (une seule requête, utilisable dans les listes).
+     *
+     * Pour chaque réservation :
+     *  - requisition_id / origine_id : si elle est issue d'une réquisition
+     *    (réservation B), la réquisition et la réservation initiale A ;
+     *  - requisition_id / nouvelle_id : si elle a elle-même été
+     *    réquisitionnée (réservation A), la réquisition et la nouvelle
+     *    réservation B active (validée, sinon en attente) ;
+     *  - resa, req, origine, nouvelle : les mêmes au format RESA-/REQ-.
+     *
+     * Référence de dossier et référence de réquisition ne sont jamais
+     * confondues avec la référence de transaction (paiements.reference).
+     */
+    function references_dossiers(PDO $pdo, array $reservationIds): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map('intval', $reservationIds))));
+        $refs = [];
+
+        foreach ($ids as $rid) {
+            $refs[$rid] = [
+                'reservation_id' => $rid,
+                'resa'           => ref_resa($rid),
+                'requisition_id' => null,
+                'req'            => '',
+                'origine_id'     => null,
+                'origine'        => '',
+                'nouvelle_id'    => null,
+                'nouvelle'       => '',
+            ];
+        }
+
+        if (!$ids) {
+            return $refs;
+        }
+
+        $in = implode(',', array_fill(0, count($ids), '?'));
+
+        // Réservations B : issues d'une réquisition
+        $stmt = $pdo->prepare("
+            SELECT r.id, r.requisition_id, rm.reservation_id AS origine_id
+            FROM reservations r
+            JOIN requisitions_ministerielles rm ON rm.id = r.requisition_id
+            WHERE r.id IN ($in)
+        ");
+        $stmt->execute($ids);
+        foreach ($stmt->fetchAll() as $row) {
+            $rid = (int)$row['id'];
+            $refs[$rid]['requisition_id'] = (int)$row['requisition_id'];
+            $refs[$rid]['req'] = ref_req((int)$row['requisition_id']);
+            $refs[$rid]['origine_id'] = (int)$row['origine_id'];
+            $refs[$rid]['origine'] = ref_resa((int)$row['origine_id']);
+        }
+
+        // Réservations A : réquisitionnées (nouvelle réservation active éventuelle)
+        $stmt = $pdo->prepare("
+            SELECT rm.reservation_id, rm.id AS requisition_id,
+                   (
+                       SELECT n.id
+                       FROM reservations n
+                       WHERE n.requisition_id = rm.id
+                         AND n.statut IN ('validee', 'en_attente')
+                       ORDER BY (n.statut = 'validee') DESC, n.id DESC
+                       LIMIT 1
+                   ) AS nouvelle_id
+            FROM requisitions_ministerielles rm
+            WHERE rm.reservation_id IN ($in)
+            ORDER BY rm.id ASC
+        ");
+        $stmt->execute($ids);
+        foreach ($stmt->fetchAll() as $row) {
+            $rid = (int)$row['reservation_id'];
+            if ($refs[$rid]['requisition_id'] === null) {
+                $refs[$rid]['requisition_id'] = (int)$row['requisition_id'];
+                $refs[$rid]['req'] = ref_req((int)$row['requisition_id']);
+            }
+            if ($row['nouvelle_id']) {
+                $refs[$rid]['nouvelle_id'] = (int)$row['nouvelle_id'];
+                $refs[$rid]['nouvelle'] = ref_resa((int)$row['nouvelle_id']);
+            }
+        }
+
+        return $refs;
+    }
+}
+
+if (!function_exists('references_dossier')) {
+    /** Chaîne de références d'une seule réservation (voir references_dossiers). */
+    function references_dossier(PDO $pdo, int $reservationId): array
+    {
+        return references_dossiers($pdo, [$reservationId])[$reservationId] ?? [
+            'reservation_id' => $reservationId, 'resa' => ref_resa($reservationId),
+            'requisition_id' => null, 'req' => '', 'origine_id' => null, 'origine' => '',
+            'nouvelle_id' => null, 'nouvelle' => '',
+        ];
+    }
+}
+
+if (!function_exists('libelle_references_dossier')) {
+    /**
+     * Libellé court et lisible : « RESA-152 · REQ-27 · issue de RESA-98 »
+     * (ou « RESA-98 · REQ-27 · remplacée par RESA-152 »).
+     */
+    function libelle_references_dossier(array $refs): string
+    {
+        $parts = [$refs['resa']];
+        if ($refs['req'] !== '') {
+            $parts[] = $refs['req'];
+        }
+        if ($refs['origine'] !== '') {
+            $parts[] = 'issue de ' . $refs['origine'];
+        } elseif ($refs['nouvelle'] !== '') {
+            $parts[] = 'remplacée par ' . $refs['nouvelle'];
+        }
+        return implode(' · ', $parts);
+    }
+}
+
+if (!function_exists('historique_financier_reservation')) {
+    /**
+     * Historique financier chronologique d'un dossier (lecture seule),
+     * reconstruit à partir des tables existantes, sans rien modifier :
+     * paiements, réductions (saisie et changements de statut),
+     * remboursements, opérations de réquisition et observations.
+     *
+     * Pour une réservation B issue d'une réquisition, les éléments de la
+     * réservation initiale A et de la réquisition sont inclus.
+     *
+     * Chaque entrée : date, action, auteur, objet (références), montant,
+     * resultat, transaction (référence réelle), detail.
+     */
+    function historique_financier_reservation(PDO $pdo, int $reservationId): array
+    {
+        $refs = references_dossier($pdo, $reservationId);
+        $resaIds = array_values(array_filter([$reservationId, $refs['origine_id']]));
+        $in = implode(',', array_fill(0, count($resaIds), '?'));
+        $entrees = [];
+
+        $ajouter = function (?string $date, string $action, ?string $auteur, string $objet, $montant, string $resultat, string $transaction = '', string $detail = '') use (&$entrees) {
+            if (!$date) {
+                return;
+            }
+            $entrees[] = [
+                'date'        => $date,
+                'action'      => $action,
+                'auteur'      => $auteur ?: '—',
+                'objet'       => $objet,
+                'montant'     => $montant === null ? null : round((float)$montant, 2),
+                'resultat'    => $resultat,
+                'transaction' => $transaction,
+                'detail'      => $detail,
+            ];
+        };
+
+        // Paiements (un paiement transféré apparaît sur la réservation qui le porte aujourd'hui)
+        $stmt = $pdo->prepare("
+            SELECT p.id, p.reservation_id, p.montant, p.mode, p.reference, p.note, p.created_at, u.nom_complet
+            FROM paiements p
+            LEFT JOIN users u ON u.id = p.enregistre_par
+            WHERE p.reservation_id IN ($in)
+        ");
+        $stmt->execute($resaIds);
+        $modes = ['especes' => 'Espèces', 'orange_money' => 'Orange Money', 'moov_money' => 'Moov Money', 'virement' => 'Virement', 'cheque' => 'Chèque'];
+        foreach ($stmt->fetchAll() as $p) {
+            $transfere = str_contains((string)$p['note'], 'Paiement transféré');
+            $ajouter(
+                $p['created_at'],
+                'Paiement encaissé',
+                $p['nom_complet'],
+                ref_recu((int)$p['id'], $p['created_at']) . ' · ' . ref_resa((int)$p['reservation_id']),
+                $p['montant'],
+                ($modes[$p['mode']] ?? $p['mode']) . ($transfere ? ' — transféré depuis la réservation initiale' : ''),
+                (string)($p['reference'] ?? '')
+            );
+        }
+
+        // Réductions et maintien du tarif
+        $stmt = $pdo->prepare("
+            SELECT ra.*, us.nom_complet AS saisi_nom, um.nom_complet AS modifie_nom
+            FROM reductions_accordees ra
+            LEFT JOIN users us ON us.id = ra.saisi_par
+            LEFT JOIN users um ON um.id = ra.statut_modifie_par
+            WHERE ra.reservation_id IN ($in)
+        ");
+        $stmt->execute($resaIds);
+        foreach ($stmt->fetchAll() as $ra) {
+            $estReq = ($ra['origine'] ?? '') === 'requisition';
+            $libelle = $estReq ? 'Maintien du tarif (réquisition)' : 'Réduction commerciale';
+            $ajouter(
+                $ra['created_at'],
+                $libelle . ' accordée',
+                $ra['saisi_nom'],
+                ref_resa((int)$ra['reservation_id']),
+                $ra['montant_reduction'],
+                ['appliquee' => 'Appliquée', 'non_appliquee' => 'Non utilisée', 'annulee' => 'Annulée'][$ra['statut']] ?? $ra['statut'],
+                '',
+                trim((string)$ra['motif'])
+                    . (!empty($ra['autorise_par']) ? ' — autorisée par ' . $ra['autorise_par'] : '')
+                    . (!empty($ra['reference_accord']) ? ' (accord ' . $ra['reference_accord'] . ')' : '')
+            );
+            if (!empty($ra['statut_modifie_le']) && $ra['statut'] !== 'appliquee') {
+                $ajouter(
+                    $ra['statut_modifie_le'],
+                    $libelle . ' ' . ($ra['statut'] === 'annulee' ? 'annulée' : 'marquée non utilisée'),
+                    $ra['modifie_nom'],
+                    ref_resa((int)$ra['reservation_id']),
+                    $ra['montant_reduction'],
+                    $ra['statut'] === 'annulee' ? 'Annulée' : 'Non utilisée',
+                    '',
+                    trim((string)($ra['motif_statut'] ?? ''))
+                );
+            }
+        }
+
+        // Réquisition, opérations et remboursements
+        if ($refs['requisition_id']) {
+            $stmt = $pdo->prepare("
+                SELECT rm.*, u.nom_complet AS declenche_nom, t.nom_complet AS traite_nom
+                FROM requisitions_ministerielles rm
+                LEFT JOIN users u ON u.id = rm.declenche_par
+                LEFT JOIN users t ON t.id = rm.traite_par
+                WHERE rm.id = ?
+            ");
+            $stmt->execute([$refs['requisition_id']]);
+            if ($rm = $stmt->fetch()) {
+                $objetReq = ref_req((int)$rm['id']) . ' · ' . ref_resa((int)$rm['reservation_id']);
+                $ajouter($rm['date_declenchee'], 'Réquisition déclenchée', $rm['declenche_nom'], $objetReq, null, 'Réservation initiale réquisitionnée');
+                $ajouter($rm['date_choix'], 'Choix du client', null, $objetReq, null,
+                    ['annulation' => 'Annulation', 'remboursement' => 'Remboursement', 'nouvelle_date' => 'Nouvelle date', 'autre_espace' => 'Autre espace'][$rm['choix_client']] ?? (string)$rm['choix_client']);
+                if ($rm['statut'] === 'cloturee') {
+                    $ajouter($rm['date_traitement'], 'Réquisition clôturée', $rm['traite_nom'], $objetReq, null, 'Clôturée', '', trim((string)($rm['note_traitement'] ?? '')));
+                }
+            }
+
+            $stmt = $pdo->prepare("
+                SELECT rb.*, u.nom_complet AS traite_nom
+                FROM remboursements rb
+                LEFT JOIN users u ON u.id = rb.traite_par
+                WHERE rb.requisition_id = ?
+            ");
+            $stmt->execute([$refs['requisition_id']]);
+            foreach ($stmt->fetchAll() as $rb) {
+                $effectue = ($rb['resultat'] ?? '') === 'effectue';
+                $ajouter(
+                    $rb['date_traitement'] ?: $rb['created_at'],
+                    'Remboursement ' . ($effectue ? 'effectué' : 'enregistré'),
+                    $rb['traite_nom'],
+                    'BR-' . date('Y', strtotime($rb['date_traitement'] ?? $rb['created_at'])) . '-' . str_pad((string)$rb['id'], 6, '0', STR_PAD_LEFT)
+                        . ' · ' . ref_req((int)$rb['requisition_id']),
+                    $effectue ? ($rb['montant_rembourse'] ?? $rb['montant_a_rembourser']) : $rb['montant_a_rembourser'],
+                    $effectue ? 'Effectué' : 'Non effectué',
+                    (string)($rb['reference'] ?? ''),
+                    trim((string)$rb['motif'])
+                );
+            }
+        }
+
+        // Observations associées (fils principaux)
+        $cibles = [['reservation', $reservationId]];
+        if ($refs['origine_id']) {
+            $cibles[] = ['reservation', $refs['origine_id']];
+        }
+        if ($refs['requisition_id']) {
+            $cibles[] = ['requisition', $refs['requisition_id']];
+        }
+        foreach ($cibles as [$type, $cid]) {
+            try {
+                $stmt = $pdo->prepare("
+                    SELECT o.id, o.contenu, o.created_at, u.nom_complet,
+                           (SELECT COUNT(*) FROM observations r WHERE r.parent_id = o.id) AS nb_reponses
+                    FROM observations o
+                    LEFT JOIN users u ON u.id = o.auteur_id
+                    WHERE o.cible_type = ? AND o.cible_id = ? AND o.parent_id IS NULL
+                ");
+                $stmt->execute([$type, $cid]);
+                foreach ($stmt->fetchAll() as $o) {
+                    $ajouter(
+                        $o['created_at'],
+                        'Observation',
+                        $o['nom_complet'],
+                        ($type === 'requisition' ? ref_req((int)$cid) : ref_resa((int)$cid)),
+                        null,
+                        (int)$o['nb_reponses'] > 0 ? $o['nb_reponses'] . ' réponse(s)' : 'Sans réponse',
+                        '',
+                        mb_strimwidth((string)$o['contenu'], 0, 160, '…')
+                    );
+                }
+            } catch (PDOException $e) {
+                // Type d'observation non encore disponible (migration non exécutée)
+            }
+        }
+
+        usort($entrees, fn($a, $b) => strcmp($a['date'], $b['date']));
+
+        return $entrees;
     }
 }
 

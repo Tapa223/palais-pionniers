@@ -260,8 +260,14 @@ require __DIR__ . '/_admin_header.php';
         <input type="date" name="fin" value="<?= e($fin) ?>" class="text-xs font-bold rounded-xl border border-slate-200 px-3 py-2 outline-none text-primary">
         <button type="submit" class="text-xs font-black bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-xl transition">Filtrer</button>
       </form>
-      <?php if (in_array($type, ['reductions','guichet','encaisse'], true)): ?>
-      <a href="export.php?type=<?= $type === 'reductions' ? 'paiements' : ($type === 'guichet' ? 'reservations' : 'paiements') ?>&debut=<?= e($debut) ?>&fin=<?= e($fin) ?>" target="_blank"
+      <?php
+        // Export correspondant au rapport (droits vérifiés aussi dans export.php)
+        $exportRapport = ['reductions' => 'reductions', 'guichet' => 'reservations', 'encaisse' => 'paiements'][$type] ?? null;
+        $exportAutorise = $exportRapport === 'reservations'
+            || in_array($_SESSION['role'] ?? '', ['superadmin', 'ministre', 'admin_comptable'], true);
+      ?>
+      <?php if ($exportRapport && $exportAutorise): ?>
+      <a href="export.php?type=<?= $exportRapport ?>&debut=<?= e($debut) ?>&fin=<?= e($fin) ?>" target="_blank"
          class="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-black uppercase px-4 py-2.5 rounded-xl transition">
         <i class="fas fa-file-excel"></i> Excel (CSV)
       </a>

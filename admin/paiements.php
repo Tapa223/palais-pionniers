@@ -373,6 +373,12 @@ if ($search) {
         $cond .= ' OR p.reservation_id = ?';
         $params[] = (int)$mResa[1];
     }
+    // Référence de réquisition (REQ-27) : réservation initiale et nouvelle réservation
+    if (preg_match('/^#?REQ-?(\d+)$/i', $search, $mReq)) {
+        $cond .= ' OR r.requisition_id = ? OR p.reservation_id = (SELECT rmq.reservation_id FROM requisitions_ministerielles rmq WHERE rmq.id = ?)';
+        $params[] = (int)$mReq[1];
+        $params[] = (int)$mReq[1];
+    }
     $where[] = "($cond)";
 }
 if ($filterDate)   { $where[] = 'DATE(p.created_at) = ?'; $params[] = $filterDate; }
@@ -414,6 +420,10 @@ foreach ($enAttente as &$ea) {
 }
 unset($ea);
 
+// Références de dossier (RESA / REQ / réservation initiale), en une requête par liste
+$refsAttente   = references_dossiers($pdo, array_column($enAttente, 'id'));
+$refsPaiements = references_dossiers($pdo, array_column($paiements, 'reservation_id'));
+
 // Totaux : brut encaissé, remboursements effectués, net
 $totalPaye     = (float)$pdo->query("SELECT COALESCE(SUM(montant),0) FROM paiements")->fetchColumn();
 $totalRembourse = (float)$pdo->query("SELECT COALESCE(SUM(COALESCE(montant_rembourse, montant_a_rembourser)),0) FROM remboursements WHERE resultat = 'effectue'")->fetchColumn();
@@ -446,6 +456,8 @@ if ($openId) {
     $openPaiement = $s->fetch();
     if ($openPaiement) {
         $openPaiement['situation'] = situation_financiere_reservation($pdo, (int)$openPaiement['reservation_id']);
+        $openPaiement['refs'] = references_dossier($pdo, (int)$openPaiement['reservation_id']);
+        $openPaiement['historique'] = historique_financier_reservation($pdo, (int)$openPaiement['reservation_id']);
     }
 }
 
@@ -548,7 +560,8 @@ require __DIR__ . '/_admin_header.php';
         // Maintien du tarif suite à réquisition : pas une réduction commerciale, non modifiable
         $priseEnCharge = $s['prise_en_charge_requisition'];
         $libelleMaintien = 'Maintien du tarif — réquisition #' . (int)($s['requisition_id'] ?? 0);
-        $rechercheTexte = mb_strtolower($r['nom_complet'] . ' ' . $r['espace_nom'] . ' #resa-' . $rid . ' ' . $rid . ' ' . ($r['telephone'] ?? '') . ' ' . date('d/m/Y', strtotime($r['date_resa'])));
+        $refsR = $refsAttente[$rid] ?? references_dossier($pdo, $rid);
+        $rechercheTexte = mb_strtolower($r['nom_complet'] . ' ' . $r['espace_nom'] . ' #resa-' . $rid . ' ' . $rid . ' ' . $refsR['req'] . ' ' . $refsR['origine'] . ' ' . ($r['telephone'] ?? '') . ' ' . date('d/m/Y', strtotime($r['date_resa'])));
     ?>
     <div id="resa-<?= $rid ?>" data-recherche="<?= e($rechercheTexte) ?>" class="ligne-attente">
     <div onclick="<?= !$readonly ? "togglePayForm($rid)" : '' ?>" class="flex flex-col md:flex-row md:items-center gap-3 px-5 py-4 hover:bg-slate-50 transition <?= !$readonly ? 'cursor-pointer' : '' ?>">
@@ -557,7 +570,7 @@ require __DIR__ . '/_admin_header.php';
           <p class="font-black text-primary text-sm"><?= e($r['nom_complet']) ?></p>
           <span class="text-xs text-slate-400">·</span>
           <p class="text-sm text-slate-600 font-semibold"><?= e($r['espace_nom']) ?></p>
-          <span class="text-[10px] font-mono font-black text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">#RESA-<?= $rid ?></span>
+          <span class="text-[10px] font-mono font-black text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full"><?= e(libelle_references_dossier($refsR)) ?></span>
         </div>
         <div class="flex items-center gap-2 mt-1 text-xs text-slate-500 flex-wrap">
           <?php if ($estSejourResa): ?>
@@ -744,8 +757,9 @@ require __DIR__ . '/_admin_header.php';
             </select>
           </div>
           <div>
-            <label class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Référence / N° reçu</label>
-            <input form="fPay-<?= $rid ?>" type="text" name="reference" maxlength="100" placeholder="Ex: OM-123456"
+            <label class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Référence de la transaction</label>
+            <input form="fPay-<?= $rid ?>" type="text" name="reference" maxlength="100" placeholder="Ex : OM-123456789, VIR-2026-…, n° de reçu"
+                   title="Référence réelle du paiement (Orange Money, virement, reçu…) — ne pas saisir la référence du dossier"
                    class="w-full rounded-xl border-2 border-slate-200 bg-white px-3 py-2.5 font-bold text-primary outline-none focus:border-primary text-sm">
           </div>
           <div>
@@ -777,6 +791,27 @@ require __DIR__ . '/_admin_header.php';
           </button>
         </div>
       </div>
+    </div>
+    <?php endif; ?>
+    <?php if ($ouvert): ?>
+    <div class="px-5 pb-5">
+      <?php $histoEntrees = historique_financier_reservation($pdo, $rid); require __DIR__ . '/_historique_financier.php'; ?>
+      <div class="flex flex-wrap gap-3 text-[11px] font-black mt-3">
+        <a href="observations.php?cible_type=reservation&cible_id=<?= $rid ?>" class="text-slate-400 hover:text-accent transition">
+          <i class="fas fa-eye mr-1"></i>Observer la réservation<?= ($nbObs = nb_observations($pdo, 'reservation', $rid)) ? ' (' . $nbObs . ')' : '' ?>
+        </a>
+        <?php if ($refsR['requisition_id']): ?>
+        <a href="requisition-detail.php?id=<?= (int)$refsR['requisition_id'] ?>" class="text-slate-400 hover:text-accent transition">
+          <i class="fas fa-landmark mr-1"></i>Dossier <?= e($refsR['req']) ?>
+        </a>
+        <?php endif; ?>
+      </div>
+    </div>
+    <?php else: ?>
+    <div class="px-5 pb-3">
+      <a href="paiements.php?resa=<?= $rid ?>#resa-<?= $rid ?>" class="text-[10px] font-black text-slate-400 hover:text-accent transition">
+        <i class="fas fa-clock-rotate-left mr-1"></i>Historique du dossier
+      </a>
     </div>
     <?php endif; ?>
     </div>
@@ -849,7 +884,7 @@ require __DIR__ . '/_admin_header.php';
               <span class="text-xs font-black text-green-600">+<?= $fcfa($p['montant']) ?> FCFA</span>
             </div>
             <p class="text-[9px] font-mono font-bold text-slate-400 mt-0.5">
-              <?= ref_recu((int)$p['id'], $p['created_at']) ?> · #RESA-<?= (int)$p['reservation_id'] ?>
+              <?= ref_recu((int)$p['id'], $p['created_at']) ?> · <?= e(libelle_references_dossier($refsPaiements[(int)$p['reservation_id']] ?? references_dossier($pdo, (int)$p['reservation_id']))) ?>
               <?php if (!empty($p['motif_reduction'])): ?>
                 <span class="ml-1 inline-block bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded-full"><i class="fas fa-percent"></i> Réduction</span>
               <?php endif; ?>
@@ -933,9 +968,14 @@ require __DIR__ . '/_admin_header.php';
         </div>
         <?php endforeach; ?>
 
+        <div class="bg-slate-50 rounded-xl p-3 border border-slate-100">
+          <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Dossier</p>
+          <p class="text-sm font-mono font-bold text-primary"><?= e(libelle_references_dossier($openPaiement['refs'])) ?></p>
+        </div>
+
         <?php if ($openPaiement['reference']): ?>
         <div class="bg-slate-50 rounded-xl p-3 border border-slate-100">
-          <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Référence</p>
+          <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Référence de la transaction</p>
           <code class="text-sm font-mono text-primary"><?= e($openPaiement['reference']) ?></code>
         </div>
         <?php endif; ?>
@@ -946,6 +986,26 @@ require __DIR__ . '/_admin_header.php';
           <p class="text-sm text-slate-700 whitespace-pre-line"><?= e($openPaiement['note']) ?></p>
         </div>
         <?php endif; ?>
+
+        <?php
+          $nbObsPaiement = nb_observations($pdo, 'paiement', (int)$openPaiement['id']);
+          $nbObsResa = nb_observations($pdo, 'reservation', (int)$openPaiement['reservation_id']);
+        ?>
+        <div class="flex flex-wrap gap-3 text-[11px] font-black">
+          <a href="observations.php?cible_type=paiement&cible_id=<?= (int)$openPaiement['id'] ?>" class="text-slate-400 hover:text-accent transition">
+            <i class="fas fa-eye mr-1"></i>Observer ce paiement<?= $nbObsPaiement ? ' (' . $nbObsPaiement . ')' : '' ?>
+          </a>
+          <a href="observations.php?cible_type=reservation&cible_id=<?= (int)$openPaiement['reservation_id'] ?>" class="text-slate-400 hover:text-accent transition">
+            <i class="fas fa-eye mr-1"></i>Observer la réservation<?= $nbObsResa ? ' (' . $nbObsResa . ')' : '' ?>
+          </a>
+          <?php if (!empty($openPaiement['refs']['requisition_id'])): ?>
+          <a href="requisition-detail.php?id=<?= (int)$openPaiement['refs']['requisition_id'] ?>" class="text-slate-400 hover:text-accent transition">
+            <i class="fas fa-landmark mr-1"></i>Dossier <?= e($openPaiement['refs']['req']) ?>
+          </a>
+          <?php endif; ?>
+        </div>
+
+        <?php $histoEntrees = $openPaiement['historique']; require __DIR__ . '/_historique_financier.php'; ?>
       </div>
     </div>
     <?php else: ?>

@@ -222,7 +222,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$readonly) {
 
                         log_activity(
                             'requisition_traitement_commence',
-                            'requisitions',
+                            'reservations', // module existant de activity_log (ENUM)
                             'Traitement commencé pour la réquisition #' . $id
                         );
 
@@ -531,7 +531,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$readonly) {
 
                             log_activity(
                                 'remboursement_requisition',
-                                'requisitions',
+                                'reservations', // module existant de activity_log (ENUM)
                                 'Remboursement effectué pour la réquisition #' . $id
                             );
 
@@ -678,7 +678,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$readonly) {
 
                             log_activity(
                                 'requisition_traitee',
-                                'requisitions',
+                                'reservations', // module existant de activity_log (ENUM)
                                 'Réquisition #' . $id . ' traitée'
                             );
 
@@ -952,9 +952,25 @@ require __DIR__ . '/_admin_header.php';
                 Dossier de réquisition
             </h1>
 
-            <p class="text-sm text-slate-500 mt-1">
-                Réquisition #<?= (int)$rq['id'] ?>
-                · Réservation #<?= (int)$rq['reservation_id'] ?>
+            <?php
+                $nouvelleRef = !empty($suivi['validee']) ? (int)$suivi['validee']['id']
+                    : (!empty($suivi['liste']) ? (int)$suivi['liste'][0]['id'] : 0);
+                $nbObsReq = nb_observations($pdo, 'requisition', (int)$rq['id']);
+            ?>
+            <p class="text-sm text-slate-500 mt-1 flex flex-wrap items-center gap-2">
+                <span class="font-mono font-black text-slate-600"><?= e(ref_req((int)$rq['id'])) ?></span>
+                <span>· réservation initiale</span>
+                <span class="font-mono font-black text-slate-600"><?= e(ref_resa((int)$rq['reservation_id'])) ?></span>
+                <?php if ($nouvelleRef): ?>
+                    <span>→ nouvelle réservation</span>
+                    <span class="font-mono font-black text-slate-600"><?= e(ref_resa($nouvelleRef)) ?></span>
+                <?php endif; ?>
+                <?php if (in_array('requisition', observations_types_disponibles($pdo), true)): ?>
+                    <a href="observations.php?cible_type=requisition&cible_id=<?= (int)$rq['id'] ?>"
+                       class="text-[11px] font-black text-slate-400 hover:text-accent transition ml-1">
+                        <i class="fas fa-eye mr-1"></i>Observer<?= $nbObsReq ? ' (' . $nbObsReq . ')' : '' ?>
+                    </a>
+                <?php endif; ?>
             </p>
 
         </div>
@@ -1406,7 +1422,7 @@ require __DIR__ . '/_admin_header.php';
 
                                         <div>
                                             <p class="text-sm font-black text-slate-800">
-                                                Réservation #<?= (int)$n['id'] ?> — <?= e($n['espace_nom']) ?>
+                                                <?= e(ref_resa((int)$n['id'])) ?> — <?= e($n['espace_nom']) ?>
                                             </p>
 
                                             <p class="text-xs text-slate-600 mt-1">
@@ -1424,9 +1440,22 @@ require __DIR__ . '/_admin_header.php';
                                             <p class="text-[10px] font-black uppercase text-slate-500">
                                                 <?= e($libellesStatutResa[$n['statut']] ?? $n['statut']) ?>
                                             </p>
+                                            <?php
+                                                // État financier calculé (paiements − remboursements effectués)
+                                                $sfN = situation_financiere_reservation($pdo, (int)$n['id']);
+                                                [$libEtatN] = libelle_etat_financier($sfN['etat'] ?? '');
+                                            ?>
                                             <p class="text-[10px] font-bold text-slate-400 mt-0.5">
-                                                <?= e($libellesPaiementResa[$n['statut_paiement']] ?? $n['statut_paiement']) ?>
-                                                · <?= number_format((float)$n['total_paye'], 0, ',', ' ') ?> FCFA versés
+                                                <?php if (in_array($n['statut'], ['validee'], true)): ?>
+                                                    <?= e($libEtatN) ?>
+                                                    · <?= number_format((float)$sfN['paye_net'], 0, ',', ' ') ?> FCFA payés
+                                                    <?php if ($sfN['solde'] > 0): ?>
+                                                        · reste <?= number_format((float)$sfN['solde'], 0, ',', ' ') ?> FCFA
+                                                    <?php endif; ?>
+                                                <?php else: ?>
+                                                    <?= e($libellesPaiementResa[$n['statut_paiement']] ?? $n['statut_paiement']) ?>
+                                                    · <?= number_format((float)$sfN['paye_net'], 0, ',', ' ') ?> FCFA payés
+                                                <?php endif; ?>
                                             </p>
                                         </div>
 
@@ -1438,19 +1467,40 @@ require __DIR__ . '/_admin_header.php';
 
                         <?php endif; ?>
 
-                        <?php if ($suivi['trop_percu_constate'] > 0): ?>
+                        <?php
+                            // Uniquement sur base financière réelle : trop-perçu calculé
+                            // restant, ou remboursement réellement effectué.
+                            $tropAffiche = $suivi['trop_percu'] > 0 && $suivi['situation'] && $suivi['situation']['total_paye'] > 0;
+                            $rembourseAffiche = $suivi['rembourse'] && $suivi['montant_rembourse'] > 0;
+                        ?>
+                        <?php if ($tropAffiche || $rembourseAffiche): ?>
 
-                            <div class="rounded-2xl p-4 border <?= $suivi['rembourse'] ? 'bg-emerald-50 border-emerald-200' : 'bg-orange-50 border-orange-200' ?>">
-                                <p class="text-sm font-black <?= $suivi['rembourse'] ? 'text-emerald-800' : 'text-orange-800' ?>">
-                                    Trop-perçu : <?= number_format($suivi['trop_percu_constate'], 0, ',', ' ') ?> FCFA
-                                    — <?= $suivi['rembourse'] ? 'remboursé' : 'à rembourser' ?>
+                            <div class="rounded-2xl p-4 border <?= !$tropAffiche ? 'bg-emerald-50 border-emerald-200' : 'bg-orange-50 border-orange-200' ?>">
+                                <p class="text-sm font-black <?= !$tropAffiche ? 'text-emerald-800' : 'text-orange-800' ?>">
+                                    <?php if ($tropAffiche): ?>
+                                        Trop-perçu : <?= number_format($suivi['trop_percu'], 0, ',', ' ') ?> FCFA — à rembourser
+                                    <?php else: ?>
+                                        Trop-perçu : <?= number_format($suivi['montant_rembourse'], 0, ',', ' ') ?> FCFA — remboursé
+                                    <?php endif; ?>
                                 </p>
                                 <p class="text-xs text-slate-600 mt-1">
                                     La nouvelle réservation coûte moins cher que le montant déjà encaissé.
                                 </p>
+                                <?php if ($rembourseAffiche && $remboursement): ?>
+                                    <?php include __DIR__ . '/_liens_remboursement.php'; ?>
+                                <?php endif; ?>
                             </div>
 
                         <?php endif; ?>
+
+                        <?php
+                            // Historique financier (lecture seule) du dossier RESA-A → REQ-X → RESA-B
+                            $histoResaId = $nouvelleRef ?: (int)$rq['reservation_id'];
+                            $histoEntrees = historique_financier_reservation($pdo, $histoResaId);
+                        ?>
+                        <div class="pt-2">
+                            <?php require __DIR__ . '/_historique_financier.php'; ?>
+                        </div>
 
                     </div>
 
@@ -1563,6 +1613,8 @@ require __DIR__ . '/_admin_header.php';
                                             </p>
 
                                         <?php endif; ?>
+
+                                        <?php include __DIR__ . '/_liens_remboursement.php'; ?>
 
                                     </div>
 

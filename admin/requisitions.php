@@ -722,6 +722,17 @@ require __DIR__ . '/_admin_header.php';
             Suivi complet des espaces réquisitionnés pour un besoin institutionnel prioritaire
         </p>
 
+        <div class="flex flex-wrap gap-2 mt-3">
+            <a href="export.php?type=requisitions" target="_blank"
+               class="inline-flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-black uppercase px-4 py-2.5 rounded-xl transition">
+                <i class="fas fa-file-excel"></i> Export réquisitions
+            </a>
+            <a href="export.php?type=remboursements" target="_blank"
+               class="inline-flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-black uppercase px-4 py-2.5 rounded-xl transition">
+                <i class="fas fa-file-excel"></i> Export remboursements
+            </a>
+        </div>
+
     </div>
 
     <?php if ($msg): ?>

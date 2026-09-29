@@ -73,7 +73,8 @@ foreach ($stmt->fetchAll() as $a) {
         $retenu = false;
     }
     if ($retenu && $rechercheNorm !== '') {
-        $texte = mb_strtolower($a['nom_complet'] . ' ' . $a['telephone'] . ' ' . $a['espace_nom']);
+        $refsRech = references_dossier($pdo, (int)$a['id']);
+        $texte = mb_strtolower($a['nom_complet'] . ' ' . $a['telephone'] . ' ' . $a['espace_nom'] . ' ' . $refsRech['req'] . ' ' . $refsRech['origine']);
         $retenu = ctype_digit($rechercheNorm)
             ? ((int)$rechercheNorm === (int)$a['id'] || str_contains($texte, $rechercheNorm))
             : str_contains($texte, $rechercheNorm);
@@ -136,7 +137,8 @@ require __DIR__ . '/_admin_header.php';
     <a href="paiements.php?resa=<?= (int)$a['id'] ?>" class="block bg-white rounded-2xl border <?= $enRetard ? 'border-accent' : 'border-slate-100' ?> shadow-sm p-5 hover:shadow-md transition">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p class="font-black text-primary text-sm"><?= e($a['espace_nom']) ?> <span class="text-slate-300 font-bold">#RESA-<?= (int)$a['id'] ?></span></p>
+          <?php $refsA = references_dossier($pdo, (int)$a['id']); ?>
+          <p class="font-black text-primary text-sm"><?= e($a['espace_nom']) ?> <span class="text-slate-300 font-bold font-mono text-xs"><?= e(libelle_references_dossier($refsA)) ?></span></p>
           <p class="text-xs text-slate-400 mt-0.5">
             <?= e($a['nom_complet']) ?> · <?= e($a['telephone']) ?> ·
             <?php if (!empty($a['heure_debut'])): ?>
