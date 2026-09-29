@@ -86,7 +86,9 @@ if (in_array($role, ['superadmin','ministre','admin_comptable'])) {
      * statut « appliquee ») + anciennes saisies sur un paiement. Une réduction
      * non utilisée ou annulée n'est pas comptée.
      */
-    $nb_reductions = (int)$pdo->query("SELECT COUNT(*) FROM reductions_accordees WHERE statut = 'appliquee'")->fetchColumn()
+    // Les prises en charge suite à réquisition (maintien du tarif) ne sont pas des réductions commerciales
+    $filtreCommerciale = reductions_origine_disponible($pdo) ? " AND origine = 'commerciale'" : '';
+    $nb_reductions = (int)$pdo->query("SELECT COUNT(*) FROM reductions_accordees WHERE statut = 'appliquee'" . $filtreCommerciale)->fetchColumn()
         + (int)$pdo->query("SELECT COUNT(DISTINCT reservation_id) FROM paiements WHERE motif_reduction IS NOT NULL AND motif_reduction != ''")->fetchColumn();
     $reductionsRecentes = $pdo->query("
         SELECT ra.reservation_id, ra.created_at, ra.motif AS motif_reduction, ra.montant_reduction, e.nom AS espace_nom, u.nom_complet
@@ -94,7 +96,7 @@ if (in_array($role, ['superadmin','ministre','admin_comptable'])) {
         JOIN reservations r ON r.id = ra.reservation_id
         JOIN espaces e ON e.id = r.espace_id
         JOIN users u ON u.id = r.user_id
-        WHERE ra.statut = 'appliquee'
+        WHERE ra.statut = 'appliquee'" . str_replace('origine', 'ra.origine', $filtreCommerciale) . "
         ORDER BY ra.created_at DESC LIMIT 6
     ")->fetchAll();
     $anciennes = $pdo->query("

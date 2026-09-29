@@ -933,6 +933,14 @@ $montantReductionFacture = $sf['montant_reduction'];
 
 $motifReductionFacture = $sf['reduction_appliquee']['motif'] ?? null;
 
+// Maintien du tarif suite à réquisition : ce n'est pas une remise commerciale
+$libelleReductionFacture = !empty($sf['prise_en_charge_requisition'])
+    ? 'Maintien du tarif — réquisition #' . (int) $sf['requisition_id']
+    : null;
+if ($libelleReductionFacture) {
+    $motifReductionFacture = null; // le libellé suffit (le détail reste dans l'historique comptable)
+}
+
 if ($motifReductionFacture === null && $sf['reduction_historique'] > 0) {
     // Ancien fonctionnement : motif porté par le paiement
     foreach ($tousLesPaiements as $pz) {
@@ -1360,7 +1368,7 @@ $qteLigne = $estSejour
                 colspan="3"
             >
 
-                Remise accordée
+                <?= $libelleReductionFacture ? e($libelleReductionFacture) : 'Remise accordée' ?>
 
                 <?= !empty($motifReductionFacture)
                     ? ' — ' . e($motifReductionFacture)
@@ -1765,7 +1773,7 @@ $qteLigne = $estSejour
                 <tr class="border-b border-slate-200">
 
                     <td class="py-3 text-sm text-orange-700 font-bold">
-                        Réduction accordée
+                        <?= $libelleReductionFacture ? e($libelleReductionFacture) : 'Réduction accordée' ?>
                     </td>
 
                     <td class="py-3 font-black text-right text-orange-700">
@@ -1882,7 +1890,7 @@ $qteLigne = $estSejour
                 <tr class="border-b border-slate-200">
 
                     <td class="py-3 text-sm text-orange-700 font-bold">
-                        Réduction accordée
+                        <?= $libelleReductionFacture ? e($libelleReductionFacture) : 'Réduction accordée' ?>
                     </td>
 
                     <td class="py-3 font-black text-right text-orange-700">

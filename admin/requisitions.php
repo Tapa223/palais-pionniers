@@ -132,17 +132,11 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     $action === 'traiter_operation'
                     && in_array($requisition['choix_client'], ['nouvelle_date', 'autre_espace'], true)
                 ) {
-                    $suiviNouvelle = requisition_suivi_nouvelle_reservation($pdo, $id);
+                    $blocagesCloture = requisition_blocages_cloture($pdo, $id);
 
-                    if ($suiviNouvelle['validee'] === null) {
+                    if ($blocagesCloture) {
                         throw new RuntimeException(
-                            'La nouvelle réservation du client n’existe pas encore ou n’a pas été validée : la réquisition ne peut pas être clôturée.'
-                        );
-                    }
-
-                    if ($suiviNouvelle['a_rembourser']) {
-                        throw new RuntimeException(
-                            'Un trop-perçu doit d’abord être remboursé depuis le dossier de la réquisition.'
+                            'La réquisition ne peut pas encore être clôturée : ' . implode(' ', $blocagesCloture)
                         );
                     }
                 }

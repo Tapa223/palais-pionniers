@@ -603,20 +603,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$readonly) {
                         ? requisition_suivi_nouvelle_reservation($pdo, $id)
                         : null;
 
-                    if ($suiviOperation !== null && $suiviOperation['validee'] === null) {
+                    $blocagesCloture = $suiviOperation !== null
+                        ? requisition_blocages_cloture($pdo, $id)
+                        : [];
+
+                    if ($blocagesCloture) {
 
                         $msg = [
                             'err',
-                            'La nouvelle réservation du client n’existe pas encore ou n’a pas été validée par l’administration des espaces : la réquisition ne peut pas être clôturée.'
-                        ];
-
-                    } elseif ($suiviOperation !== null && $suiviOperation['a_rembourser']) {
-
-                        $msg = [
-                            'err',
-                            'Un trop-perçu de '
-                            . number_format($suiviOperation['trop_percu'], 0, ',', ' ')
-                            . ' FCFA doit d’abord être remboursé (formulaire de remboursement).'
+                            'La réquisition ne peut pas encore être clôturée : ' . implode(' ', $blocagesCloture)
                         ];
 
                     } elseif ($resultat === '') {
@@ -874,6 +869,8 @@ $suivi = $estNouvelleReservation
     : null;
 
 $tropPercuARembourser = $suivi !== null && $suivi['a_rembourser'];
+// Ce qui empêche encore la clôture (même règle que le traitement serveur)
+$blocagesCloture = $estNouvelleReservation ? requisition_blocages_cloture($pdo, (int)$id) : [];
 
 $libellesStatutResa = [
     'en_attente'     => 'En attente de validation',
@@ -2060,18 +2057,18 @@ require __DIR__ . '/_admin_header.php';
                         && $estEnTraitement
                         && $estNouvelleReservation
                         && !$estCloturee
-                        && ($suivi['validee'] === null || $tropPercuARembourser)
+                        && $blocagesCloture
                     ): ?>
 
                         <div class="rounded-xl bg-indigo-50 border border-indigo-200 p-3">
                             <p class="text-[11px] text-indigo-800 leading-5">
                                 <i class="fas fa-circle-info mr-1"></i>
-                                <?php if ($suivi['validee'] === null): ?>
-                                    La clôture sera possible lorsque la nouvelle réservation du client
-                                    aura été validée par l’administration des espaces.
-                                <?php else: ?>
-                                    Enregistrez d’abord le remboursement du trop-perçu :
-                                    la réquisition sera alors clôturée.
+                                Clôture possible lorsque le dossier sera réellement terminé :
+                                <?php foreach ($blocagesCloture as $blocage): ?>
+                                    <br>— <?= e($blocage) ?>
+                                <?php endforeach; ?>
+                                <?php if ($suivi['validee'] !== null && ($suivi['situation']['solde'] ?? 0) > 0): ?>
+                                    <br><a href="paiements.php?resa=<?= (int)$suivi['validee']['id'] ?>" class="font-black underline">Encaisser le solde</a>
                                 <?php endif; ?>
                             </p>
                         </div>
@@ -2083,7 +2080,7 @@ require __DIR__ . '/_admin_header.php';
                         && $estEnTraitement
                         && !$estRemboursement
                         && !$estCloturee
-                        && (!$estNouvelleReservation || ($suivi['validee'] !== null && !$tropPercuARembourser))
+                        && (!$estNouvelleReservation || !$blocagesCloture)
                     ): ?>
 
                         <div class="pt-1">

@@ -154,7 +154,7 @@ if ($type === 'paiements') {
     ";
     $filename = 'reservations_' . date('Y-m-d_His') . '.csv';
     $headers  = ['ID','Date création','Client','Téléphone','Espace','Date résa','Date départ','Heure début','Heure fin','Statut','Statut paiement','Tarif','Montant tarif (FCFA)',
-                 'Montant initial (FCFA)','Réduction appliquée (FCFA)','Net dû (FCFA)','Encaissé (FCFA)','Remboursé (FCFA)','Solde (FCFA)','Réduction accordée non utilisée (FCFA)'];
+                 'Montant initial (FCFA)','Réduction appliquée (FCFA)','Nature de la réduction','Net dû (FCFA)','Encaissé (FCFA)','Remboursé (FCFA)','Solde (FCFA)','Réduction accordée non utilisée (FCFA)'];
     $mapRow = function($r) use ($situation, $fin2) {
         $s = $situation((int)$r['id']);
         $nonUtilisee = 0.0;
@@ -170,7 +170,9 @@ if ($type === 'paiements') {
             $r['heure_debut'] ? substr($r['heure_debut'],0,5) : '',
             $r['heure_fin']   ? substr($r['heure_fin'],0,5)   : '',
             $r['statut'], $r['statut_paiement'], $r['tarif'] ?? '', $r['tarif_montant'] ?? '',
-            $fin2($s['montant_initial'] ?? null), $fin2($s['montant_reduction'] ?? null), $fin2($s['net_du'] ?? null),
+            $fin2($s['montant_initial'] ?? null), $fin2($s['montant_reduction'] ?? null),
+            ($s['montant_reduction'] ?? 0) > 0 ? (!empty($s['prise_en_charge_requisition']) ? 'Prise en charge réquisition' : 'Commerciale') : '',
+            $fin2($s['net_du'] ?? null),
             $fin2($s['total_paye'] ?? null), $fin2($s['total_rembourse'] ?? null),
             in_array($r['statut'], ['validee'], true) ? $fin2($s['solde'] ?? null) : '',
             $nonUtilisee > 0 ? $fin2($nonUtilisee) : '',

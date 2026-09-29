@@ -57,16 +57,23 @@ if ($type === 'reductions') {
     ");
     $stmt->execute($params);
     $lignesTriees = [];
+    $totalPriseEnCharge = 0;
     foreach ($stmt->fetchAll() as $r) {
         $sRed = situation_financiere_reservation($pdo, (int)$r['reservation_id']);
+        // Maintien du tarif suite à réquisition : listé à part, jamais compté comme réduction commerciale
+        $estPriseEnCharge = ($r['origine'] ?? '') === 'requisition';
         $lignesTriees[] = [$r['created_at'], [
             'RESA-' . (int)$r['reservation_id'], date('d/m/Y', strtotime($r['created_at'])), $r['espace_nom'], $r['nom_complet'],
             number_format((float)($sRed['montant_initial'] ?? 0), 0, ',', ' '),
             number_format((float)$r['montant_reduction'], 0, ',', ' '),
-            $libellesStatutRed[$r['statut']] ?? $r['statut'],
+            $estPriseEnCharge ? 'Prise en charge suite à réquisition' : ($libellesStatutRed[$r['statut']] ?? $r['statut']),
             trim(($r['motif'] ?? '') . ($r['motif_statut'] ? ' — ' . $r['motif_statut'] : '')), $r['admin_nom']]];
         if ($r['statut'] === 'appliquee') {
-            $totalGeneral += (float)$r['montant_reduction'];
+            if ($estPriseEnCharge) {
+                $totalPriseEnCharge += (float)$r['montant_reduction'];
+            } else {
+                $totalGeneral += (float)$r['montant_reduction'];
+            }
         }
     }
 
@@ -99,7 +106,8 @@ if ($type === 'reductions') {
         $totalGeneral += $montantRed;
     }
 
-    $libelleTotal = 'Total des réductions appliquées';
+    $libelleTotal = 'Total des réductions commerciales appliquées'
+        . ($totalPriseEnCharge > 0 ? ' (prises en charge suite à réquisition, non comptées : ' . number_format($totalPriseEnCharge, 0, ',', ' ') . ' FCFA)' : '');
     usort($lignesTriees, fn($a, $b) => strcmp($b[0], $a[0]));
     $lignes = array_column($lignesTriees, 1);
 } elseif ($type === 'guichet') {

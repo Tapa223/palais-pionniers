@@ -1505,6 +1505,12 @@ if (!function_exists('situation_financiere_reservation')) {
         $reductionsNonAppliquees = [];
         $reductionsAnnulees = [];
 
+        foreach ($reductions as &$red) {
+            // Origine : « commerciale » (guichet) ou « requisition » (maintien du tarif)
+            $red['origine'] = ($red['origine'] ?? '') === 'requisition' ? 'requisition' : 'commerciale';
+        }
+        unset($red);
+
         foreach ($reductions as $red) {
             if ($red['statut'] === 'appliquee') {
                 $reductionAppliquee = $red;
@@ -1625,6 +1631,8 @@ if (!function_exists('situation_financiere_reservation')) {
             'reduction_appliquee'       => $reductionAppliquee,
             'montant_reduction'         => round($montantReduction, 2),
             'reduction_historique'      => $montantReductionHistorique,
+            'prise_en_charge_requisition' => ($reductionAppliquee && $reductionAppliquee['origine'] === 'requisition'),
+            'requisition_id'            => $r['requisition_id'] ? (int) $r['requisition_id'] : null,
             'reductions_non_appliquees' => $reductionsNonAppliquees,
             'reductions_annulees'       => $reductionsAnnulees,
             'reductions'                => $reductions,
@@ -2254,16 +2262,148 @@ if (!function_exists('requisition_suivi_nouvelle_reservation')) {
     }
 }
 
+if (!function_exists('requisition_blocages_cloture')) {
+    /**
+     * Raisons empêchant de clôturer une réquisition « nouvelle date » /
+     * « autre espace » (liste vide = clôture possible).
+     *
+     * Une réquisition clôturée doit correspondre à un dossier réellement
+     * terminé :
+     *  - nouvelle réservation validée ;
+     *  - solde de la nouvelle réservation à 0 (avec le maintien du tarif,
+     *    il ne reste que ce que le client devait déjà) ;
+     *  - aucun trop-perçu restant à rembourser ;
+     *  - aucun remboursement enregistré mais non effectué.
+     */
+    function requisition_blocages_cloture(PDO $pdo, int $requisitionId): array
+    {
+        $suivi = requisition_suivi_nouvelle_reservation($pdo, $requisitionId);
+        $fmt = fn($m) => number_format((float) $m, 0, ',', ' ');
+        $blocages = [];
+
+        if ($suivi['validee'] === null) {
+            $blocages[] = 'La nouvelle réservation du client n’existe pas encore ou n’a pas été validée.';
+        } else {
+            $s = $suivi['situation'];
+            if ($s && $s['solde'] > 0) {
+                $blocages[] = 'Il reste ' . $fmt($s['solde']) . ' FCFA à encaisser sur la nouvelle réservation #'
+                    . (int) $suivi['validee']['id'] . '.';
+            }
+            if ($s && $s['trop_percu'] > 0) {
+                $blocages[] = 'Un trop-perçu de ' . $fmt($s['trop_percu']) . ' FCFA doit d’abord être remboursé.';
+            }
+        }
+
+        $stmt = $pdo->prepare("
+            SELECT COUNT(*)
+            FROM remboursements
+            WHERE requisition_id = ?
+              AND (resultat IS NULL OR resultat <> 'effectue')
+        ");
+        $stmt->execute([$requisitionId]);
+        if ((int) $stmt->fetchColumn() > 0) {
+            $blocages[] = 'Un remboursement est enregistré mais pas encore effectué.';
+        }
+
+        return $blocages;
+    }
+}
+
+if (!function_exists('reductions_origine_disponible')) {
+    /**
+     * La colonne reductions_accordees.origine existe-t-elle ?
+     * (migration « origine des réductions »). Sans elle, toutes les
+     * réductions sont considérées comme commerciales.
+     */
+    function reductions_origine_disponible(PDO $pdo): bool
+    {
+        static $disponible = null;
+        if ($disponible === null) {
+            $disponible = (bool) $pdo->query("SHOW COLUMNS FROM reductions_accordees LIKE 'origine'")->fetch();
+        }
+        return $disponible;
+    }
+}
+
+if (!function_exists('estimation_maintien_tarif')) {
+    /**
+     * Garantie de l'ancien tarif pour une réservation issue d'une réquisition.
+     *
+     * Le client ne doit jamais devoir plus pour la nouvelle réservation (B)
+     * que ce qu'il devait réellement pour la réservation réquisitionnée (A) :
+     * montant initial de A − réduction appliquée sur A.
+     *
+     * Retourne null si la réservation n'est pas issue d'une réquisition, sinon :
+     *  - origine_id, requisition_id ;
+     *  - net_du_origine        : montant réellement dû pour A ;
+     *  - reduction_origine     : réduction appliquée sur A (ligne) ou null ;
+     *  - montant_initial       : tarif normal de B (figé ou calculé) ;
+     *  - report_commercial     : réduction de A qui serait reportée (plafonnée) ;
+     *  - prise_en_charge       : montant pris en charge suite à la réquisition
+     *                            (0 si B ne coûte pas plus que A).
+     */
+    function estimation_maintien_tarif(PDO $pdo, int $nouvelleReservationId): ?array
+    {
+        $stmt = $pdo->prepare("
+            SELECT r.requisition_id, rm.reservation_id AS origine_id
+            FROM reservations r
+            JOIN requisitions_ministerielles rm ON rm.id = r.requisition_id
+            WHERE r.id = ?
+        ");
+        $stmt->execute([$nouvelleReservationId]);
+        $lien = $stmt->fetch();
+
+        if (!$lien || empty($lien['origine_id']) || (int) $lien['origine_id'] === $nouvelleReservationId) {
+            return null;
+        }
+
+        $origineId = (int) $lien['origine_id'];
+        $sOrigine = situation_financiere_reservation($pdo, $origineId);
+        if (!$sOrigine) {
+            return null;
+        }
+
+        $montantInitial = montant_attendu_reservation($pdo, $nouvelleReservationId);
+        $reductionOrigine = $sOrigine['reduction_appliquee'];
+        $reportCommercial = $reductionOrigine
+            ? min((float) $reductionOrigine['montant_reduction'], $montantInitial)
+            : 0.0;
+
+        $netDuOrigine = $sOrigine['net_du'];
+        $priseEnCharge = ($montantInitial - $reportCommercial) > $netDuOrigine + 0.001
+            ? round($montantInitial - $netDuOrigine, 2)
+            : 0.0;
+
+        return [
+            'origine_id'        => $origineId,
+            'requisition_id'    => (int) $lien['requisition_id'],
+            'net_du_origine'    => $netDuOrigine,
+            'reduction_origine' => $reductionOrigine,
+            'montant_initial'   => $montantInitial,
+            'report_commercial' => $reportCommercial,
+            'prise_en_charge'   => $priseEnCharge,
+        ];
+    }
+}
+
 if (!function_exists('reporter_reduction_requisition')) {
     /**
-     * Reporte la réduction appliquée d'une réservation réquisitionnée vers
-     * la nouvelle réservation qui la remplace (nouvelle date / autre espace).
+     * Réductions de la nouvelle réservation (B) issue d'une réquisition.
      *
-     * - le montant reporté est plafonné au montant initial de la nouvelle
-     *   réservation ;
-     * - la réduction d'origine reste inchangée (historique) ;
-     * - rien n'est fait si la nouvelle réservation a déjà une réduction
-     *   appliquée, ou si l'origine n'en a pas.
+     * 1. B coûte plus que ce qui était réellement dû pour A :
+     *    une seule réduction « appliquée » d'origine « requisition » est créée
+     *    sur B, égale à (montant initial de B − montant dû pour A).
+     *    Le client doit ainsi exactement ce qu'il devait pour A.
+     *    La réduction commerciale éventuelle de A n'est ni reportée ni modifiée :
+     *    elle reste sur A (historique) et la prise en charge y est liée
+     *    (reportee_de) pour la traçabilité.
+     *
+     * 2. Sinon (B coûte autant ou moins) : comportement existant — la
+     *    réduction appliquée de A est reportée sur B, plafonnée au montant
+     *    initial de B ; le trop-perçu éventuel suit le circuit habituel.
+     *
+     * Rien n'est fait si B a déjà une réduction appliquée.
+     * Retourne le montant de la réduction créée sur B.
      *
      * DOIT être appelée à l'intérieur d'une transaction.
      */
@@ -2275,20 +2415,6 @@ if (!function_exists('reporter_reduction_requisition')) {
     ): float {
 
         $stmt = $pdo->prepare("
-            SELECT *
-            FROM reductions_accordees
-            WHERE reservation_id = ?
-              AND statut = 'appliquee'
-            LIMIT 1
-        ");
-        $stmt->execute([$origineId]);
-        $origine = $stmt->fetch();
-
-        if (!$origine) {
-            return 0.0;
-        }
-
-        $stmt = $pdo->prepare("
             SELECT COUNT(*)
             FROM reductions_accordees
             WHERE reservation_id = ?
@@ -2297,6 +2423,59 @@ if (!function_exists('reporter_reduction_requisition')) {
         $stmt->execute([$nouvelleReservationId]);
 
         if ((int) $stmt->fetchColumn() > 0) {
+            return 0.0;
+        }
+
+        $estimation = estimation_maintien_tarif($pdo, $nouvelleReservationId);
+        $origine = $estimation['reduction_origine'] ?? null;
+        $fmt = fn($m) => number_format((float) $m, 0, ',', ' ');
+
+        $saisiPar = (int) ($_SESSION['user_id'] ?? 0);
+        if ($saisiPar <= 0) {
+            $stmt = $pdo->prepare("SELECT declenche_par FROM requisitions_ministerielles WHERE id = ?");
+            $stmt->execute([$requisitionId]);
+            $saisiPar = (int) $stmt->fetchColumn() ?: (int) ($origine['saisi_par'] ?? 0);
+        }
+
+        // --- 1. Maintien de l'ancien tarif : prise en charge suite à réquisition ---
+        if ($estimation && $estimation['prise_en_charge'] > 0) {
+
+            $montant = $estimation['prise_en_charge'];
+            $motif = 'Maintien du tarif — réquisition #' . $requisitionId
+                . ' : réservation #' . $origineId . ' due ' . $fmt($estimation['net_du_origine']) . ' FCFA'
+                . ($origine ? ' (dont ' . $fmt($origine['montant_reduction']) . ' FCFA de réduction commerciale sur #' . $origineId . ')' : '')
+                . ', nouvelle réservation au tarif normal de ' . $fmt($estimation['montant_initial']) . ' FCFA.';
+
+            $colonnes = 'reservation_id, montant_reduction, pourcentage, motif, autorise_par, reference_accord, statut, reportee_de, saisi_par';
+            $valeurs  = '?, ?, NULL, ?, ?, ?, \'appliquee\', ?, ?';
+            if (reductions_origine_disponible($pdo)) {
+                $colonnes .= ', origine';
+                $valeurs  .= ', \'requisition\'';
+            }
+
+            $pdo->prepare("INSERT INTO reductions_accordees ($colonnes) VALUES ($valeurs)")->execute([
+                $nouvelleReservationId,
+                $montant,
+                $motif,
+                'Réquisition #' . $requisitionId,
+                'REQ-' . $requisitionId,
+                $origine ? (int) $origine['id'] : null,
+                $saisiPar,
+            ]);
+
+            log_activity(
+                'maintien_tarif_requisition',
+                'reservations',
+                'Maintien du tarif (réquisition #' . $requisitionId . ') : ' . $fmt($montant)
+                    . ' FCFA pris en charge sur la réservation #' . $nouvelleReservationId
+                    . ' — le client doit ' . $fmt($estimation['net_du_origine']) . ' FCFA comme pour la réservation #' . $origineId
+            );
+
+            return $montant;
+        }
+
+        // --- 2. Comportement existant : report de la réduction de A ---
+        if (!$origine) {
             return 0.0;
         }
 
@@ -2323,13 +2502,13 @@ if (!function_exists('reporter_reduction_requisition')) {
             $origine['autorise_par'],
             $origine['reference_accord'],
             (int) $origine['id'],
-            (int) ($_SESSION['user_id'] ?? $origine['saisi_par']),
+            $saisiPar ?: (int) $origine['saisi_par'],
         ]);
 
         log_activity(
             'reduction_reportee',
             'reservations',
-            'Réduction de ' . number_format($montant, 0, ',', ' ') . ' FCFA reportée de la réservation #'
+            'Réduction de ' . $fmt($montant) . ' FCFA reportée de la réservation #'
                 . $origineId . ' vers la réservation #' . $nouvelleReservationId
                 . ' (réquisition #' . $requisitionId . ')'
         );

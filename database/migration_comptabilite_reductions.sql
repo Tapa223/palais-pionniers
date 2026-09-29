@@ -58,3 +58,19 @@ CREATE TABLE IF NOT EXISTS `reductions_accordees` (
   CONSTRAINT `fk_reduction_reportee_de` FOREIGN KEY (`reportee_de`) REFERENCES `reductions_accordees` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
   COMMENT='Réductions accordées au guichet (distinctes des paiements)';
+
+-- =====================================================================
+--  Origine des réductions (ajout du 29/09/2026 — déjà exécuté en local)
+--  commerciale  : réduction accordée au guichet (comportement actuel)
+--  requisition  : prise en charge suite à réquisition (maintien du tarif)
+--  Les réductions existantes prennent la valeur « commerciale ».
+--  La contrainte « une seule réduction appliquée par réservation » est conservée.
+-- =====================================================================
+
+ALTER TABLE `reductions_accordees`
+  ADD COLUMN IF NOT EXISTS `origine` ENUM('commerciale','requisition') NOT NULL DEFAULT 'commerciale'
+    COMMENT 'commerciale = réduction accordée au guichet ; requisition = prise en charge du surcoût imposé par une réquisition'
+    AFTER `statut`;
+
+ALTER TABLE `reductions_accordees`
+  ADD INDEX IF NOT EXISTS `idx_reduction_origine` (`origine`, `statut`);

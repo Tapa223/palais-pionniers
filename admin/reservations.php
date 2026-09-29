@@ -377,7 +377,7 @@ require __DIR__ . '/_admin_header.php';
                 </tr>
             </thead>
             <tbody class="divide-y divide-slate-50">
-                <?php foreach ($reservations as $res): ?>
+                <?php foreach ($reservations as $res): $maintienTarif = null; ?>
                 <tr id="resa-<?= $res['id'] ?>" class="hover:bg-slate-50/50 transition-colors">
                     
                     <td class="p-6">
@@ -393,6 +393,17 @@ require __DIR__ . '/_admin_header.php';
                             <div class="mt-1 text-[9px] font-black uppercase tracking-widest text-amber-600">
                                 <i class="fas fa-landmark mr-1"></i>Suite à la réquisition #<?= (int)$res['requisition_id'] ?>
                             </div>
+                            <?php
+                            // Tarif garanti : ce que le client paiera réellement si cette demande est acceptée
+                            $maintienTarif = $res['statut'] === 'en_attente' ? estimation_maintien_tarif($pdo, (int)$res['id']) : null;
+                            if ($maintienTarif && $maintienTarif['prise_en_charge'] > 0):
+                            ?>
+                            <div class="mt-1 text-[10px] font-bold text-orange-700">
+                                Tarif garanti : <?= number_format($maintienTarif['net_du_origine'], 0, ',', ' ') ?> FCFA au lieu de
+                                <?= number_format($maintienTarif['montant_initial'], 0, ',', ' ') ?> FCFA
+                                (<?= number_format($maintienTarif['prise_en_charge'], 0, ',', ' ') ?> FCFA pris en charge)
+                            </div>
+                            <?php endif; ?>
                         <?php endif; ?>
                         <div class="flex flex-wrap gap-2 mt-2">
                             <?php if($res['tarif_nom']): ?>
@@ -471,7 +482,11 @@ require __DIR__ . '/_admin_header.php';
                             <input type="hidden" name="id" value="<?= $res['id'] ?>">
 
                             <?php if ($res['statut'] === 'en_attente'): ?>
-                                <button name="action" value="valider" class="bg-emerald-500 text-white px-4 py-2 rounded-xl hover:bg-emerald-600 transition text-[10px] font-black uppercase tracking-widest">
+                                <button name="action" value="valider"
+                                        <?php if (!empty($maintienTarif) && $maintienTarif['prise_en_charge'] > 0 && !empty($res['requisition_id'])): ?>
+                                        onclick="return confirm(<?= e(json_encode('Réquisition : le client paiera ' . number_format($maintienTarif['net_du_origine'], 0, ',', ' ') . ' FCFA (tarif de sa réservation initiale). ' . number_format($maintienTarif['prise_en_charge'], 0, ',', ' ') . ' FCFA seront pris en charge au titre de la réquisition. Accepter cette demande ?', JSON_UNESCAPED_UNICODE)) ?>)"
+                                        <?php endif; ?>
+                                        class="bg-emerald-500 text-white px-4 py-2 rounded-xl hover:bg-emerald-600 transition text-[10px] font-black uppercase tracking-widest">
                                     Accepter
                                 </button>
                                 <button name="action" value="refuser" class="border border-rose-100 text-rose-500 px-4 py-2 rounded-xl hover:bg-rose-50 transition text-[10px] font-black uppercase tracking-widest" onclick="return confirm('Refuser ?')">

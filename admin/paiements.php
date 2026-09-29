@@ -171,6 +171,11 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (mb_strlen($motifStatut) < 3) {
                     throw new RuntimeException('Indiquez la raison du changement.');
                 }
+                // Le maintien du tarif suite à réquisition n'est pas une réduction commerciale :
+                // il ne peut être ni annulé ni marqué « non utilisé ».
+                if ($s['prise_en_charge_requisition'] && (int)$s['reduction_appliquee']['id'] === $reductionId) {
+                    throw new RuntimeException('Le maintien du tarif suite à réquisition ne peut pas être annulé ni marqué non utilisé.');
+                }
 
                 $upd = $pdo->prepare("
                     UPDATE reductions_accordees
@@ -208,7 +213,8 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 // Le client règle finalement le plein tarif : la réduction accordée
                 // reste tracée mais n'est pas utilisée (aucune réduction encaissée).
-                if (!empty($_POST['plein_tarif']) && $s['reduction_appliquee']) {
+                // (sans effet sur une prise en charge suite à réquisition)
+                if (!empty($_POST['plein_tarif']) && $s['reduction_appliquee'] && !$s['prise_en_charge_requisition']) {
                     $pdo->prepare("
                         UPDATE reductions_accordees
                         SET statut = 'non_appliquee',
@@ -539,6 +545,9 @@ require __DIR__ . '/_admin_header.php';
         // Avertissement d'expiration : uniquement tant qu'aucun paiement n'a été reçu (délai de 48 h)
         $heuresRestantes = $s['echeance_premier_paiement'] ? ($s['echeance_premier_paiement'] - time()) / 3600 : null;
         $red = $s['reduction_appliquee'];
+        // Maintien du tarif suite à réquisition : pas une réduction commerciale, non modifiable
+        $priseEnCharge = $s['prise_en_charge_requisition'];
+        $libelleMaintien = 'Maintien du tarif — réquisition #' . (int)($s['requisition_id'] ?? 0);
         $rechercheTexte = mb_strtolower($r['nom_complet'] . ' ' . $r['espace_nom'] . ' #resa-' . $rid . ' ' . $rid . ' ' . ($r['telephone'] ?? '') . ' ' . date('d/m/Y', strtotime($r['date_resa'])));
     ?>
     <div id="resa-<?= $rid ?>" data-recherche="<?= e($rechercheTexte) ?>" class="ligne-attente">
@@ -562,7 +571,7 @@ require __DIR__ . '/_admin_header.php';
           <?php if ($r['telephone']): ?>
           <span><i class="fas fa-phone text-accent text-[10px] mr-1"></i><?= e($r['telephone']) ?></span>
           <?php endif; ?>
-          <span class="font-black text-primary"><i class="fas fa-tag text-accent text-[10px] mr-1"></i><?= $fcfa($s['net_du']) ?> FCFA<?= $red ? ' <span class="font-bold text-orange-600">(réduction ' . $fcfa($s['montant_reduction']) . ')</span>' : '' ?></span>
+          <span class="font-black text-primary"><i class="fas fa-tag text-accent text-[10px] mr-1"></i><?= $fcfa($s['net_du']) ?> FCFA<?= $red ? ' <span class="font-bold text-orange-600">(' . ($priseEnCharge ? e($libelleMaintien) . ' : ' : 'réduction ') . $fcfa($s['montant_reduction']) . ')</span>' : '' ?></span>
           <?php if ($s['total_paye'] > 0): ?>
           <span class="font-black <?= $s['en_retard'] ? 'text-red-600 bg-red-50' : 'text-sky-700 bg-sky-50' ?> px-2 py-0.5 rounded-full">
             <i class="fas fa-coins text-[10px] mr-1"></i>Acompte versé : <?= $fcfa($s['paye_net']) ?> FCFA — <?= $s['en_retard'] ? 'solde en retard' : 'solde' ?> : <?= $fcfa($s['solde']) ?> FCFA<?= $s['echeance_solde'] ? ($s['en_retard'] ? ' — échéance dépassée (' . date('d/m/Y H:i', $s['echeance_solde']) . ')' : ' — à régler avant le ' . date('d/m/Y H:i', $s['echeance_solde'])) : '' ?>
@@ -608,7 +617,7 @@ require __DIR__ . '/_admin_header.php';
         <input type="hidden" name="action" value="accorder_reduction">
         <input type="hidden" name="reservation_id" value="<?= $rid ?>">
       </form>
-      <?php else: ?>
+      <?php elseif (!$priseEnCharge): ?>
       <form id="fRedM-<?= $rid ?>" method="POST" class="hidden" onsubmit="return confirm('Confirmer le changement de cette réduction ?')">
         <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
         <input type="hidden" name="jeton" value="<?= paiement_jeton() ?>">
@@ -632,6 +641,10 @@ require __DIR__ . '/_admin_header.php';
               <button type="button" onclick="basculer('reduction-<?= $rid ?>')" class="text-xs font-black px-3 py-2 rounded-xl border-2 border-orange-200 bg-white text-orange-700 hover:bg-slate-50 transition">
                 <i class="fas fa-percent mr-1"></i>Appliquer une réduction
               </button>
+              <?php elseif ($priseEnCharge): ?>
+              <span class="text-xs font-bold px-3 py-2 rounded-xl border-2 border-orange-200 bg-orange-50 text-orange-700" title="Prise en charge suite à réquisition : le client ne paie pas plus que pour sa réservation initiale">
+                <?= e($libelleMaintien) ?> : <?= $fcfa($s['montant_reduction']) ?> pris en charge
+              </span>
               <?php else: ?>
               <button type="button" onclick="basculer('reductionModif-<?= $rid ?>')" class="text-xs font-bold px-3 py-2 rounded-xl border-2 border-orange-200 bg-white text-orange-700 hover:bg-slate-50 transition">
                 Réduction de <?= $fcfa($s['montant_reduction']) ?> appliquée · <span class="underline">modifier</span>
@@ -676,7 +689,7 @@ require __DIR__ . '/_admin_header.php';
           <button type="submit" form="fRed-<?= $rid ?>" class="bg-amber-600 hover:bg-amber-700 text-white text-xs font-black uppercase px-5 py-2.5 rounded-xl transition">Appliquer la réduction</button>
         </div>
         </div>
-        <?php else: ?>
+        <?php elseif (!$priseEnCharge): ?>
         <!-- Modification de la réduction : visible seulement après clic sur « modifier » -->
         <div id="reductionModif-<?= $rid ?>" class="hidden bg-orange-50 border-2 border-orange-200 rounded-xl p-4 space-y-3">
         <p class="text-xs text-orange-800">
@@ -742,7 +755,7 @@ require __DIR__ . '/_admin_header.php';
           </div>
         </div>
 
-        <?php if ($red): ?>
+        <?php if ($red && !$priseEnCharge): ?>
         <label class="flex items-start gap-2 text-xs text-orange-800 bg-orange-50 border border-orange-200 rounded-xl p-3 cursor-pointer">
           <input form="fPay-<?= $rid ?>" type="checkbox" name="plein_tarif" value="1" onchange="majAffichage(<?= $rid ?>)" class="mt-0.5 w-4 h-4 accent-amber-600" id="pleinTarif-<?= $rid ?>"
                  data-solde-plein="<?= (int)round($s['montant_initial'] - $s['paye_net']) ?>" data-net-plein="<?= (int)round($s['montant_initial']) ?>">
@@ -886,7 +899,7 @@ require __DIR__ . '/_admin_header.php';
 
         <?php if ($so && $so['montant_reduction'] > 0): ?>
         <div class="bg-orange-50 border border-orange-200 rounded-xl p-3">
-          <p class="text-[10px] font-black uppercase tracking-widest text-orange-700 mb-1"><i class="fas fa-percent mr-1"></i> Réduction accordée</p>
+          <p class="text-[10px] font-black uppercase tracking-widest text-orange-700 mb-1"><i class="fas fa-percent mr-1"></i> <?= $so['prise_en_charge_requisition'] ? 'Maintien du tarif — réquisition #' . (int)$so['requisition_id'] : 'Réduction accordée' ?></p>
           <p class="text-sm font-black text-orange-800">-<?= $fcfa($so['montant_reduction']) ?> FCFA</p>
           <?php $motifRed = $so['reduction_appliquee']['motif'] ?? $openPaiement['motif_reduction'] ?? ''; ?>
           <?php if ($motifRed): ?><p class="text-xs text-orange-700 mt-1"><?= e($motifRed) ?></p><?php endif; ?>
