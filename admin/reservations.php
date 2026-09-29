@@ -112,10 +112,20 @@ if (!$readonly && isset($_POST['action'])) {
                     . ($transfert['trop_percu'] > 0 ? ", trop-perçu à rembourser : {$fmt($transfert['trop_percu'])} FCFA" : '') . '.',
                     "requisition-detail.php?id=$reqIdVal"
                 );
+            } elseif (($sfB = situation_financiere_reservation($pdo, $id)) && $sfB['total_paye'] > 0) {
+                // Revalidation : les paiements avaient déjà été rattachés à B lors
+                // d'une validation précédente (aucun nouveau transfert).
+                $montantAPayer = $sfB['solde'];
+                $suiteClient = " Les paiements déjà rattachés ({$fmt($sfB['paye_net'])} FCFA) restent acquis"
+                    . ($sfB['solde'] > 0 ? " : il reste {$fmt($sfB['solde'])} FCFA à régler au guichet." : ' : aucun nouveau paiement n\'est nécessaire.');
+                notify('admin_comptable', 'reservation_validee',
+                    "Réservation " . ref_resa($id) . " de nouveau validée (" . ref_req($reqIdVal) . ") — {$fmt($sfB['paye_net'])} FCFA déjà rattachés"
+                    . ($sfB['solde'] > 0 ? ", solde à encaisser : {$fmt($sfB['solde'])} FCFA" : '') . '.',
+                    "paiements.php?resa=$id"
+                );
             } else {
                 // Réservation initiale non payée : aucun transfert, aucun
                 // remboursement ; paiement attendu dans le délai habituel de 48 h.
-                $sfB = situation_financiere_reservation($pdo, $id);
                 $montantAPayer = $sfB ? $sfB['solde'] : 0.0;
                 $mentionTarif = ($sfB && $sfB['prise_en_charge_requisition'])
                     ? " (tarif de votre réservation initiale maintenu)"
@@ -141,7 +151,9 @@ if (!$readonly && isset($_POST['action'])) {
             $msg = ['ok', 'Réservation confirmée (réquisition #' . $reqIdVal . ').'
                 . ($transfert['transfere'] > 0
                     ? ' ' . $fmt($transfert['transfere']) . ' FCFA déjà encaissés y ont été rattachés.'
-                    : ' Aucun paiement sur la réservation initiale : ' . $fmt($montantAPayer) . ' FCFA à régler sous 48 h. Le comptable a été notifié pour l\'encaissement.')
+                    : ($sfB['total_paye'] > 0
+                        ? ' Paiements déjà rattachés : ' . $fmt($sfB['paye_net']) . ' FCFA' . ($sfB['solde'] > 0 ? ', solde ' . $fmt($sfB['solde']) . ' FCFA.' : ', réservation réglée.')
+                        : ' Aucun paiement sur la réservation initiale : ' . $fmt($montantAPayer) . ' FCFA à régler sous 48 h. Le comptable a été notifié pour l\'encaissement.'))
                 . ($annulees ? ' ' . count($annulees) . ' demande(s) concurrente(s) annulée(s).' : '')];
             goto finValider;
         }
@@ -176,13 +188,13 @@ if (!$readonly && isset($_POST['action'])) {
         finValider:
 
     } elseif ($action === 'refuser') {
-        // Une réservation issue d'une réquisition qui porte déjà des paiements transférés
-        // ne peut pas être refusée ici : l'argent resterait rattaché à une demande refusée.
-        $chkReq = $pdo->prepare("SELECT r.requisition_id, (SELECT COUNT(*) FROM paiements p WHERE p.reservation_id = r.id) AS nb_paiements FROM reservations r WHERE r.id = ?");
+        // Réservation B issue d'une réquisition : pas de refus si elle porte des
+        // paiements (transférés ou encaissés) ni si la réquisition est clôturée.
+        $chkReq = $pdo->prepare("SELECT r.requisition_id FROM reservations r WHERE r.id = ?");
         $chkReq->execute([$id]);
         $chkReq = $chkReq->fetch();
-        if ($chkReq && !empty($chkReq['requisition_id']) && (int)$chkReq['nb_paiements'] > 0) {
-            $msg = ['error', 'Cette réservation (réquisition #' . (int)$chkReq['requisition_id'] . ') porte déjà des paiements : elle ne peut pas être refusée. Contactez le service comptable.'];
+        if ($blocageB = reservation_requisition_blocage($pdo, $id, 'refuser')) {
+            $msg = ['error', $blocageB];
             goto finRefus;
         }
         $stmt = $pdo->prepare("UPDATE reservations SET statut = 'refusee', notification_vue = 0 WHERE id = ?");
@@ -225,6 +237,13 @@ if (!$readonly && isset($_POST['action'])) {
         $chkStatut->execute([$id]);
         if ($chkStatut->fetchColumn() === 'requisitionnee') {
             $msg = ['error', 'Une réservation réquisitionnée ne peut pas être remise en attente : son traitement se fait depuis la réquisition.'];
+            goto finAnnuler;
+        }
+        // Réservation B issue d'une réquisition : pas de remise en attente si
+        // elle porte des paiements, si la réquisition est clôturée, ou si elle
+        // a été refusée / a expiré (le client dépose une nouvelle demande).
+        if ($blocageB = reservation_requisition_blocage($pdo, $id, 'annuler')) {
+            $msg = ['error', $blocageB];
             goto finAnnuler;
         }
         $stmt = $pdo->prepare("UPDATE reservations SET statut = 'en_attente', notification_vue = 0 WHERE id = ?");
@@ -496,6 +515,12 @@ require __DIR__ . '/_admin_header.php';
                             <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
                             <input type="hidden" name="id" value="<?= $res['id'] ?>">
 
+                            <?php
+                                // Réservation B : refus / remise en attente bloqués côté serveur
+                                // (paiements, réquisition clôturée) — boutons masqués en conséquence.
+                                $blocageRefus = !empty($res['requisition_id']) ? reservation_requisition_blocage($pdo, (int)$res['id'], 'refuser') : null;
+                                $blocageAnnul = !empty($res['requisition_id']) ? reservation_requisition_blocage($pdo, (int)$res['id'], 'annuler') : null;
+                            ?>
                             <?php if ($res['statut'] === 'en_attente'): ?>
                                 <button name="action" value="valider"
                                         <?php if (!empty($maintienTarif) && $maintienTarif['prise_en_charge'] > 0 && !empty($res['requisition_id'])): ?>
@@ -504,14 +529,22 @@ require __DIR__ . '/_admin_header.php';
                                         class="bg-emerald-500 text-white px-4 py-2 rounded-xl hover:bg-emerald-600 transition text-[10px] font-black uppercase tracking-widest">
                                     Accepter
                                 </button>
+                                <?php if (!$blocageRefus): ?>
                                 <button name="action" value="refuser" class="border border-rose-100 text-rose-500 px-4 py-2 rounded-xl hover:bg-rose-50 transition text-[10px] font-black uppercase tracking-widest" onclick="return confirm('Refuser ?')">
                                     Refuser
                                 </button>
+                                <?php endif; ?>
 
                             <?php elseif ($res['statut'] !== 'requisitionnee'): ?>
+                                <?php if (!$blocageAnnul): ?>
                                 <button name="action" value="annuler" class="bg-slate-900 text-white px-4 py-2 rounded-xl hover:bg-black transition text-[10px] font-black uppercase tracking-widest">
                                     Annuler
                                 </button>
+                                <?php else: ?>
+                                <span class="text-[9px] font-black uppercase text-slate-400 py-2" title="<?= e($blocageAnnul) ?>">
+                                    <i class="fas fa-lock mr-1"></i>Suivi par la réquisition
+                                </span>
+                                <?php endif; ?>
                                 <?php if ($res['statut'] === 'validee' && (is_superadmin() || $role === 'admin_comptable')): ?>
                                 <button type="button" onclick="document.getElementById('reqModal-<?= $res['id'] ?>').classList.remove('hidden')"
                                         class="bg-amber-500 text-white px-4 py-2 rounded-xl hover:bg-amber-600 transition text-[10px] font-black uppercase tracking-widest">

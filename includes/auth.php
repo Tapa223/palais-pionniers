@@ -2652,6 +2652,93 @@ if (!function_exists('historique_financier_reservation')) {
     }
 }
 
+if (!function_exists('requisition_remboursement_attendu')) {
+    /**
+     * Remboursement réellement dû au client pour une réquisition, calculé
+     * uniquement sur une base financière réelle (paiements encaissés −
+     * remboursements effectués). Règle unique pour requisition-detail.php
+     * et requisitions.php :
+     *  - choix « remboursement » : tout ce que le client a réellement payé
+     *    sur la réservation d'origine (payé net) ;
+     *  - « nouvelle date » / « autre espace » : le trop-perçu réel de la
+     *    nouvelle réservation validée ;
+     *  - sinon (ou si rien n'a été payé) : aucun remboursement.
+     *
+     * @return array{type: ?string, montant: float, reservation_id: ?int}
+     */
+    function requisition_remboursement_attendu(PDO $pdo, int $requisitionId): array
+    {
+        $aucun = ['type' => null, 'montant' => 0.0, 'reservation_id' => null];
+
+        $stmt = $pdo->prepare("SELECT reservation_id, choix_client, statut FROM requisitions_ministerielles WHERE id = ?");
+        $stmt->execute([$requisitionId]);
+        $rq = $stmt->fetch();
+
+        if (!$rq || $rq['statut'] === 'cloturee') {
+            return $aucun;
+        }
+
+        if ($rq['choix_client'] === 'remboursement') {
+            $s = situation_financiere_reservation($pdo, (int)$rq['reservation_id']);
+            $montant = $s ? round((float)$s['paye_net'], 2) : 0.0;
+            return $montant > 0
+                ? ['type' => 'remboursement', 'montant' => $montant, 'reservation_id' => (int)$rq['reservation_id']]
+                : $aucun;
+        }
+
+        if (in_array($rq['choix_client'], ['nouvelle_date', 'autre_espace'], true)) {
+            $suivi = requisition_suivi_nouvelle_reservation($pdo, $requisitionId);
+            return $suivi['a_rembourser']
+                ? ['type' => 'trop_percu', 'montant' => round((float)$suivi['trop_percu'], 2), 'reservation_id' => (int)$suivi['validee']['id']]
+                : $aucun;
+        }
+
+        return $aucun;
+    }
+}
+
+if (!function_exists('reservation_requisition_blocage')) {
+    /**
+     * Raison empêchant de refuser ou de remettre en attente une nouvelle
+     * réservation B issue d'une réquisition (null = action possible).
+     * Ne concerne que les réservations B (requisition_id renseigné) :
+     *  - réquisition déjà clôturée : B n'est plus modifiable ;
+     *  - B porte des paiements (transférés depuis A ou encaissés) ;
+     *  - remise en attente d'une B refusée, annulée ou expirée : le client
+     *    dépose une nouvelle demande (une seule B active à la fois).
+     */
+    function reservation_requisition_blocage(PDO $pdo, int $reservationId, string $action): ?string
+    {
+        $stmt = $pdo->prepare("
+            SELECT r.statut, r.requisition_id, rm.statut AS requisition_statut,
+                   (SELECT COUNT(*) FROM paiements p WHERE p.reservation_id = r.id) AS nb_paiements
+            FROM reservations r
+            LEFT JOIN requisitions_ministerielles rm ON rm.id = r.requisition_id
+            WHERE r.id = ?
+        ");
+        $stmt->execute([$reservationId]);
+        $r = $stmt->fetch();
+
+        if (!$r || empty($r['requisition_id'])) {
+            return null;
+        }
+
+        $req = 'la réquisition #' . (int)$r['requisition_id'];
+
+        if ($r['requisition_statut'] === 'cloturee') {
+            return "Cette réservation est issue de $req, déjà clôturée : elle ne peut plus être modifiée.";
+        }
+        if ((int)$r['nb_paiements'] > 0) {
+            return "Cette réservation (issue de $req) porte déjà des paiements : elle ne peut être ni refusée ni remise en attente. Contactez le service comptable.";
+        }
+        if ($action === 'annuler' && in_array($r['statut'], ['refusee', 'annulee', 'expiree'], true)) {
+            return "Cette réservation issue de $req ne peut pas être remise en attente : le client dépose une nouvelle demande depuis son espace.";
+        }
+
+        return null;
+    }
+}
+
 if (!function_exists('requisition_blocages_cloture')) {
     /**
      * Raisons empêchant de clôturer une réquisition « nouvelle date » /

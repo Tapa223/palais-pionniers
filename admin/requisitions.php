@@ -193,7 +193,10 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     && $requisition['choix_client'] === 'remboursement'
                 ) {
 
-                    $montantPaye = (float)$requisition['montant_verse'];
+                    // Règle commune avec requisition-detail.php : totalité du montant
+                    // réellement payé (paiements − remboursements déjà effectués)
+                    $rembAttendu = requisition_remboursement_attendu($pdo, $id);
+                    $montantPaye = $rembAttendu['type'] === 'remboursement' ? $rembAttendu['montant'] : 0.0;
                     $montantARembourser = $montantPaye;
 
                     $montantRembourse = (float)(
@@ -221,10 +224,11 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
                         abs(
                             $montantRembourse
                             - $montantARembourser
-                        ) > 0.01
+                        ) > 0.5
                     ) {
                         throw new RuntimeException(
-                            'Pour clôturer la réquisition, le montant réellement remboursé doit correspondre au montant à rembourser.'
+                            'Le remboursement doit porter sur la totalité du montant dû au client : '
+                            . number_format($montantARembourser, 0, ',', ' ') . ' FCFA (montant réellement payé).'
                         );
                     }
 
@@ -243,9 +247,11 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
                         );
                     }
 
-                    if ($resultat === '') {
+                    if ($resultat !== 'effectue') {
+                        // Même règle que requisition-detail.php : la réquisition
+                        // n'est clôturée que par un remboursement réellement effectué.
                         throw new RuntimeException(
-                            'Veuillez préciser le résultat du remboursement.'
+                            'Le remboursement doit être marqué comme effectué pour clôturer la réquisition.'
                         );
                     }
 

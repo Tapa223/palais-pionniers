@@ -277,23 +277,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$readonly) {
 
                 $estTropPercu = $suiviTrop !== null && $suiviTrop['a_rembourser'];
 
-                if ($rqAction['choix_client'] !== 'remboursement' && !$estTropPercu) {
+                // Règle commune (requisitions.php utilise la même) : montant réel dû au client
+                $rembAttendu = requisition_remboursement_attendu($pdo, (int)$id);
+
+                if ($rembAttendu['type'] === null) {
 
                     $msg = [
                         'err',
                         'Cette opération ne correspond pas à un remboursement.'
                     ];
 
-                } elseif ($estTropPercu && (
-                    (float)($_POST['montant_a_rembourser'] ?? 0) <= 0
-                    || (float)($_POST['montant_a_rembourser'] ?? 0) > $suiviTrop['trop_percu']
-                )) {
+                } elseif (abs((float)($_POST['montant_a_rembourser'] ?? 0) - $rembAttendu['montant']) > 0.5) {
 
                     $msg = [
                         'err',
-                        'Le montant à rembourser doit être compris entre 1 et '
-                        . number_format($suiviTrop['trop_percu'], 0, ',', ' ')
-                        . ' FCFA (trop-perçu constaté).'
+                        'Le remboursement doit porter sur la totalité du montant dû au client : '
+                        . number_format($rembAttendu['montant'], 0, ',', ' ')
+                        . ' FCFA' . ($rembAttendu['type'] === 'trop_percu' ? ' (trop-perçu constaté).' : ' (montant réellement payé).')
                     ];
 
                 } elseif ($rqAction['statut'] === 'cloturee') {
@@ -368,6 +368,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$readonly) {
                         $pdo->beginTransaction();
 
                         try {
+
+                            // Verrou : empêche un double traitement simultané
+                            $verrou = $pdo->prepare("SELECT statut FROM requisitions_ministerielles WHERE id = ? FOR UPDATE");
+                            $verrou->execute([$id]);
+                            if ($verrou->fetchColumn() === 'cloturee') {
+                                throw new RuntimeException('Cette réquisition est déjà clôturée.');
+                            }
 
                             /*
                              * Récupérer l'opération active.
@@ -587,6 +594,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$readonly) {
                         'Cette réquisition est déjà clôturée.'
                     ];
 
+                } elseif ($rqAction['choix_client'] === 'remboursement') {
+
+                    // Un choix « remboursement » ne se clôture que par un
+                    // remboursement réellement effectué (action dédiée).
+                    $msg = [
+                        'err',
+                        'Cette réquisition ne peut être clôturée que par l’enregistrement du remboursement effectué.'
+                    ];
+
                 } else {
 
                     $resultat = trim($_POST['resultat'] ?? '');
@@ -626,6 +642,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$readonly) {
                         $pdo->beginTransaction();
 
                         try {
+
+                            // Verrou + contrôles refaits sous verrou (double clic, deux onglets)
+                            $verrou = $pdo->prepare("SELECT statut FROM requisitions_ministerielles WHERE id = ? FOR UPDATE");
+                            $verrou->execute([$id]);
+                            if ($verrou->fetchColumn() === 'cloturee') {
+                                throw new RuntimeException('Cette réquisition est déjà clôturée.');
+                            }
+                            if ($suiviOperation !== null && ($blocagesVerrou = requisition_blocages_cloture($pdo, $id))) {
+                                throw new RuntimeException(implode(' ', $blocagesVerrou));
+                            }
 
                             $stmtOp = $pdo->prepare("
                                 SELECT id
@@ -1913,13 +1939,13 @@ require __DIR__ . '/_admin_header.php';
                         !$readonly
                         && $estEnTraitement
                         && (($estRemboursement && !$remboursement) || $tropPercuARembourser)
+                        && ($rembAttenduVue = requisition_remboursement_attendu($pdo, (int)$id))['type'] !== null
                     ):
+                        // Montants fixés par le serveur (règle commune) : totalité du montant dû
                         $montantPayeFormulaire = $tropPercuARembourser
                             ? (float)$suivi['validee']['total_paye']
-                            : $montantPaye;
-                        $montantARembourserFormulaire = $tropPercuARembourser
-                            ? $suivi['trop_percu']
-                            : $montantPaye;
+                            : $rembAttenduVue['montant'];
+                        $montantARembourserFormulaire = $rembAttenduVue['montant'];
                     ?>
 
                         <div class="pt-1">
@@ -1995,8 +2021,9 @@ require __DIR__ . '/_admin_header.php';
                                         name="montant_a_rembourser"
                                         min="0"
                                         step="1"
-                                        <?= $tropPercuARembourser ? 'max="' . e((string)$suivi['trop_percu']) . '"' : '' ?>
                                         value="<?= e((string)$montantARembourserFormulaire) ?>"
+                                        readonly
+                                        title="Totalité du montant dû au client, calculée par le système"
                                         required
                                         class="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-bold text-slate-700 outline-none focus:border-primary"
                                     >
