@@ -7,11 +7,15 @@ require_once __DIR__ . '/includes/auth.php';
 
 try {
     $pdo = db();
-} catch (Throwable $e) {
-    http_response_code(500);
-    exit('Erreur de connexion.');
+} catch (Exception $e) {
+    die('Erreur de connexion.');
 }
 
+/*
+|--------------------------------------------------------------------------
+| Récupération du slug
+|--------------------------------------------------------------------------
+*/
 $slug = trim($_GET['slug'] ?? '');
 
 if ($slug === '') {
@@ -35,9 +39,9 @@ if (!$activite) {
 
 /*
 |--------------------------------------------------------------------------
-| Photos de la galerie
+| Photos de galerie
 |--------------------------------------------------------------------------
-| Pas de shuffle() : les photos restent dans le même ordre.
+| Les photos restent dans l'ordre défini dans l'administration.
 */
 $stmtPh = $pdo->prepare('
     SELECT image_path
@@ -54,8 +58,9 @@ $photosGalerie = array_column(
 
 /*
 |--------------------------------------------------------------------------
-| Image principale + photos galerie
+| Toutes les photos
 |--------------------------------------------------------------------------
+| La photo principale reste la première photo du hero.
 */
 $toutesLesPhotos = [];
 
@@ -64,6 +69,7 @@ $imagePrincipale = trim($activite['image_principale'] ?? '');
 if ($imagePrincipale !== '' && $imagePrincipale !== 'default-hero.jpg') {
     $toutesLesPhotos[] = [
         'chemin' => 'assets/images/activites/' . basename($imagePrincipale),
+        'legende_absente' => true,
     ];
 }
 
@@ -79,7 +85,7 @@ foreach ($photosGalerie as $photo) {
 
 /*
 |--------------------------------------------------------------------------
-| Liens facultatifs
+| Liens utiles
 |--------------------------------------------------------------------------
 */
 $stmtLiens = $pdo->prepare('
@@ -93,15 +99,18 @@ $liens = $stmtLiens->fetchAll(PDO::FETCH_ASSOC);
 
 /*
 |--------------------------------------------------------------------------
-| Photos de présentation
+| Couleur activité
+|--------------------------------------------------------------------------
+*/
+$accent = trim($activite['couleur'] ?? '') ?: '#E61E2A';
+
+/*
+|--------------------------------------------------------------------------
+| Images de la mosaïque et du carrousel inférieur
 |--------------------------------------------------------------------------
 */
 $photosMosaique = array_slice($toutesLesPhotos, 0, 3);
 $photosCarrousel = array_slice($toutesLesPhotos, 3);
-
-$accent = trim($activite['couleur'] ?? '') ?: '#E61E2A';
-
-$pageTitle = $activite['nom'] . ' — Palais des Pionniers';
 ?>
 
 <!DOCTYPE html>
@@ -110,7 +119,7 @@ $pageTitle = $activite['nom'] . ' — Palais des Pionniers';
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    <title><?= e($pageTitle) ?></title>
+    <title><?= e($activite['nom']) ?> - Palais des Pionniers</title>
 
     <link rel="stylesheet" href="assets/css/tailwind.css">
     <link rel="stylesheet" href="assets/fontawesome/css/all.min.css">
@@ -128,12 +137,12 @@ $pageTitle = $activite['nom'] . ' — Palais des Pionniers';
         }
 
         .lum-lightbox {
-            z-index: 9999;
+            z-index: 1000;
         }
 
         /*
-        Permet de couper automatiquement une longue chaîne,
-        même lorsqu'elle ne contient aucun espace.
+        Cette règle force les longues chaînes sans espace à revenir à la ligne.
+        Exemple : nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn
         */
         .activity-description {
             max-width: 100%;
@@ -151,85 +160,65 @@ $pageTitle = $activite['nom'] . ' — Palais des Pionniers';
     }
     ?>
 
-    <!-- Bouton retour -->
+    <!-- Retour -->
     <div class="container mx-auto px-4 sm:px-6 pt-4 sm:pt-6">
         <a
             href="activites.php"
-            class="inline-flex items-center gap-2 rounded-full bg-primary/5 px-3.5 py-2 text-xs font-black uppercase tracking-widest text-primary transition hover:bg-accent/10 hover:text-accent"
+            class="inline-flex items-center gap-2 text-xs font-black uppercase tracking-widest text-primary hover:text-accent transition bg-primary/5 hover:bg-accent/10 px-3.5 py-2 rounded-full"
         >
             <i class="fas fa-arrow-left"></i>
             Retour aux activités
         </a>
     </div>
 
-    <!-- Hero -->
-    <section class="relative mt-4 flex min-h-[300px] items-center overflow-hidden bg-[#0a214a] sm:mt-6 sm:min-h-[430px]">
+    <!-- HERO : CONSERVÉ DANS LE FORMAT ORIGINAL -->
+    <section class="relative h-[28vh] sm:h-[45vh] flex items-center bg-[#0a214a] overflow-hidden">
 
-        <?php if (!empty($toutesLesPhotos)): ?>
-            <?php foreach ($toutesLesPhotos as $index => $photo): ?>
+        <?php if ($toutesLesPhotos): ?>
+            <?php foreach ($toutesLesPhotos as $i => $p): ?>
                 <img
-                    src="<?= e($photo['chemin']) ?>"
+                    src="<?= e($p['chemin']) ?>"
                     alt=""
-                    class="detail-slide absolute inset-0 h-full w-full scale-105 object-cover transition-opacity duration-700 ease-in-out <?= $index === 0 ? 'z-10 opacity-100' : 'z-0 opacity-0' ?>"
+                    class="detail-slide absolute inset-0 w-full h-full object-cover scale-110 blur-sm transition-opacity duration-700 ease-in-out <?= $i === 0 ? 'opacity-100' : 'opacity-0' ?>"
                 >
             <?php endforeach; ?>
         <?php endif; ?>
 
-        <div class="absolute inset-0 z-10 bg-[#0a214a]/65"></div>
+        <div class="absolute inset-0 bg-[#0a214a]/60"></div>
 
-        <div class="container relative z-20 mx-auto px-4 sm:px-6">
-            <div class="max-w-4xl">
-                <h1 class="text-3xl font-black uppercase italic leading-tight tracking-tighter text-white sm:text-5xl md:text-6xl">
-                    <?= e($activite['nom']) ?>
-                </h1>
+        <div class="container mx-auto px-4 sm:px-6 relative z-10">
+            <h1 class="text-2xl sm:text-5xl md:text-6xl font-black text-white uppercase italic tracking-tighter leading-tight">
+                <?= e($activite['nom']) ?>
+            </h1>
 
-                <div
-                    class="mt-3 h-1.5 w-16 sm:mt-5 sm:h-2 sm:w-24"
-                    style="background:<?= e($accent) ?>"
-                ></div>
-
-                <?php if (!empty($activite['sous_titre'])): ?>
-                    <p class="mt-4 max-w-2xl text-sm font-medium leading-relaxed text-white/80 sm:text-lg">
-                        <?= e($activite['sous_titre']) ?>
-                    </p>
-                <?php endif; ?>
-            </div>
+            <div
+                class="h-1.5 sm:h-2 w-14 sm:w-20 mt-2 sm:mt-4"
+                style="background:<?= e($accent) ?>"
+            ></div>
         </div>
-
-        <?php if (count($toutesLesPhotos) > 1): ?>
-            <div class="absolute bottom-5 left-1/2 z-30 flex -translate-x-1/2 gap-2 sm:bottom-7">
-                <?php foreach ($toutesLesPhotos as $index => $photo): ?>
-                    <span
-                        class="detail-dot h-1.5 rounded-full transition-all <?= $index === 0 ? 'w-7' : 'w-1.5 bg-white/50' ?>"
-                        style="<?= $index === 0 ? 'background:' . e($accent) : '' ?>"
-                    ></span>
-                <?php endforeach; ?>
-            </div>
-        <?php endif; ?>
     </section>
 
-    <!-- Présentation -->
+    <!-- PRÉSENTATION -->
     <section class="py-8 sm:py-16">
         <div class="container mx-auto px-4 sm:px-6">
-            <div class="mx-auto max-w-6xl space-y-10">
 
-                <?php
-                /*
-                On affiche les deux colonnes uniquement si au moins
-                deux images sont disponibles pour la mosaïque.
-                */
-                ?>
+            <div class="space-y-10 sm:space-y-14">
 
                 <?php if (count($photosMosaique) >= 2): ?>
 
-                    <div class="grid items-start gap-x-10 gap-y-6 md:grid-cols-2 lg:gap-x-16">
+                    <!--
+                    Mobile : une colonne.
+                    À partir de md : deux colonnes.
+                    L'espace entre texte et photos augmente selon l'écran.
+                    -->
+                    <div class="grid grid-cols-1 items-start gap-y-8 md:grid-cols-2 md:gap-x-12 lg:gap-x-20 xl:gap-x-24">
 
-                        <!-- Colonne texte -->
+                        <!-- Colonne gauche : texte -->
                         <div class="min-w-0 max-w-full">
 
                             <?php if (!empty($activite['sous_titre'])): ?>
                                 <p
-                                    class="mb-4 text-sm font-bold uppercase tracking-widest sm:text-lg"
+                                    class="mb-4 text-sm sm:text-lg font-bold uppercase tracking-widest"
                                     style="color:<?= e($accent) ?>"
                                 >
                                     <?= e($activite['sous_titre']) ?>
@@ -237,48 +226,69 @@ $pageTitle = $activite['nom'] . ' — Palais des Pionniers';
                             <?php endif; ?>
 
                             <?php if (!empty($activite['description'])): ?>
-                                <div class="activity-description max-w-full text-base font-light leading-relaxed text-slate-600 sm:text-lg">
+                                <div class="activity-description max-w-full text-base sm:text-lg leading-relaxed text-slate-600 font-light">
                                     <?= nl2br(e($activite['description'])) ?>
                                 </div>
                             <?php endif; ?>
 
+                            <!-- Chiffres clés : sous le texte -->
                             <?php if (!empty($activite['chiffres_cles'])): ?>
                                 <div
-                                    class="mt-6 rounded-2xl border-l-4 bg-white px-5 py-4 shadow-sm"
+                                    class="mt-6 sm:mt-8 rounded-2xl border-l-4 bg-white px-5 py-4 shadow-sm"
                                     style="border-color:<?= e($accent) ?>"
                                 >
-                                    <p class="mb-1 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                    <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">
                                         Chiffres clés
                                     </p>
 
-                                    <p class="text-base font-black sm:text-lg" style="color:<?= e($accent) ?>">
+                                    <p
+                                        class="text-sm sm:text-base font-black uppercase tracking-wide"
+                                        style="color:<?= e($accent) ?>"
+                                    >
                                         <i class="fas fa-chart-simple mr-1"></i>
                                         <?= e($activite['chiffres_cles']) ?>
                                     </p>
                                 </div>
                             <?php endif; ?>
+
+                            <!-- Liens : sous chiffres clés -->
+                            <?php if ($liens): ?>
+                                <div class="mt-6 sm:mt-8 flex flex-wrap gap-3">
+                                    <?php foreach ($liens as $l): ?>
+                                        <?php if (!empty($l['url'])): ?>
+                                            <a
+                                                href="<?= e($l['url']) ?>"
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                class="inline-flex items-center gap-2 px-4 sm:px-5 py-3 rounded-xl text-white text-[10px] sm:text-xs font-black uppercase tracking-widest hover:opacity-90 transition"
+                                                style="background:<?= e($accent) ?>"
+                                            >
+                                                <i class="fas fa-arrow-up-right-from-square"></i>
+                                                <?= e($l['titre']) ?>
+                                            </a>
+                                        <?php endif; ?>
+                                    <?php endforeach; ?>
+                                </div>
+                            <?php endif; ?>
                         </div>
 
-                        <!-- Colonne images -->
-                        <div
-                            class="grid min-w-0 grid-cols-2 gap-3 sm:gap-4"
-                            style="grid-template-rows: 160px 110px;"
-                        >
-                            <?php foreach ($photosMosaique as $index => $photo): ?>
+                        <!-- Colonne droite : mosaïque -->
+                        <div class="grid min-w-0 grid-cols-2 gap-3 sm:gap-4">
+
+                            <?php foreach ($photosMosaique as $i => $p): ?>
                                 <a
-                                    href="<?= e($photo['chemin']) ?>"
-                                    class="luminous-gallery group relative min-w-0 overflow-hidden rounded-xl bg-slate-50 shadow-sm transition-all hover:shadow-xl sm:rounded-2xl <?= $index === 0 ? 'col-span-2' : '' ?>"
-                                    style="grid-row:<?= $index === 0 ? '1' : '2' ?>"
+                                    href="<?= e($p['chemin']) ?>"
+                                    class="luminous-gallery group relative overflow-hidden rounded-xl sm:rounded-2xl bg-slate-50 shadow-sm transition-all hover:shadow-xl <?= $i === 0 ? 'col-span-2 aspect-[16/9]' : 'aspect-[4/3]' ?>"
                                 >
                                     <img
-                                        src="<?= e($photo['chemin']) ?>"
-                                        class="gallery-image h-full w-full object-cover"
+                                        src="<?= e($p['chemin']) ?>"
+                                        class="gallery-image w-full h-full object-cover"
                                         alt="<?= e($activite['nom']) ?>"
                                     >
 
-                                    <div class="absolute inset-0 flex items-center justify-center bg-[#0a214a]/60 opacity-0 transition-opacity group-hover:opacity-100">
+                                    <div class="absolute inset-0 bg-[#0a214a]/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                                         <div
-                                            class="flex h-8 w-8 items-center justify-center rounded-full text-white sm:h-10 sm:w-10"
+                                            class="w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center text-white"
                                             style="background:<?= e($accent) ?>"
                                         >
                                             <i class="fas fa-expand-alt text-xs"></i>
@@ -286,17 +296,18 @@ $pageTitle = $activite['nom'] . ' — Palais des Pionniers';
                                     </div>
                                 </a>
                             <?php endforeach; ?>
+
                         </div>
                     </div>
 
                 <?php else: ?>
 
-                    <!-- Affichage lorsque l'activité a moins de deux photos -->
+                    <!-- Cas : moins de deux photos -->
                     <div class="max-w-3xl">
 
                         <?php if (!empty($activite['sous_titre'])): ?>
                             <p
-                                class="text-sm font-bold uppercase tracking-widest sm:text-lg"
+                                class="text-sm sm:text-lg font-bold uppercase tracking-widest"
                                 style="color:<?= e($accent) ?>"
                             >
                                 <?= e($activite['sous_titre']) ?>
@@ -304,7 +315,7 @@ $pageTitle = $activite['nom'] . ' — Palais des Pionniers';
                         <?php endif; ?>
 
                         <?php if (!empty($activite['description'])): ?>
-                            <div class="activity-description mt-4 max-w-full text-base font-light leading-relaxed text-slate-600 sm:text-xl">
+                            <div class="activity-description mt-4 max-w-full text-base sm:text-xl leading-relaxed text-slate-600 font-light">
                                 <?= nl2br(e($activite['description'])) ?>
                             </div>
                         <?php endif; ?>
@@ -314,74 +325,69 @@ $pageTitle = $activite['nom'] . ' — Palais des Pionniers';
                                 class="mt-6 rounded-2xl border-l-4 bg-white px-5 py-4 shadow-sm"
                                 style="border-color:<?= e($accent) ?>"
                             >
-                                <p class="mb-1 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">
                                     Chiffres clés
                                 </p>
 
-                                <p class="text-base font-black sm:text-lg" style="color:<?= e($accent) ?>">
+                                <p
+                                    class="text-sm sm:text-base font-black uppercase tracking-wide"
+                                    style="color:<?= e($accent) ?>"
+                                >
                                     <i class="fas fa-chart-simple mr-1"></i>
                                     <?= e($activite['chiffres_cles']) ?>
                                 </p>
+                            </div>
+                        <?php endif; ?>
+
+                        <?php if ($liens): ?>
+                            <div class="mt-6 flex flex-wrap gap-3">
+                                <?php foreach ($liens as $l): ?>
+                                    <?php if (!empty($l['url'])): ?>
+                                        <a
+                                            href="<?= e($l['url']) ?>"
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            class="inline-flex items-center gap-2 px-4 sm:px-5 py-3 rounded-xl text-white text-[10px] sm:text-xs font-black uppercase tracking-widest hover:opacity-90 transition"
+                                            style="background:<?= e($accent) ?>"
+                                        >
+                                            <i class="fas fa-arrow-up-right-from-square"></i>
+                                            <?= e($l['titre']) ?>
+                                        </a>
+                                    <?php endif; ?>
+                                <?php endforeach; ?>
                             </div>
                         <?php endif; ?>
                     </div>
 
                     <?php
                     /*
-                    S'il reste une seule photo, elle sera affichée dans
-                    le carrousel plus bas.
+                    Une seule photo : on l'affiche dans le carrousel inférieur.
                     */
                     ?>
-                    <?php if (!empty($photosMosaique) && empty($photosCarrousel)): ?>
+                    <?php if ($photosMosaique && !$photosCarrousel): ?>
                         <?php $photosCarrousel = $photosMosaique; ?>
                     <?php endif; ?>
 
                 <?php endif; ?>
 
-                <!-- Liens -->
-                <?php if (!empty($liens)): ?>
-                    <div class="flex flex-wrap gap-3">
-                        <?php foreach ($liens as $lien): ?>
-                            <?php
-                            $url = trim($lien['url'] ?? '');
+                <!-- CARROUSEL INFÉRIEUR : uniquement les photos restantes -->
+                <?php if ($photosCarrousel): ?>
+                    <div class="relative rounded-2xl sm:rounded-[2rem] overflow-hidden h-[38vh] min-h-[260px] sm:h-[55vh] sm:min-h-[420px] bg-slate-100">
 
-                            if ($url === '') {
-                                continue;
-                            }
-                            ?>
-
+                        <?php foreach ($photosCarrousel as $i => $p): ?>
                             <a
-                                href="<?= e($url) ?>"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                class="inline-flex items-center gap-2 rounded-xl px-5 py-3 text-xs font-black uppercase tracking-widest text-white transition hover:opacity-90"
-                                style="background:<?= e($accent) ?>"
-                            >
-                                <i class="fas fa-arrow-up-right-from-square"></i>
-                                <?= e($lien['titre']) ?>
-                            </a>
-                        <?php endforeach; ?>
-                    </div>
-                <?php endif; ?>
-
-                <!-- Carrousel secondaire -->
-                <?php if (!empty($photosCarrousel)): ?>
-                    <div class="relative h-[38vh] min-h-[260px] overflow-hidden rounded-2xl bg-slate-100 sm:h-[55vh] sm:min-h-[420px] sm:rounded-[2rem]">
-
-                        <?php foreach ($photosCarrousel as $index => $photo): ?>
-                            <a
-                                href="<?= e($photo['chemin']) ?>"
-                                class="luminous-gallery content-slide group absolute inset-0 block transition-opacity duration-700 ease-in-out <?= $index === 0 ? 'z-10 opacity-100' : 'pointer-events-none z-0 opacity-0' ?>"
+                                href="<?= e($p['chemin']) ?>"
+                                class="luminous-gallery content-slide group absolute inset-0 block transition-opacity duration-700 ease-in-out <?= $i === 0 ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none' ?>"
                             >
                                 <img
-                                    src="<?= e($photo['chemin']) ?>"
-                                    class="h-full w-full object-cover"
+                                    src="<?= e($p['chemin']) ?>"
+                                    class="w-full h-full object-cover"
                                     alt="<?= e($activite['nom']) ?>"
                                 >
 
-                                <div class="absolute inset-0 flex items-center justify-center bg-[#0a214a]/0 transition-colors group-hover:bg-[#0a214a]/30">
+                                <div class="absolute inset-0 bg-[#0a214a]/0 group-hover:bg-[#0a214a]/30 transition-colors flex items-center justify-center">
                                     <div
-                                        class="flex h-10 w-10 items-center justify-center rounded-full text-white opacity-0 transition-opacity group-hover:opacity-100 sm:h-12 sm:w-12"
+                                        class="w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity"
                                         style="background:<?= e($accent) ?>"
                                     >
                                         <i class="fas fa-expand-alt text-sm"></i>
@@ -391,11 +397,11 @@ $pageTitle = $activite['nom'] . ' — Palais des Pionniers';
                         <?php endforeach; ?>
 
                         <?php if (count($photosCarrousel) > 1): ?>
-                            <div class="pointer-events-none absolute bottom-4 left-1/2 z-30 flex -translate-x-1/2 gap-2 sm:bottom-6">
-                                <?php foreach ($photosCarrousel as $index => $photo): ?>
+                            <div class="absolute bottom-3 sm:bottom-5 left-1/2 -translate-x-1/2 z-30 flex gap-1.5 pointer-events-none">
+                                <?php foreach ($photosCarrousel as $i => $p): ?>
                                     <span
-                                        class="content-dot h-1.5 rounded-full transition-all <?= $index === 0 ? 'w-7' : 'w-1.5 bg-white/50' ?>"
-                                        style="<?= $index === 0 ? 'background:' . e($accent) : '' ?>"
+                                        class="content-dot h-1.5 rounded-full transition-all <?= $i === 0 ? 'w-6' : 'w-1.5 bg-white/50' ?>"
+                                        style="<?= $i === 0 ? "background:$accent" : '' ?>"
                                     ></span>
                                 <?php endforeach; ?>
                             </div>
@@ -407,81 +413,66 @@ $pageTitle = $activite['nom'] . ' — Palais des Pionniers';
         </div>
     </section>
 
-    <!-- Contact -->
-    <section class="bg-slate-50 py-8 sm:py-20">
+    <!-- CONTACT -->
+    <section class="py-8 sm:py-20 bg-slate-50">
         <div class="container mx-auto px-4 sm:px-6">
-            <div class="mx-auto flex max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl md:flex-row sm:rounded-[3rem]">
+            <div class="max-w-5xl mx-auto bg-white rounded-2xl sm:rounded-[3rem] shadow-2xl overflow-hidden flex flex-col md:flex-row">
 
-                <div class="bg-[#0a214a] p-8 text-white md:w-1/3 sm:p-12">
-                    <h2 class="mb-6 text-2xl font-black uppercase italic sm:text-3xl">
+                <div class="md:w-1/3 bg-[#0a214a] p-8 sm:p-12 text-white">
+                    <h3 class="text-2xl sm:text-3xl font-black uppercase italic mb-6">
                         Un mot sur ce projet ?
-                    </h2>
+                    </h3>
 
-                    <p class="text-sm leading-relaxed text-slate-300">
+                    <p class="text-slate-400 text-sm leading-relaxed">
                         Pour toute information supplémentaire concernant l'activité
                         <?= e($activite['nom']) ?>, contactez-nous.
                     </p>
                 </div>
 
-                <div class="p-8 md:w-2/3 sm:p-12">
-                    <form action="#" method="post" class="space-y-5">
+                <div class="md:w-2/3 p-8 sm:p-12">
+                    <form action="#" method="POST" class="space-y-5 sm:space-y-6">
 
-                        <div class="grid gap-5 md:grid-cols-2">
+                        <div class="grid md:grid-cols-2 gap-5 sm:gap-6">
                             <div class="space-y-2">
-                                <label
-                                    for="nom"
-                                    class="ml-2 block text-[10px] font-black uppercase tracking-widest text-slate-400"
-                                >
+                                <label class="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-2">
                                     Nom complet
                                 </label>
 
                                 <input
-                                    id="nom"
-                                    name="nom"
                                     type="text"
-                                    required
-                                    class="w-full rounded-2xl border border-slate-100 bg-slate-50 px-5 py-3.5 text-sm outline-none transition focus:border-red-600 focus:ring-2 focus:ring-red-600/20"
+                                    name="nom"
+                                    class="w-full px-5 sm:px-6 py-3.5 sm:py-4 bg-slate-50 rounded-2xl border-none focus:ring-2 focus:ring-red-600 outline-none"
                                 >
                             </div>
 
                             <div class="space-y-2">
-                                <label
-                                    for="email"
-                                    class="ml-2 block text-[10px] font-black uppercase tracking-widest text-slate-400"
-                                >
+                                <label class="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-2">
                                     Email
                                 </label>
 
                                 <input
-                                    id="email"
-                                    name="email"
                                     type="email"
-                                    required
-                                    class="w-full rounded-2xl border border-slate-100 bg-slate-50 px-5 py-3.5 text-sm outline-none transition focus:border-red-600 focus:ring-2 focus:ring-red-600/20"
+                                    name="email"
+                                    class="w-full px-5 sm:px-6 py-3.5 sm:py-4 bg-slate-50 rounded-2xl border-none focus:ring-2 focus:ring-red-600 outline-none"
                                 >
                             </div>
                         </div>
 
                         <div class="space-y-2">
-                            <label
-                                for="message"
-                                class="ml-2 block text-[10px] font-black uppercase tracking-widest text-slate-400"
-                            >
+                            <label class="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-2">
                                 Message
                             </label>
 
                             <textarea
-                                id="message"
                                 name="message"
-                                rows="5"
-                                required
-                                class="w-full resize-y rounded-2xl border border-slate-100 bg-slate-50 px-5 py-3.5 text-sm outline-none transition focus:border-red-600 focus:ring-2 focus:ring-red-600/20"
+                                rows="4"
+                                class="w-full px-5 sm:px-6 py-3.5 sm:py-4 bg-slate-50 rounded-2xl border-none focus:ring-2 focus:ring-red-600 outline-none"
                             ></textarea>
                         </div>
 
                         <button
                             type="submit"
-                            class="w-full rounded-2xl bg-red-600 py-4 text-xs font-black uppercase tracking-[0.18em] text-white shadow-lg shadow-red-600/20 transition hover:bg-red-700"
+                            class="w-full py-4 sm:py-5 bg-red-600 text-white rounded-2xl font-black uppercase text-xs tracking-[0.2em] hover:bg-red-700 transition-all shadow-lg shadow-red-600/20"
                         >
                             Envoyer le message
                         </button>
@@ -500,99 +491,101 @@ $pageTitle = $activite['nom'] . ' — Palais des Pionniers';
     <script src="assets/vendor/luminous/luminous.min.js"></script>
 
     <script>
-    document.addEventListener('DOMContentLoaded', function () {
-        const accent = <?= json_encode($accent) ?>;
+        document.addEventListener('DOMContentLoaded', function () {
 
-        /*
-        |--------------------------------------------------------------------------
-        | Lightbox galerie
-        |--------------------------------------------------------------------------
-        */
-        const galleryLinks = document.querySelectorAll('.luminous-gallery');
+            /*
+            |--------------------------------------------------------------------------
+            | Lightbox galerie
+            |--------------------------------------------------------------------------
+            */
+            var galleryLinks = document.querySelectorAll('.luminous-gallery');
 
-        if (galleryLinks.length > 0) {
-            new LuminousGallery(
-                galleryLinks,
-                {
-                    arrowNavigation: true
-                },
-                {
-                    caption: function (trigger) {
-                        const image = trigger.querySelector('img');
-                        return image ? image.getAttribute('alt') : '';
+            if (galleryLinks.length > 0) {
+                new LuminousGallery(
+                    galleryLinks,
+                    {
+                        arrowNavigation: true
+                    },
+                    {
+                        caption: function (trigger) {
+                            var image = trigger.querySelector('img');
+                            return image ? image.getAttribute('alt') : '';
+                        }
                     }
-                }
-            );
-        }
+                );
+            }
 
-        /*
-        |--------------------------------------------------------------------------
-        | Carrousel hero
-        |--------------------------------------------------------------------------
-        */
-        const detailSlides = document.querySelectorAll('.detail-slide');
-        const detailDots = document.querySelectorAll('.detail-dot');
+            /*
+            |--------------------------------------------------------------------------
+            | Carrousel du hero : inchangé dans son fonctionnement
+            |--------------------------------------------------------------------------
+            */
+            var detailSlides = document.querySelectorAll('.detail-slide');
+            var detailDots = document.querySelectorAll('.detail-dot');
+            var accentCouleur = <?= json_encode($accent) ?>;
 
-        if (detailSlides.length > 1) {
-            let detailIndex = 0;
+            if (detailSlides.length > 1) {
+                var detailIdx = 0;
 
-            setInterval(function () {
-                detailSlides[detailIndex].classList.remove('opacity-100', 'z-10');
-                detailSlides[detailIndex].classList.add('opacity-0', 'z-0');
+                setInterval(function () {
+                    detailSlides[detailIdx].classList.replace('opacity-100', 'opacity-0');
+                    detailSlides[detailIdx].classList.replace('z-10', 'z-0');
 
-                if (detailDots[detailIndex]) {
-                    detailDots[detailIndex].classList.remove('w-7');
-                    detailDots[detailIndex].classList.add('w-1.5', 'bg-white/50');
-                    detailDots[detailIndex].style.background = '';
-                }
+                    if (detailDots[detailIdx]) {
+                        detailDots[detailIdx].classList.replace('w-6', 'w-1.5');
+                        detailDots[detailIdx].classList.add('bg-white/40');
+                        detailDots[detailIdx].style.background = '';
+                    }
 
-                detailIndex = (detailIndex + 1) % detailSlides.length;
+                    detailIdx = (detailIdx + 1) % detailSlides.length;
 
-                detailSlides[detailIndex].classList.remove('opacity-0', 'z-0');
-                detailSlides[detailIndex].classList.add('opacity-100', 'z-10');
+                    detailSlides[detailIdx].classList.replace('opacity-0', 'opacity-100');
+                    detailSlides[detailIdx].classList.replace('z-0', 'z-10');
 
-                if (detailDots[detailIndex]) {
-                    detailDots[detailIndex].classList.remove('w-1.5', 'bg-white/50');
-                    detailDots[detailIndex].classList.add('w-7');
-                    detailDots[detailIndex].style.background = accent;
-                }
-            }, 4500);
-        }
+                    if (detailDots[detailIdx]) {
+                        detailDots[detailIdx].classList.replace('w-1.5', 'w-6');
+                        detailDots[detailIdx].classList.remove('bg-white/40');
+                        detailDots[detailIdx].style.background = accentCouleur;
+                    }
+                }, 4000);
+            }
 
-        /*
-        |--------------------------------------------------------------------------
-        | Carrousel inférieur
-        |--------------------------------------------------------------------------
-        */
-        const contentSlides = document.querySelectorAll('.content-slide');
-        const contentDots = document.querySelectorAll('.content-dot');
+            /*
+            |--------------------------------------------------------------------------
+            | Carrousel inférieur
+            |--------------------------------------------------------------------------
+            */
+            var contentSlides = document.querySelectorAll('.content-slide');
+            var contentDots = document.querySelectorAll('.content-dot');
 
-        if (contentSlides.length > 1) {
-            let contentIndex = 0;
+            if (contentSlides.length > 1) {
+                var contentIdx = 0;
 
-            setInterval(function () {
-                contentSlides[contentIndex].classList.remove('opacity-100', 'z-10');
-                contentSlides[contentIndex].classList.add('opacity-0', 'z-0', 'pointer-events-none');
+                setInterval(function () {
+                    contentSlides[contentIdx].classList.replace('opacity-100', 'opacity-0');
+                    contentSlides[contentIdx].classList.replace('z-10', 'z-0');
+                    contentSlides[contentIdx].classList.add('pointer-events-none');
 
-                if (contentDots[contentIndex]) {
-                    contentDots[contentIndex].classList.remove('w-7');
-                    contentDots[contentIndex].classList.add('w-1.5', 'bg-white/50');
-                    contentDots[contentIndex].style.background = '';
-                }
+                    if (contentDots[contentIdx]) {
+                        contentDots[contentIdx].classList.replace('w-6', 'w-1.5');
+                        contentDots[contentIdx].classList.add('bg-white/50');
+                        contentDots[contentIdx].style.background = '';
+                    }
 
-                contentIndex = (contentIndex + 1) % contentSlides.length;
+                    contentIdx = (contentIdx + 1) % contentSlides.length;
 
-                contentSlides[contentIndex].classList.remove('opacity-0', 'z-0', 'pointer-events-none');
-                contentSlides[contentIndex].classList.add('opacity-100', 'z-10');
+                    contentSlides[contentIdx].classList.replace('opacity-0', 'opacity-100');
+                    contentSlides[contentIdx].classList.replace('z-0', 'z-10');
+                    contentSlides[contentIdx].classList.remove('pointer-events-none');
 
-                if (contentDots[contentIndex]) {
-                    contentDots[contentIndex].classList.remove('w-1.5', 'bg-white/50');
-                    contentDots[contentIndex].classList.add('w-7');
-                    contentDots[contentIndex].style.background = accent;
-                }
-            }, 5000);
-        }
-    });
+                    if (contentDots[contentIdx]) {
+                        contentDots[contentIdx].classList.replace('w-1.5', 'w-6');
+                        contentDots[contentIdx].classList.remove('bg-white/50');
+                        contentDots[contentIdx].style.background = accentCouleur;
+                    }
+                }, 4500);
+            }
+        });
     </script>
 </body>
 </html>

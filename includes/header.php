@@ -82,13 +82,14 @@ $currentUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https:/
 <header class="sticky top-0 z-50 border-b border-slate-200 bg-white/85 backdrop-blur">
   <div class="container mx-auto flex h-16 items-center justify-between px-4">
     
-    <a href="<?= $prefix ?>index.php" class="flex items-center gap-2 sm:gap-4">
-      <img src="<?= $prefix ?>assets/images/logopalais.png" alt="Logo" class="h-9 sm:h-16 md:h-20 w-auto object-contain">
-      <?php if (file_exists(__DIR__ . '/../assets/images/logominis.jpg')): ?>
-      <div class="h-6 sm:h-10 md:h-12 w-px bg-slate-200"></div>
-      <img src="<?= $prefix ?>assets/images/logominis.jpg" alt="Sceau de la République du Mali" class="h-7 sm:h-12 md:h-14 w-auto object-contain rounded-full">
-      <?php endif; ?>
-    </a>
+  <a href="<?= $prefix ?>index.php" class="flex items-center gap-2 sm:gap-4">
+    <?php if (file_exists(__DIR__ . '/../assets/images/logominis.jpg')): ?>
+    <img src="<?= $prefix ?>assets/images/logominis.jpg" alt="Sceau de la République du Mali" class="h-7 sm:h-12 md:h-14 w-auto object-contain rounded-full">
+    <div class="h-6 sm:h-10 md:h-12 w-px bg-slate-200"></div>
+    <?php endif; ?>
+
+    <img src="<?= $prefix ?>assets/images/logopalais.png" alt="Logo du Palais des Pionniers" class="h-9 sm:h-16 md:h-20 w-auto object-contain">
+</a>
 
     <nav class="hidden md:flex items-center gap-1 text-sm">
       <?php
