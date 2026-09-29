@@ -681,6 +681,30 @@ if (!function_exists('admin_nav')) {
                 ]
             ],
 
+            'partenaires.php' => [
+                'fas fa-handshake',
+                'Partenaires',
+                [
+                    'superadmin',
+                    'ministre',
+                    'admin_comptable',
+                    'admin_espaces'
+                ]
+            ],
+
+            'suggestions.php' => [
+                'fas fa-comment-dots',
+                'Suggestions',
+                [
+                    'superadmin',
+                    'ministre',
+                    'admin_espaces',
+                    'admin_activites',
+                    'admin_messages',
+                    'admin_comptable'
+                ]
+            ],
+
             'jeunes-engages.php' => [
                 'fas fa-hand-fist',
                 'Jeunes engagés',
@@ -917,6 +941,24 @@ if (!function_exists('admin_nav_badges')) {
                 'admin_nav_badges(): '
                 . $e->getMessage()
             );
+        }
+
+        // Compteurs indépendants : une erreur ci-dessus ne les empêche pas
+        try {
+            $badges['demandes-services.php'] = (int) $pdo->query(
+                "SELECT COUNT(*) FROM demandes_services WHERE statut = 'en_attente'"
+            )->fetchColumn();
+        } catch (Exception $e) {
+            // table absente
+        }
+        try {
+            if (suggestions_disponibles($pdo)) {
+                $badges['suggestions.php'] = (int) $pdo->query(
+                    "SELECT COUNT(*) FROM suggestions WHERE statut = 'nouvelle'"
+                )->fetchColumn();
+            }
+        } catch (Exception $e) {
+            // table absente
         }
 
         return $badges;
@@ -2264,6 +2306,103 @@ if (!function_exists('requisition_suivi_nouvelle_reservation')) {
             'rembourse'  => $rembourse,
             'a_rembourser' => $validee !== null && $aDesPaiements && $tropPercu > 0 && !$rembourse,
         ];
+    }
+}
+
+if (!function_exists('colonne_existe')) {
+    /** Vrai si la colonne existe (cache par requête) — code compatible avant/après migration. */
+    function colonne_existe(PDO $pdo, string $table, string $colonne): bool
+    {
+        static $cache = [];
+        $cle = $table . '.' . $colonne;
+        if (!array_key_exists($cle, $cache)) {
+            try {
+                $st = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?");
+                $st->execute([$table, $colonne]);
+                $cache[$cle] = (int)$st->fetchColumn() > 0;
+            } catch (PDOException $e) {
+                $cache[$cle] = false;
+            }
+        }
+        return $cache[$cle];
+    }
+}
+
+if (!function_exists('partenaires_disponibles')) {
+    /** Module partenaires installé (migration exécutée). */
+    function partenaires_disponibles(PDO $pdo): bool
+    {
+        return colonne_existe($pdo, 'partenaires', 'id')
+            && colonne_existe($pdo, 'users', 'partenaire_id')
+            && colonne_existe($pdo, 'reservations', 'partenaire_id');
+    }
+}
+
+if (!function_exists('partenaire_utilisateur')) {
+    /**
+     * Partenaire ACTIF associé à un compte client (null = client classique).
+     * Un partenaire désactivé ne donne plus le statut partenaire.
+     */
+    function partenaire_utilisateur(PDO $pdo, int $userId): ?array
+    {
+        if (!$userId || !partenaires_disponibles($pdo)) {
+            return null;
+        }
+        $st = $pdo->prepare("
+            SELECT p.*
+            FROM users u
+            JOIN partenaires p ON p.id = u.partenaire_id
+            WHERE u.id = ? AND p.actif = 1
+        ");
+        $st->execute([$userId]);
+        return $st->fetch() ?: null;
+    }
+}
+
+if (!function_exists('attribuer_partenaire_reservation')) {
+    /**
+     * Rattache une réservation au partenaire actif du client (s'il en a un).
+     * Appelée juste après la création d'une réservation : le circuit de
+     * réservation reste le même pour tous, seule l'attribution change.
+     */
+    function attribuer_partenaire_reservation(PDO $pdo, int $reservationId, int $userId): void
+    {
+        $partenaire = partenaire_utilisateur($pdo, $userId);
+        if ($partenaire) {
+            $pdo->prepare("UPDATE reservations SET partenaire_id = ? WHERE id = ?")
+                ->execute([(int)$partenaire['id'], $reservationId]);
+        }
+    }
+}
+
+if (!function_exists('suggestions_disponibles')) {
+    /** Boîte à suggestions installée (migration exécutée). */
+    function suggestions_disponibles(PDO $pdo): bool
+    {
+        return colonne_existe($pdo, 'suggestions', 'contenu');
+    }
+}
+
+if (!function_exists('services_cycle_disponible')) {
+    /** Cycle complet des demandes de services disponible (migration exécutée). */
+    function services_cycle_disponible(PDO $pdo): bool
+    {
+        return colonne_existe($pdo, 'demandes_services', 'date_prise_en_charge');
+    }
+}
+
+if (!function_exists('libelle_statut_service')) {
+    /** Libellé et couleur d'un statut de demande de service (« traitee » = ancien « réalisée »). */
+    function libelle_statut_service(string $statut): array
+    {
+        return [
+            'en_attente' => ['En attente', 'bg-amber-100 text-amber-700'],
+            'en_cours'   => ['En cours', 'bg-sky-100 text-sky-700'],
+            'realisee'   => ['Réalisée', 'bg-emerald-100 text-emerald-700'],
+            'traitee'    => ['Réalisée', 'bg-emerald-100 text-emerald-700'],
+            'refusee'    => ['Refusée', 'bg-red-100 text-red-700'],
+            'annulee'    => ['Annulée', 'bg-slate-100 text-slate-600'],
+        ][$statut] ?? [$statut, 'bg-slate-100 text-slate-600'];
     }
 }
 

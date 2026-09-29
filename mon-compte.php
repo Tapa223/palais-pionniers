@@ -660,6 +660,40 @@ $mesBaux->execute([$user_id]);
 
 $mesBaux = $mesBaux->fetchAll();
 
+// ------------------------------------------------------------
+// COMPTE PARTENAIRE (fiche partenaire active associée au compte)
+// Synthèse financière des réservations du partenaire (tous ses comptes).
+// ------------------------------------------------------------
+$partenaireMoi = partenaire_utilisateur($pdo, (int)$user_id);
+$synthesePartenaire = null;
+if ($partenaireMoi) {
+    $synthesePartenaire = ['nb' => 0, 'du' => 0.0, 'paye' => 0.0, 'reste' => 0.0];
+    $stP = $pdo->prepare("SELECT id, statut FROM reservations WHERE partenaire_id = ? AND statut NOT IN ('refusee','annulee','expiree')");
+    $stP->execute([(int)$partenaireMoi['id']]);
+    foreach ($stP->fetchAll() as $rp) {
+        $sp = situation_financiere_reservation($pdo, (int)$rp['id']);
+        $synthesePartenaire['nb']++;
+        if ($sp && $rp['statut'] === 'validee') {
+            $synthesePartenaire['du'] += (float)$sp['net_du'];
+            $synthesePartenaire['reste'] += (float)$sp['solde'];
+        }
+        $synthesePartenaire['paye'] += $sp ? max(0.0, (float)$sp['paye_net']) : 0.0;
+    }
+}
+
+// ------------------------------------------------------------
+// MES DEMANDES DE SERVICES (lavage automobile, support publicitaire…)
+// ------------------------------------------------------------
+$mesServices = $pdo->prepare("
+    SELECT ds.*, s.nom AS service_nom, s.montant, s.unite
+    FROM demandes_services ds
+    JOIN services_annexes s ON s.id = ds.service_id
+    WHERE ds.user_id = ?
+    ORDER BY ds.created_at DESC
+");
+$mesServices->execute([(int)$user_id]);
+$mesServices = $mesServices->fetchAll();
+
 
 $dureeParTypeBail = [
     'mensuel'     => 1,
@@ -1041,6 +1075,7 @@ $tab = in_array(
         'notifications',
         'messages',
         'baux',
+        'services',
         'profil'
     ],
     true
@@ -1113,6 +1148,12 @@ require __DIR__ . '/includes/header.php';
               <?= e($me['email']) ?>
             </p>
 
+            <?php if ($partenaireMoi): ?>
+            <p class="mt-1 inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-white bg-white/10 px-2.5 py-1 rounded-full">
+              <i class="fas fa-handshake"></i> Compte partenaire · <?= e($partenaireMoi['nom']) ?>
+            </p>
+            <?php endif; ?>
+
           </div>
 
         </div>
@@ -1176,6 +1217,28 @@ require __DIR__ . '/includes/header.php';
 
       </div>
 
+      <?php if ($synthesePartenaire): ?>
+      <!-- SYNTHÈSE PARTENAIRE (réservations de tous les comptes du partenaire) -->
+      <div class="mt-3 bg-white/10 rounded-2xl p-4">
+        <p class="text-[10px] text-white/60 uppercase tracking-widest font-black mb-2">
+          <i class="fas fa-handshake mr-1"></i> <?= e($partenaireMoi['nom']) ?> — synthèse financière
+        </p>
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
+          <?php foreach ([
+              ['Réservations', (string)$synthesePartenaire['nb'], 'text-white'],
+              ['Montant dû', number_format($synthesePartenaire['du'], 0, ',', ' ') . ' F', 'text-white'],
+              ['Payé', number_format($synthesePartenaire['paye'], 0, ',', ' ') . ' F', 'text-emerald-400'],
+              ['Reste à régler', number_format($synthesePartenaire['reste'], 0, ',', ' ') . ' F', 'text-amber-400'],
+          ] as [$lib, $val, $cls]): ?>
+          <div>
+            <p class="text-base font-black <?= $cls ?>"><?= e($val) ?></p>
+            <p class="text-[10px] text-white/50 uppercase tracking-wide font-bold"><?= $lib ?></p>
+          </div>
+          <?php endforeach; ?>
+        </div>
+      </div>
+      <?php endif; ?>
+
     </div>
 
 
@@ -1218,6 +1281,13 @@ require __DIR__ . '/includes/header.php';
                         fn($b) => !$b['periode_payee']
                     )
                 )
+            ]]
+            : [], $mesServices
+            ? [[
+                'services',
+                'fa-concierge-bell',
+                'Mes services',
+                count(array_filter($mesServices, fn($d) => in_array($d['statut'], ['en_attente', 'en_cours'], true))) ?: null
             ]]
             : [], [
 
@@ -2633,6 +2703,39 @@ require __DIR__ . '/includes/header.php';
     <!-- ======================================================
          ONGLET NOTIFICATIONS
          ====================================================== -->
+    <?php elseif ($tab === 'services'): ?>
+
+    <!-- ======================================================
+         ONGLET MES SERVICES (lavage automobile, support publicitaire…)
+         ====================================================== -->
+    <div class="space-y-3">
+      <?php foreach ($mesServices as $ds): [$libSrv, $clsSrv] = libelle_statut_service($ds['statut']); ?>
+      <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+        <div class="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <p class="font-black text-primary text-sm"><?= e($ds['service_nom']) ?></p>
+            <p class="text-[11px] text-slate-400 mt-0.5">Demande du <?= date('d/m/Y à H:i', strtotime($ds['created_at'])) ?></p>
+          </div>
+          <span class="text-[9px] font-black uppercase px-2.5 py-1 rounded-full <?= $clsSrv ?>"><?= e($libSrv) ?></span>
+        </div>
+        <?php if (!empty($ds['message'])): ?>
+        <p class="text-xs text-slate-600 bg-slate-50 rounded-xl p-3 mt-3">« <?= e($ds['message']) ?> »</p>
+        <?php endif; ?>
+        <?php if ($ds['statut'] === 'en_attente'): ?>
+        <p class="text-[11px] text-slate-500 mt-2">Votre demande sera examinée par l'administration, qui vous recontactera.</p>
+        <?php elseif ($ds['statut'] === 'en_cours'): ?>
+        <p class="text-[11px] text-sky-700 mt-2">Votre demande est prise en charge<?= !empty($ds['date_prise_en_charge']) ? ' depuis le ' . date('d/m/Y', strtotime($ds['date_prise_en_charge'])) : '' ?>.</p>
+        <?php endif; ?>
+        <?php if (!empty($ds['note_traitement']) && in_array($ds['statut'], ['realisee', 'traitee', 'refusee', 'annulee'], true)): ?>
+        <p class="text-[11px] text-slate-600 mt-2"><span class="font-black">Réponse de l'administration :</span> <?= e($ds['note_traitement']) ?></p>
+        <?php endif; ?>
+      </div>
+      <?php endforeach; ?>
+      <p class="text-center pt-2">
+        <a href="espaces.php#services" class="text-xs font-black text-accent hover:underline">Faire une nouvelle demande de service</a>
+      </p>
+    </div>
+
     <?php elseif ($tab === 'notifications'): ?>
 
 

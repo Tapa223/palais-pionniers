@@ -195,6 +195,7 @@ if (!$requisition_id) {
         ");
         $stmt->execute([$user_id, $espace_id, $tarif_id, $date_resa, $estSejour ? $date_depart : null, $heure_debut_fmt, $heure_fin_fmt, $petit_dej, $vip, $quantite, $motif]);
         $resaId = (int)$pdo->lastInsertId();
+        attribuer_partenaire_reservation($pdo, $resaId, $user_id); // compte partenaire : réservation attribuée
 
         // Notifier admin_espaces : une nouvelle demande attend sa validation
         $nomClient = $_SESSION['nom_complet'] ?? 'Un client';
@@ -295,6 +296,7 @@ try {
     ");
     $stmt->execute([$user_id, $espace_id, $tarif_id, $date_resa, $estSejour ? $date_depart : null, $heure_debut_fmt, $heure_fin_fmt, $petit_dej, $vip, $quantite, $motif, $requisition_id]);
     $resaId = (int)$pdo->lastInsertId();
+    attribuer_partenaire_reservation($pdo, $resaId, $user_id); // compte partenaire : réservation attribuée
 
     // --- Traçabilité sur l'opération de la réquisition ---
     $periode = $estSejour

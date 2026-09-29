@@ -935,6 +935,14 @@ $sf = situation_financiere_reservation($pdo, $id);
 $refsBon = references_dossier($pdo, $id);
 $refsBonRequisition = $refsBon['origine_id'] !== null;
 
+// Réservation d'un partenaire : nom du partenaire affiché sur le bon et la facture
+$partenaireBon = null;
+if (partenaires_disponibles($pdo)) {
+    $stPb = $pdo->prepare("SELECT p.nom FROM reservations r JOIN partenaires p ON p.id = r.partenaire_id WHERE r.id = ?");
+    $stPb->execute([$id]);
+    $partenaireBon = $stPb->fetchColumn() ?: null;
+}
+
 $estPaye = (
     $sf['statut_paiement_calcule'] === 'paye'
     && $sf['total_paye'] > 0
@@ -1376,7 +1384,7 @@ $qteLigne = $estSejour
 </p>
 
 <p class="text-xs mb-6 font-mono font-bold text-slate-700">
-    Dossier : #<?= e($refsBon['resa']) ?>
+    <?php if ($partenaireBon): ?>Partenaire : <?= e($partenaireBon) ?> · <?php endif; ?>Dossier : #<?= e($refsBon['resa']) ?>
     <?php if ($refsBonRequisition): ?>
         · Réquisition : #<?= e($refsBon['req']) ?>
         · Réservation initiale : #<?= e($refsBon['origine']) ?>
@@ -1636,6 +1644,12 @@ $qteLigne = $estSejour
         <p class="text-sm mt-2 text-slate-900 font-mono font-bold italic">
             ID: #RESA-<?= (int) $bon['id'] ?>
         </p>
+
+        <?php if ($partenaireBon): ?>
+            <p class="text-xs text-slate-700 font-bold">
+                Partenaire : <?= e($partenaireBon) ?>
+            </p>
+        <?php endif; ?>
 
         <?php if ($refsBonRequisition): ?>
             <p class="text-xs text-slate-700 font-mono font-bold">

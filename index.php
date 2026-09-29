@@ -657,4 +657,6 @@ document.addEventListener("DOMContentLoaded", function() {
 });
 </script>
 
+<?php require __DIR__ . '/includes/suggestion-bulle.php'; // boîte à suggestions anonyme ?>
+
 <?php require __DIR__ . '/includes/footer.php'; ?>

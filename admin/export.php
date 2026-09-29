@@ -348,6 +348,7 @@ if ($type === 'paiements') {
     if ($fin)   { $where[] = "$dateCol <= ?"; $params[] = $fin   . ' 23:59:59'; }
     $sql = "
         SELECT r.id, r.created_at, r.canal, r.quantite, u.nom_complet AS client, u.telephone, e.nom AS espace,
+               " . (partenaires_disponibles($pdo) ? "(SELECT p.nom FROM partenaires p WHERE p.id = r.partenaire_id)" : "NULL") . " AS partenaire,
                r.date_resa, r.date_depart, r.heure_debut, r.heure_fin, r.statut,
                t.libelle AS tarif
         FROM reservations r
@@ -361,7 +362,7 @@ if ($type === 'paiements') {
     $filename = 'reservations_' . date('Y-m-d_His') . '.csv';
 
     // Colonnes communes (gestion des espaces et des réservations)
-    $headers  = ['Réservation','Réquisition','Réservation initiale','Remplacée par','Canal','Date création','Client','Téléphone','Espace','Date résa','Date départ','Heure début','Heure fin','Quantité','Statut','Tarif'];
+    $headers  = ['Réservation','Réquisition','Réservation initiale','Remplacée par','Canal','Date création','Client','Partenaire','Téléphone','Espace','Date résa','Date départ','Heure début','Heure fin','Quantité','Statut','Tarif'];
     // Colonnes financières : uniquement pour la comptabilité et la Direction
     if ($accesFinancier) {
         $headers = array_merge($headers, [
@@ -375,7 +376,7 @@ if ($type === 'paiements') {
             $rf['resa'], $rf['req'], $rf['origine'], $rf['nouvelle'],
             $r['canal'] === 'guichet' ? 'Guichet' : 'En ligne',
             $dateH($r['created_at']),
-            $r['client'], $r['telephone'] ?? '', $r['espace'],
+            $r['client'], $r['partenaire'] ?? '', $r['telephone'] ?? '', $r['espace'],
             $dateJ($r['date_resa']), $dateJ($r['date_depart']),
             $r['heure_debut'] ? substr($r['heure_debut'],0,5) : '',
             $r['heure_fin']   ? substr($r['heure_fin'],0,5)   : '',

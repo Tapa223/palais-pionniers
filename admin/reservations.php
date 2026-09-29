@@ -302,8 +302,19 @@ if (!$dObj || $dObj->format('Y-m-d') !== $filterDate) {
     $filterDate = '';
 }
 
+// Partenaires : filtre « type de client » (réservations partenaires / classiques)
+$partenairesActifs = partenaires_disponibles($pdo);
+$listePartenaires  = $partenairesActifs ? $pdo->query("SELECT id, nom FROM partenaires ORDER BY nom")->fetchAll() : [];
+$filterPartenaire  = (string)($_GET['partenaire'] ?? '');
+if ($filterPartenaire !== 'tous' && $filterPartenaire !== 'aucun' && !in_array((int)$filterPartenaire, array_map('intval', array_column($listePartenaires, 'id')), true)) {
+    $filterPartenaire = '';
+}
+
 $whereResa  = [];
 $paramsResa = [];
+if ($partenairesActifs && $filterPartenaire === 'tous')  { $whereResa[] = 'r.partenaire_id IS NOT NULL'; }
+if ($partenairesActifs && $filterPartenaire === 'aucun') { $whereResa[] = 'r.partenaire_id IS NULL'; }
+if ($partenairesActifs && ctype_digit($filterPartenaire)) { $whereResa[] = 'r.partenaire_id = ?'; $paramsResa[] = (int)$filterPartenaire; }
 if ($filterCanal)  { $whereResa[] = 'r.canal = ?';     $paramsResa[] = $filterCanal; }
 if ($filterStatut) { $whereResa[] = 'r.statut = ?';    $paramsResa[] = $filterStatut; }
 if ($filterEspace) { $whereResa[] = 'r.espace_id = ?'; $paramsResa[] = $filterEspace; }
@@ -321,15 +332,17 @@ if ($filterQ !== '') {
     }
     $whereResa[] = "($condQ)";
 }
-$filtreResaActif = $filterCanal || $filterStatut || $filterEspace || $filterDate || $filterQ !== '';
+$filtreResaActif = $filterCanal || $filterStatut || $filterEspace || $filterDate || $filterQ !== '' || $filterPartenaire !== '';
 
 $stmtResa = $pdo->prepare("
     SELECT r.*, e.nom as espace_nom, u.nom_complet as user_nom, u.telephone as user_tel,
            t.libelle as tarif_nom, t.montant as tarif_prix
+           " . ($partenairesActifs ? ", pa.nom AS partenaire_nom" : ", NULL AS partenaire_nom") . "
     FROM reservations r
     JOIN espaces e ON e.id = r.espace_id
     JOIN users u ON u.id = r.user_id
     LEFT JOIN tarifs t ON t.id = r.tarif_id
+    " . ($partenairesActifs ? "LEFT JOIN partenaires pa ON pa.id = r.partenaire_id" : "") . "
     " . ($whereResa ? 'WHERE ' . implode(' AND ', $whereResa) : '') . "
     ORDER BY r.created_at DESC
 ");
@@ -384,6 +397,16 @@ require __DIR__ . '/_admin_header.php';
             <option value="<?= $cleS ?>" <?= $filterStatut === $cleS ? 'selected' : '' ?>><?= $libS ?></option>
             <?php endforeach; ?>
         </select>
+        <?php if ($partenairesActifs): ?>
+        <select name="partenaire" class="w-full text-xs font-bold rounded-xl border border-slate-200 bg-white px-3 py-2 outline-none text-primary">
+            <option value="">Tous les clients</option>
+            <option value="tous" <?= $filterPartenaire === 'tous' ? 'selected' : '' ?>>Partenaires uniquement</option>
+            <option value="aucun" <?= $filterPartenaire === 'aucun' ? 'selected' : '' ?>>Clients classiques</option>
+            <?php foreach ($listePartenaires as $pf): ?>
+            <option value="<?= (int)$pf['id'] ?>" <?= $filterPartenaire === (string)$pf['id'] ? 'selected' : '' ?>>Partenaire : <?= e($pf['nom']) ?></option>
+            <?php endforeach; ?>
+        </select>
+        <?php endif; ?>
         <div class="flex flex-wrap items-center gap-2 col-span-2">
             <button type="submit" class="text-xs font-black bg-primary text-white px-4 py-2 rounded-xl hover:bg-slate-800 transition">Rechercher</button>
             <?php if ($filtreResaActif): ?>
@@ -414,6 +437,11 @@ require __DIR__ . '/_admin_header.php';
                     
                     <td class="p-6">
                         <div class="font-black text-primary uppercase text-sm italic"><?= htmlspecialchars($res['user_nom']) ?></div>
+                        <?php if (!empty($res['partenaire_nom'])): ?>
+                        <span class="inline-flex items-center gap-1 mt-1 text-[9px] font-black uppercase tracking-widest text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full">
+                            <i class="fas fa-handshake"></i> Partenaire · <?= e($res['partenaire_nom']) ?>
+                        </span>
+                        <?php endif; ?>
                         <div class="text-xs text-slate-500 mt-1 font-bold italic">
                              <?= htmlspecialchars($res['user_tel'] ?? 'N/A') ?>
                         </div>

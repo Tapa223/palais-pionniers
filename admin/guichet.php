@@ -153,6 +153,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 
             $resaId = (int)$pdo->lastInsertId();
+            attribuer_partenaire_reservation($pdo, $resaId, (int)$userId); // client partenaire : réservation attribuée
             // Tarif normal (avant toute réduction) figé dès la saisie guichet
             figer_montant_initial($pdo, $resaId);
             $estComptable = (($_SESSION['role'] ?? '') === 'admin_comptable');

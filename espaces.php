@@ -29,7 +29,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'deman
             notify('admin_espaces', 'demande_service', "Nouvelle demande de service « $nomService » — {$_SESSION['nom_complet']}.", "demandes-services.php");
             notify('admin_comptable', 'demande_service', "Nouvelle demande de service « $nomService » — {$_SESSION['nom_complet']}. Tarif à négocier avec le client.", "demandes-services.php");
             log_activity('demande_service', 'espaces', "Demande de service « $nomService » par {$_SESSION['nom_complet']}");
-            $msgService = ['ok', "Votre demande pour « $nomService » a bien été enregistrée. L'administration vous recontactera."];
+            $msgService = ['ok', "Votre demande pour « $nomService » a bien été enregistrée. L'administration vous recontactera ; vous pouvez suivre son état dans Mon compte, onglet « Mes services »."];
         }
     }
 }
