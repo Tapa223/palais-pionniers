@@ -1123,8 +1123,14 @@ $tab = in_array(
     ? $_GET['tab']
     : 'reservations';
 
+// Compte partenaire : tableau de bord partenaire comme point d'entrée
+// (il ne fait que présenter les fonctionnalités existantes de cet espace)
+if ($partenaireMoi && (($_GET['tab'] ?? '') === 'tableau-de-bord' || !isset($_GET['tab']))) {
+    $tab = 'tableau-de-bord';
+}
 
-$pageTitle = "Mon espace — Palais des Pionniers";
+
+$pageTitle = $partenaireMoi ? "Espace partenaire — Palais des Pionniers" : "Mon espace — Palais des Pionniers";
 
 require __DIR__ . '/includes/header.php';
 ?>
@@ -1257,7 +1263,7 @@ require __DIR__ . '/includes/header.php';
 
       </div>
 
-      <?php if ($synthesePartenaire): ?>
+      <?php if ($synthesePartenaire && $tab !== 'tableau-de-bord'): ?>
       <!-- SYNTHÈSE PARTENAIRE (réservations de tous les comptes du partenaire) -->
       <div class="mt-3 bg-white/10 rounded-2xl p-4">
         <p class="text-[10px] text-white/60 uppercase tracking-widest font-black mb-2">
@@ -1289,7 +1295,12 @@ require __DIR__ . '/includes/header.php';
 
       <div class="flex gap-0.5 sm:gap-1 border-b border-white/10 overflow-x-auto scrollbar-hide">
 
-        <?php foreach (array_merge([
+        <?php foreach (array_merge($partenaireMoi ? [[
+            'tableau-de-bord',
+            'fa-chart-pie',
+            'Tableau de bord',
+            null
+          ]] : [], [
 
           [
             'reservations',
@@ -1386,6 +1397,14 @@ require __DIR__ . '/includes/header.php';
   <div class="container mx-auto max-w-4xl px-4 py-7">
 
 
+    <?php if ($partenaireMoi && $tab !== 'tableau-de-bord'): ?>
+    <!-- Retour au tableau de bord partenaire (distinct de la navigation du site) -->
+    <a href="?tab=tableau-de-bord" id="retourTableauBord"
+       class="inline-flex items-center gap-1.5 mb-5 px-3 py-1.5 rounded-full bg-white border border-slate-200 text-[11px] font-black uppercase tracking-tight text-primary hover:border-primary transition">
+      <i class="fas fa-arrow-left text-[10px]"></i> Tableau de bord
+    </a>
+    <?php endif; ?>
+
     <!-- MESSAGE GLOBAL -->
     <?php if ($msg): ?>
 
@@ -1409,7 +1428,108 @@ require __DIR__ . '/includes/header.php';
     <!-- ======================================================
          ONGLET RÉSERVATIONS
          ====================================================== -->
-    <?php if ($tab === 'reservations'): ?>
+    <?php if ($tab === 'tableau-de-bord' && $partenaireMoi): ?>
+    <?php
+      // Tableau de bord partenaire : uniquement les réservations de ce compte
+      // ($reservations) et la synthèse du partenaire déjà calculée plus haut.
+      $fmtD = fn($m) => number_format((float)$m, 0, ',', ' ');
+      $aSuivre = array_values(array_filter($reservations, fn($r) => in_array($r['statut'], ['en_attente', 'validee'], true)));
+      $dernieres = array_slice($reservations, 0, 5);
+      $nbBons = count(array_filter($reservations, fn($r) => $r['statut'] === 'validee'));
+    ?>
+    <div class="space-y-6">
+
+      <!-- Accès rapides aux fonctionnalités de l'espace partenaire -->
+      <div class="grid grid-cols-2 lg:grid-cols-3 gap-3">
+        <?php foreach ([
+            ['reserver.php', 'fa-plus-circle', 'Nouvelle réservation', 'Réserver un espace', 'bg-accent text-white', 'text-white/80'],
+            ['?tab=reservations', 'fa-calendar-check', 'Mes réservations', $stats['total'] . ' demande(s) · ' . $stats['en_attente'] . ' en attente', 'bg-white text-primary', 'text-slate-500'],
+            ['?tab=reservations', 'fa-file-invoice', 'Mes bons', $nbBons . ' bon(s) / facture(s) disponible(s)', 'bg-white text-primary', 'text-slate-500'],
+            ['?tab=services', 'fa-concierge-bell', 'Services', count($mesServices) . ' demande(s) de service', 'bg-white text-primary', 'text-slate-500'],
+            ['?tab=profil', 'fa-user', 'Mon profil', 'Nom, téléphone', 'bg-white text-primary', 'text-slate-500'],
+            ['?tab=profil#mot-de-passe', 'fa-key', 'Mot de passe', 'Modifier mon mot de passe', 'bg-white text-primary', 'text-slate-500'],
+        ] as [$href, $ico, $titre, $sous, $cls, $clsSous]): ?>
+        <a href="<?= e($href) ?>" class="<?= $cls ?> rounded-2xl border border-slate-100 shadow-sm p-4 hover:shadow-md transition flex items-start gap-3">
+          <i class="fas <?= $ico ?> text-lg mt-0.5"></i>
+          <span>
+            <span class="block text-sm font-black uppercase tracking-tight"><?= e($titre) ?></span>
+            <span class="block text-[11px] font-semibold <?= $clsSous ?>"><?= e($sous) ?></span>
+          </span>
+        </a>
+        <?php endforeach; ?>
+      </div>
+
+      <!-- Informations financières (partenaire) -->
+      <?php if ($synthesePartenaire): ?>
+      <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+        <h2 class="font-black text-primary text-sm uppercase italic mb-3"><i class="fas fa-coins text-accent mr-1"></i> Situation financière — <?= e($partenaireMoi['nom']) ?></h2>
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <?php foreach ([
+              ['Réservations', (string)$synthesePartenaire['nb'], 'text-primary'],
+              ['Montant dû', $fmtD($synthesePartenaire['du']) . ' FCFA', 'text-primary'],
+              ['Payé', $fmtD($synthesePartenaire['paye']) . ' FCFA', 'text-emerald-600'],
+              ['Reste à régler', $fmtD($synthesePartenaire['reste']) . ' FCFA', 'text-amber-600'],
+          ] as [$lib, $val, $cls]): ?>
+          <div class="rounded-xl bg-slate-50 p-3">
+            <p class="text-[10px] font-black uppercase tracking-widest text-slate-400"><?= $lib ?></p>
+            <p class="text-base font-black <?= $cls ?>"><?= e($val) ?></p>
+          </div>
+          <?php endforeach; ?>
+        </div>
+        <p class="text-[11px] text-slate-400 mt-2">Réservations de tous les comptes de votre organisation (hors refusées, annulées ou expirées). Les paiements sont enregistrés par le service comptable du Palais.</p>
+      </div>
+      <?php endif; ?>
+
+      <!-- Suivi des demandes en cours -->
+      <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+        <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-2">
+          <h2 class="font-black text-primary text-sm uppercase italic">Suivi de mes demandes</h2>
+          <a href="?tab=reservations" class="text-xs font-black text-accent hover:underline">Tout voir</a>
+        </div>
+        <div class="divide-y divide-slate-50">
+          <?php foreach ($aSuivre as $r):
+            [$blib, $bcls] = $badgeConfig[$r['statut']] ?? $badgeConfig['annulee'];
+            $sfd = $r['statut'] === 'validee' ? situation_financiere_reservation($pdo, (int)$r['id']) : null;
+            if ($sfd) { [$blib, $bcls] = libelle_etat_financier($sfd['etat']); }
+          ?>
+          <div class="px-5 py-3 flex flex-wrap items-center justify-between gap-2">
+            <div class="min-w-0">
+              <p class="text-sm font-black text-primary"><span class="font-mono text-xs text-slate-400"><?= e(ref_resa((int)$r['id'])) ?></span> <?= e($r['espace_nom']) ?></p>
+              <p class="text-[11px] text-slate-400"><?= date('d/m/Y', strtotime($r['date_resa'])) ?><?= $sfd ? ' · payé ' . $fmtD($sfd['paye_net']) . ' / ' . $fmtD($sfd['net_du']) . ' FCFA' : '' ?></p>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-[10px] font-black px-2.5 py-1 rounded-full border <?= $bcls ?>"><?= e($blib) ?></span>
+              <?php if ($r['statut'] === 'validee'): ?>
+              <a href="generer_bon.php?id=<?= (int)$r['id'] ?>" target="_blank" class="text-[10px] font-black uppercase px-3 py-1.5 rounded-xl bg-primary text-white hover:bg-slate-800 transition"><i class="fas fa-download mr-1"></i>Bon</a>
+              <?php endif; ?>
+            </div>
+          </div>
+          <?php endforeach; ?>
+          <?php if (!$aSuivre): ?>
+          <p class="px-5 py-6 text-sm text-slate-400 text-center">Aucune demande en cours. <a href="reserver.php" class="font-black text-accent hover:underline">Faire une réservation</a></p>
+          <?php endif; ?>
+        </div>
+      </div>
+
+      <!-- Activité récente -->
+      <?php if ($dernieres): ?>
+      <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+        <div class="px-5 py-4 border-b border-slate-100"><h2 class="font-black text-primary text-sm uppercase italic">Activité récente</h2></div>
+        <div class="divide-y divide-slate-50">
+          <?php foreach ($dernieres as $r): [$blib, $bcls] = $badgeConfig[$r['statut']] ?? $badgeConfig['annulee']; ?>
+          <div class="px-5 py-3 flex flex-wrap items-center justify-between gap-2">
+            <p class="text-sm font-bold text-primary"><span class="font-mono text-xs text-slate-400"><?= e(ref_resa((int)$r['id'])) ?></span> <?= e($r['espace_nom']) ?>
+              <span class="text-[11px] font-semibold text-slate-400">· demandée le <?= date('d/m/Y', strtotime($r['created_at'])) ?></span></p>
+            <span class="text-[10px] font-black px-2.5 py-1 rounded-full border <?= $bcls ?>"><?= e($blib) ?></span>
+          </div>
+          <?php endforeach; ?>
+        </div>
+      </div>
+      <?php endif; ?>
+
+    </div>
+
+    <?php elseif ($tab === 'reservations'): ?>
 
 
     <?php if (empty($reservations)): ?>
@@ -3027,7 +3147,7 @@ require __DIR__ . '/includes/header.php';
 
 
       <!-- Mot de passe -->
-      <form method="POST" class="mt-8 pt-6 border-t border-slate-100" autocomplete="off">
+      <form method="POST" id="mot-de-passe" class="mt-8 pt-6 border-t border-slate-100" autocomplete="off">
         <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
         <input type="hidden" name="action" value="changer_mot_de_passe">
         <p class="font-black text-primary uppercase italic text-sm tracking-tight flex items-center gap-2 mb-4">

@@ -20,7 +20,7 @@ $role     = $_SESSION['role'] ?? '';
 $peutGerer = is_superadmin();
 $pageRetour = isset($_GET['id']) || isset($_GET['nouveau'])
     ? ['partenaires.php', 'Retour aux partenaires']
-    : ['dashboard.php', 'Retour au tableau de bord'];
+    : null;
 $msg      = $_SESSION['partenaires_flash'] ?? null;
 unset($_SESSION['partenaires_flash']);
 
@@ -347,11 +347,6 @@ $pageTitle = 'Partenaires';
 require __DIR__ . '/_admin_header.php';
 ?>
 
-<?php if (isset($_GET['id']) || isset($_GET['nouveau'])): ?>
-<a href="partenaires.php" class="inline-flex items-center gap-2 text-xs font-black uppercase tracking-widest text-primary hover:text-accent transition bg-primary/5 hover:bg-accent/10 px-3.5 py-2 rounded-full mb-4">
-  <i class="fas fa-arrow-left"></i> Retour aux partenaires
-</a>
-<?php endif; ?>
 
 <div class="flex items-center justify-between mb-6 flex-wrap gap-3">
   <div>

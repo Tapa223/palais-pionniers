@@ -107,7 +107,6 @@ $demandes = $pdo->query("
 ")->fetchAll();
 
 $pageTitle = "Demandes de services";
-$pageRetour = ['dashboard.php', 'Retour au tableau de bord'];
 require __DIR__ . '/_admin_header.php';
 ?>
 

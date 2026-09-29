@@ -70,7 +70,6 @@ $couleurs = ['nouvelle' => 'bg-amber-100 text-amber-700', 'lue' => 'bg-sky-100 t
 $libelles = ['nouvelle' => 'Nouvelle', 'lue' => 'Lue', 'traitee' => 'Traitée'];
 
 $pageTitle = 'Suggestions';
-$pageRetour = ['dashboard.php', 'Retour au tableau de bord'];
 require __DIR__ . '/_admin_header.php';
 ?>
 

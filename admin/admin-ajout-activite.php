@@ -157,7 +157,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     }
 }
 
-$pageRetour = ['activites.php', 'Retour aux activités'];
 require __DIR__ . '/_admin_header.php';
 ?>
 

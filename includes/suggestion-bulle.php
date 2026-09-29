@@ -1,6 +1,6 @@
 <?php
 /*
- * Bulle « Une suggestion ? » (page d'accueil) — boîte à suggestions anonyme.
+ * Bulle « Boîte à suggestions » (page d'accueil) — boîte à suggestions anonyme.
  * Aucune connexion requise ; aucun élément d'identification envoyé.
  * Fonctionne aussi sans JavaScript (envoi classique puis retour à l'accueil).
  */
@@ -12,26 +12,25 @@ $_SESSION['suggestion_affichee'] = time();
 $retourSuggestion = $_GET['suggestion'] ?? '';
 ?>
 <style>
-  /* Animation ponctuelle et discrète : un léger balancement de ~1 s toutes les 25 s,
-     uniquement si l'utilisateur n'a pas demandé à réduire les animations. */
+  /* Léger flottement vertical, doux et continu (quelques pixels), mis en pause
+     au survol ou au focus ; aucun mouvement si l'utilisateur a demandé
+     à réduire les animations. */
   @media (prefers-reduced-motion: no-preference) {
-    #suggestionOuvrir { animation: suggestionCoucou 25s ease-in-out 6s infinite; }
-    #suggestionOuvrir:hover, #suggestionOuvrir:focus-visible { animation: none; }
+    #suggestionOuvrir { animation: suggestionFlotte 3.6s ease-in-out infinite; }
+    #suggestionOuvrir:hover, #suggestionOuvrir:focus-visible { animation-play-state: paused; }
   }
-  @keyframes suggestionCoucou {
-    0%, 96%, 100% { transform: none; }
-    97%   { transform: translateY(-3px) rotate(-4deg); }
-    98%   { transform: translateY(-3px) rotate(4deg); }
-    99%   { transform: translateY(0) rotate(-2deg); }
+  @keyframes suggestionFlotte {
+    0%, 100% { transform: translateY(0); }
+    50%      { transform: translateY(-4px); }
   }
 </style>
 <div id="suggestion" class="fixed right-4 z-40" style="bottom:1rem">
   <!-- Lien réel (fonctionne sans JavaScript : la page se recharge avec la fenêtre ouverte) -->
   <a href="?suggestion=ouvrir#suggestionModal" id="suggestionOuvrir" role="button" aria-haspopup="dialog" aria-controls="suggestionModal"
-     aria-label="Une idée ? Envoyer une suggestion anonyme"
-     class="flex items-center gap-2 bg-primary text-white rounded-full shadow-xl px-4 py-3 text-xs font-black uppercase tracking-wide hover:bg-accent transition">
+     aria-label="Boîte à suggestions : envoyer une suggestion anonyme"
+     class="flex items-center gap-2 bg-primary text-white rounded-full shadow-xl px-4 py-3 text-xs font-black tracking-wide hover:bg-accent transition">
     <i class="fas fa-comment-dots text-base"></i>
-    <span>Une idée ?</span>
+    <span>Boîte à suggestions</span>
   </a>
 </div>
 
