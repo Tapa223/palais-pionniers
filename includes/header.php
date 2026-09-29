@@ -91,7 +91,7 @@ $currentUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https:/
     <img src="<?= $prefix ?>assets/images/logopalais.png" alt="Logo du Palais des Pionniers" class="h-9 sm:h-16 md:h-20 w-auto object-contain">
 </a>
 
-    <nav class="hidden md:flex items-center gap-1 text-sm">
+    <nav class="hidden lg:flex items-center gap-1 text-sm">
       <?php
       $links = ['index.php'=>'Accueil', 'espaces.php'=>'Espaces', 'activites.php'=>'Activités', 'formations.php'=>'Formations', 'personnalites.php'=>'Icônes', 'a-propos.php'=>'À propos', 'contact.php'=>'Contact'];
       foreach ($links as $href => $label):
@@ -104,7 +104,7 @@ $currentUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https:/
     </nav>
 
     <div class="flex items-center gap-2">
-      <div class="hidden md:flex items-center gap-2">
+      <div class="hidden lg:flex items-center gap-2">
         <?php if ($u): ?>
           <?php $isAdminRole = in_array($u['role'], ['superadmin','ministre','admin_espaces','admin_activites','admin_messages','admin_comptable'], true); ?>
           <?php if ($isAdminRole): ?>
@@ -129,7 +129,7 @@ $currentUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https:/
         <?php endif; ?>
       </div>
 
-      <button onclick="toggleMenu()" class="md:hidden flex flex-col gap-1.5 p-2 focus:outline-none">
+      <button onclick="toggleMenu()" class="lg:hidden flex flex-col gap-1.5 p-2 focus:outline-none">
         <span id="line1" class="w-6 h-0.5 bg-primary transition-all"></span>
         <span id="line2" class="w-6 h-0.5 bg-primary transition-all"></span>
         <span id="line3" class="w-6 h-0.5 bg-primary transition-all"></span>
@@ -137,7 +137,7 @@ $currentUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https:/
     </div>
   </div>
 
-  <div id="mobileMenu" class="md:hidden bg-white shadow-2xl border-b border-slate-200 absolute w-full left-0 z-50 overflow-hidden transition-all duration-300 ease-out max-h-0 opacity-0">
+  <div id="mobileMenu" class="lg:hidden bg-white shadow-2xl border-b border-slate-200 absolute w-full left-0 z-50 overflow-hidden transition-all duration-300 ease-out max-h-0 opacity-0">
     <nav class="flex flex-col px-3 max-h-[45vh] overflow-y-auto">
         <?php foreach ($links as $href => $label): $activeM = ($page === $href); ?>
             <a href="<?= $prefix ?><?= $href ?>" class="py-2 font-bold text-[11px] uppercase tracking-tight border-b border-slate-100 flex items-center justify-between <?= $activeM ? 'text-accent border-accent/20' : 'text-primary' ?>">
