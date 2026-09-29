@@ -32,13 +32,145 @@ $occupationsRaw = $pdo->query("
 $creneaux = [];
 foreach ($occupationsRaw as $r) {
     $creneaux[$r['espace_id']][$r['date_resa']][] = [
-        'debut' => substr($r['heure_debut'], 0, 5),
-        'fin'   => substr($r['heure_fin'], 0, 5),
+        'debut' => substr((string)$r['heure_debut'], 0, 5),
+        'fin'   => substr((string)$r['heure_fin'], 0, 5),
     ];
+}
+
+/* ============================================================
+   MODE RÉQUISITION (nouvelle date / autre espace)
+   Le formulaire reste le formulaire normal de réservation ; on se
+   contente de restreindre les espaces/tarifs proposés et de
+   préremplir les informations de la réservation réquisitionnée.
+   Tous les contrôles sont refaits côté serveur au traitement.
+   ============================================================ */
+$requisitionId     = isset($_GET['requisition_id']) ? max(0, (int)$_GET['requisition_id']) : 0;
+$requisition       = null;
+$requisitionErreur = '';
+$requisitionJs     = null;
+
+if ($requisitionId > 0) {
+
+    $contexte = requisition_contexte_nouvelle_reservation($pdo, $requisitionId, (int)$_SESSION['user_id']);
+
+    if (!$contexte['ok']) {
+        $requisitionErreur = $contexte['erreur'];
+    } else {
+        $requisition = $contexte['req'];
+        $espaceOrigine = (int)$requisition['espace_id'];
+
+        // En mode réquisition, les tarifs « bail » (demande de location longue durée)
+        // ne sont pas proposés : ils ne correspondent pas à une réservation.
+        foreach ($tarifsData as $eid => $liste) {
+            $tarifsData[$eid] = array_values(array_filter($liste, fn($t) => (int)$t['est_bail'] !== 1));
+        }
+
+        if ($requisition['choix_client'] === 'nouvelle_date') {
+
+            if (!isset($espacesData[$espaceOrigine])) {
+                $requisitionErreur = "L'espace « {$requisition['espace_nom']} » n'est plus proposé à la réservation pour le moment. Merci de contacter l'administration du Palais.";
+            } else {
+                // Même espace, même type de réservation (même tarif)
+                $espacesData = [$espaceOrigine => $espacesData[$espaceOrigine]];
+                $idPreselectionne = $espaceOrigine;
+
+                if (!empty($requisition['tarif_id'])) {
+                    $tarifOrigine = array_values(array_filter(
+                        $tarifsData[$espaceOrigine] ?? [],
+                        fn($t) => (int)$t['id'] === (int)$requisition['tarif_id']
+                    ));
+                    if ($tarifOrigine) {
+                        $tarifsData[$espaceOrigine] = $tarifOrigine;
+                    }
+                }
+            }
+
+        } else {
+
+            // Autre espace : tous les espaces réservables en ligne, sauf celui réquisitionné
+            $espacesData = array_filter(
+                $espacesData,
+                fn($esp, $eid) => (int)$eid !== $espaceOrigine && empty($esp['gerant_externe']),
+                ARRAY_FILTER_USE_BOTH
+            );
+
+            if (!$espacesData) {
+                $requisitionErreur = "Aucun autre espace n'est actuellement réservable en ligne. Merci de contacter l'administration du Palais.";
+            } elseif (!isset($espacesData[$idPreselectionne])) {
+                // Présélection à partir de l'espace indiqué lors du choix (nom), si retrouvé
+                $idPreselectionne = 0;
+                foreach ($espacesData as $eid => $esp) {
+                    if ($esp['nom'] === (string)$requisition['details_choix']) {
+                        $idPreselectionne = (int)$eid;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Le créneau réquisitionné reste occupé par l'institution : on l'affiche
+        // comme occupé pour que le calendrier et les contrôles JS le prennent en compte.
+        if (!$requisitionErreur && !empty($requisition['heure_debut']) && $requisition['date_resa'] >= date('Y-m-d')) {
+            $creneaux[$espaceOrigine][$requisition['date_resa']][] = [
+                'debut' => substr($requisition['heure_debut'], 0, 5),
+                'fin'   => substr($requisition['heure_fin'], 0, 5),
+            ];
+        }
+
+        // Date proposée : celle choisie par le client lors du choix (nouvelle date),
+        // sinon la date d'origine (autre espace), si elle n'est pas passée.
+        $datePropose = '';
+        $candidate = $requisition['choix_client'] === 'nouvelle_date'
+            ? (string)$requisition['details_choix']
+            : (string)$requisition['date_resa'];
+        $dc = DateTime::createFromFormat('!Y-m-d', $candidate);
+        if ($dc && $dc->format('Y-m-d') === $candidate && $candidate >= date('Y-m-d')) {
+            $datePropose = $candidate;
+        }
+
+        $requisitionJs = [
+            'id'             => (int)$requisition['requisition_id'],
+            'choix'          => $requisition['choix_client'],
+            'espace_origine' => $espaceOrigine,
+            'espace_nom'     => $requisition['espace_nom'],
+            'mode_origine'   => $requisition['mode_reservation'],
+            'tarif_origine'  => $requisition['tarif_id'] ? (int)$requisition['tarif_id'] : null,
+            'date_origine'   => $requisition['date_resa'],
+            'date_proposee'  => $datePropose,
+            'heure_debut'    => $requisition['heure_debut'] ? substr($requisition['heure_debut'], 0, 5) : '',
+            'heure_fin'      => $requisition['heure_fin'] ? substr($requisition['heure_fin'], 0, 5) : '',
+            'nuits'          => (int)$requisition['nuits'],
+            'quantite'       => max(1, (int)$requisition['quantite']),
+            'petit_dej'      => (int)$requisition['petit_dejeuner'],
+            'vip'            => (int)$requisition['vip'],
+            'motif'          => (string)($requisition['motif'] ?? ''),
+        ];
+    }
 }
 
 $pageTitle = "Réserver un espace — Palais des Pionniers";
 require __DIR__ . '/includes/header.php';
+
+if ($requisitionErreur):
+?>
+<div class="bg-slate-50 min-h-[60vh]">
+  <div class="container mx-auto max-w-2xl px-4 py-12">
+    <div class="bg-white rounded-2xl shadow-lg border border-amber-200 p-6 sm:p-8">
+      <p class="text-sm font-black text-amber-700 mb-2 flex items-center gap-2">
+        <i class="fas fa-landmark"></i> Nouvelle réservation suite à une réquisition
+      </p>
+      <p class="text-sm text-slate-700 leading-relaxed"><?= e($requisitionErreur) ?></p>
+      <a href="mon-compte.php"
+         class="mt-6 inline-flex items-center gap-2 bg-primary text-white text-xs font-black uppercase tracking-widest px-5 py-3 rounded-xl hover:bg-slate-800 transition">
+        <i class="fas fa-arrow-left"></i> Retour à mon compte
+      </a>
+    </div>
+  </div>
+</div>
+<?php
+require __DIR__ . '/includes/footer.php';
+exit;
+endif;
 ?>
 
 <style>
@@ -136,6 +268,39 @@ require __DIR__ . '/includes/header.php';
         <div class="bg-white rounded-2xl shadow-lg overflow-hidden">
           <form action="traitement-reservation.php" method="POST" id="resaForm" novalidate class="p-5 sm:p-8 space-y-6">
             <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
+
+            <?php if ($requisition): ?>
+            <input type="hidden" name="requisition_id" value="<?= (int)$requisition['requisition_id'] ?>">
+            <input type="hidden" name="horaire_mode" id="horaireModeInput" value="nouveau">
+
+            <div class="rounded-2xl bg-amber-50 border-2 border-amber-200 p-4">
+              <p class="text-sm font-black text-amber-700 mb-1 flex items-center gap-2">
+                <i class="fas fa-landmark"></i>
+                <?= $requisition['choix_client'] === 'nouvelle_date' ? 'Nouvelle date' : 'Autre espace' ?> — réquisition n°<?= (int)$requisition['requisition_id'] ?>
+              </p>
+              <p class="text-xs text-amber-700 leading-relaxed">
+                Réservation réquisitionnée : <strong><?= e($requisition['espace_nom']) ?></strong>,
+                <?php if (!empty($requisition['heure_debut'])): ?>
+                  le <?= date('d/m/Y', strtotime($requisition['date_resa'])) ?>
+                  de <?= e(substr($requisition['heure_debut'], 0, 5)) ?> à <?= e(substr($requisition['heure_fin'], 0, 5)) ?>.
+                <?php else: ?>
+                  du <?= date('d/m/Y', strtotime($requisition['date_resa'])) ?>
+                  au <?= date('d/m/Y', strtotime($requisition['date_depart'])) ?>
+                  (<?= (int)$requisition['nuits'] ?> <?= (int)$requisition['nuits'] > 1 ? 'nuitées' : 'nuitée' ?>).
+                <?php endif; ?>
+              </p>
+              <p class="text-xs text-amber-700 leading-relaxed mt-2">
+                <?php if ($requisition['choix_client'] === 'nouvelle_date'): ?>
+                  L'espace et le tarif restent ceux de votre réservation initiale : choisissez simplement la nouvelle date<?= empty($requisition['heure_debut']) ? ' d\'arrivée (la durée du séjour est conservée)' : ' et l\'horaire' ?>.
+                <?php else: ?>
+                  Choisissez l'espace qui vous convient : son propre tarif s'appliquera.
+                <?php endif; ?>
+                Votre demande suit le circuit habituel et sera examinée par l'administration.
+                Si vous aviez déjà payé, le montant versé sera rattaché à cette nouvelle réservation lors de sa validation ;
+                un éventuel écart de tarif sera régularisé (solde à régler ou remboursement du trop-perçu).
+              </p>
+            </div>
+            <?php endif; ?>
 
             <!-- 1. Espace -->
             <div>
@@ -271,6 +436,19 @@ require __DIR__ . '/includes/header.php';
             <!-- 3. Horaires -->
             <div id="horairesSection">
               <label class="field-label"><span class="step-badge">3</span>Horaires <span class="required">*</span></label>
+              <?php if ($requisition && $requisition['choix_client'] === 'nouvelle_date' && !empty($requisition['heure_debut'])): ?>
+              <div id="horaireModeChoix" class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
+                <label class="flex items-center gap-2 p-3 rounded-xl border-2 border-slate-100 bg-white cursor-pointer text-xs font-black text-slate-700 hover:border-primary transition">
+                  <input type="radio" name="horaire_choix" value="meme" checked onchange="onHoraireModeChange()" class="w-4 h-4 accent-primary">
+                  Conserver le même horaire
+                  <span class="text-slate-400 font-semibold">(<?= e(substr($requisition['heure_debut'], 0, 5)) ?> → <?= e(substr($requisition['heure_fin'], 0, 5)) ?>)</span>
+                </label>
+                <label class="flex items-center gap-2 p-3 rounded-xl border-2 border-slate-100 bg-white cursor-pointer text-xs font-black text-slate-700 hover:border-primary transition">
+                  <input type="radio" name="horaire_choix" value="nouveau" onchange="onHoraireModeChange()" class="w-4 h-4 accent-primary">
+                  Choisir un nouvel horaire
+                </label>
+              </div>
+              <?php endif; ?>
               <div class="grid grid-cols-2 gap-3">
                 <div>
                   <p class="text-[9px] font-black text-slate-400 uppercase mb-1.5 flex items-center gap-1"><i class="fas fa-play text-green-500 text-[8px]"></i>Début</p>
@@ -489,6 +667,8 @@ require __DIR__ . '/includes/header.php';
 const espaces  = <?= json_encode($espacesData) ?>;
 const tarifs   = <?= json_encode($tarifsData) ?>;
 const creneaux = <?= json_encode($creneaux) ?>;
+// Contexte de réquisition (null pour une réservation normale)
+const REQ = <?= json_encode($requisitionJs) ?>;
 let currentViewDate = new Date();
 
 // ---- Helpers ----
@@ -513,6 +693,7 @@ const JOUR_DEBUT=7*60, JOUR_FIN=22*60, JOUR_DUREE=JOUR_FIN-JOUR_DEBUT;
 function getEspaceId(){ return el('espaceSelect').value; }
 
 function toggleEspaceDropdown() {
+    if (reqNouvelleDate()) return; // nouvelle date : l'espace réquisitionné est conservé
     const list = el('espaceDropdownList');
     const chevron = el('espaceDropdownChevron');
     const isOpen = !list.classList.contains('hidden');
@@ -565,6 +746,7 @@ function getDateDepart() { return el('dateDepartInput').value; }
 function isSejour(id) { return id && espaces[id] && espaces[id].mode_reservation === 'sejour'; }
 
 function changeQuantite(delta) {
+    if (reqNouvelleDate() && isSejour(getEspaceId())) return; // nombre de chambres conservé
     const input = el('quantiteInput');
     const max = parseInt(input.max || '1', 10);
     let val = parseInt(input.value || '1', 10) + delta;
@@ -582,7 +764,8 @@ function updateQuantiteMax() {
     const max = (tarif && tarif.quantite_disponible) ? tarif.quantite_disponible : 1;
     const input = el('quantiteInput');
     input.max = max;
-    if (parseInt(input.value,10) > max) input.value = max;
+    if (reqNouvelleDate()) { input.max = Math.max(max, REQ.quantite); input.value = REQ.quantite; }
+    if (parseInt(input.value,10) > parseInt(input.max,10)) input.value = input.max;
     el('quantiteMaxLabel').textContent = max > 1 ? `(max ${max} disponibles)` : '';
 }
 
@@ -861,6 +1044,7 @@ function onDateChange() {
     el('dateErr').classList.add('hidden');
     setValid(el('dateInput'), !!date);
     currentViewDate = date ? new Date(date+'T12:00:00') : new Date();
+    if (reqNouvelleDate() && isSejour(getEspaceId())) majDepartRequisition();
     if (isSejour(getEspaceId())) { onDateDepartChange(); }
     renderCal();
     updateDisponibilite();
@@ -972,6 +1156,7 @@ function buildCreneauxList(listId, taken) {
 }
 
 function updateDisponibilite() {
+    if (reqMemeHoraire()) appliquerMemeHoraire();
     const id=getEspaceId(), date=getDate(), debut=getDebut(), fin=getFin();
 
     if (isSejour(id)) {
@@ -999,8 +1184,13 @@ function updateDisponibilite() {
         const bl=taken.some(c=>o.value>c.debut&&o.value<=c.fin);
         o.disabled=bl; o.style.color=bl?'#ccc':''; o.style.background=bl?'#fee2e2':'';
     });
+    if (reqMemeHoraire()) {
+        // Horaire d'origine imposé : même s'il est occupé, on le garde pour afficher le conflit
+        selD.value = REQ.heure_debut; selF.value = REQ.heure_fin;
+    } else {
     if(selD.options[selD.selectedIndex]?.disabled){ const nf=Array.from(selD.options).find(o=>!o.disabled); if(nf)selD.value=nf.value; }
     if(selF.options[selF.selectedIndex]?.disabled){ const nf=Array.from(selF.options).find(o=>!o.disabled); if(nf)selF.value=nf.value; }
+    }
 
     if (!id||!date) {
         el('creneauxDuJour').classList.add('hidden');
@@ -1111,21 +1301,99 @@ function submitMobile() {
     if(!checkAllValid()) { showToast('Veuillez compléter tous les champs.','error'); return; }
     el('resaForm').dispatchEvent(new Event('submit'));
 }
+let envoiEnCours = false;
 el('resaForm').addEventListener('submit', function(e) {
     e.preventDefault();
+    if (envoiEnCours) return; // protection double clic
     if(!checkAllValid()) { showToast('Veuillez compléter tous les champs.','error'); return; }
     const debut=getDebut(), fin=getFin(), date=getDate(), esp=espaces[getEspaceId()];
     const d=new Date(date+'T12:00:00');
     const dateStr=new Intl.DateTimeFormat('fr-FR',{weekday:'long',day:'numeric',month:'long'}).format(d);
     if(confirm(`Confirmer la réservation ?\n\nEspace : ${esp.nom}\nDate : ${dateStr}\nHoraires : ${debut} → ${fin}\n\nVotre demande sera examinée sous 24h.`)) {
+        envoiEnCours = true;
+        ['submitBtn','submitBtnMobile'].forEach(b => { if (el(b)) { el(b).disabled = true; el(b).classList.add('opacity-40','cursor-not-allowed'); } });
         showToast('Envoi en cours...','info');
         this.submit();
     }
 });
 
+// ---- Mode réquisition (nouvelle date / autre espace) ----
+function reqNouvelleDate() { return !!(REQ && REQ.choix === 'nouvelle_date'); }
+function reqMemeHoraire() {
+    if (!reqNouvelleDate() || !REQ.heure_debut || isSejour(getEspaceId())) return false;
+    const r = document.querySelector('input[name="horaire_choix"]:checked');
+    return !!(r && r.value === 'meme');
+}
+function appliquerMemeHoraire() {
+    el('heureDebut').value = REQ.heure_debut;
+    el('heureFin').value   = REQ.heure_fin;
+}
+function onHoraireModeChange() {
+    const meme = reqMemeHoraire();
+    if (el('horaireModeInput')) el('horaireModeInput').value = meme ? 'meme' : 'nouveau';
+    ['heureDebut','heureFin'].forEach(s => {
+        el(s).classList.toggle('pointer-events-none', meme);
+        el(s).classList.toggle('opacity-60', meme);
+        el(s).tabIndex = meme ? -1 : 0;
+    });
+    if (meme) appliquerMemeHoraire();
+    updateDisponibilite();
+    checkAllValid();
+}
+function ajouterJours(dateStr, n) {
+    const d = new Date(dateStr + 'T12:00:00');
+    d.setDate(d.getDate() + n);
+    return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+function majDepartRequisition() {
+    const date = getDate();
+    el('dateDepartInput').value = (date && REQ.nuits > 0) ? ajouterJours(date, REQ.nuits) : '';
+}
+function initRequisition() {
+    if (!REQ) return;
+    const id = getEspaceId();
+    if (!id || !espaces[id]) { checkAllValid(); return; }
+    const sejour = isSejour(id);
+    const memeMode = espaces[id].mode_reservation === REQ.mode_origine;
+
+    if (reqNouvelleDate()) {
+        const btn = el('espaceDropdownBtn');
+        if (btn) { btn.classList.add('cursor-not-allowed'); btn.title = "L'espace réquisitionné est conservé pour une nouvelle date"; }
+        const radio = document.querySelector(`input[name="tarif_id"][value="${REQ.tarif_origine}"]`);
+        if (radio) radio.checked = true;
+    }
+
+    if (REQ.date_proposee) {
+        el('dateInput').value = REQ.date_proposee;
+        currentViewDate = new Date(REQ.date_proposee + 'T12:00:00');
+    }
+
+    if (sejour) {
+        if (reqNouvelleDate()) {
+            el('dateDepartInput').readOnly = true;
+            el('dateDepartInput').classList.add('bg-slate-100');
+            majDepartRequisition();
+            el('quantiteInput').value = REQ.quantite;
+        } else if (memeMode && REQ.date_proposee) {
+            el('dateDepartInput').value = ajouterJours(REQ.date_proposee, REQ.nuits);
+        }
+        if (memeMode && REQ.petit_dej && !el('petitDejLabel').classList.contains('hidden')) el('petitDejCheck').checked = true;
+    } else if (memeMode && REQ.heure_debut) {
+        appliquerMemeHoraire();
+    }
+
+    if (REQ.vip && !el('vipLabel').classList.contains('hidden')) el('vipCheck').checked = true;
+    if (!el('motifInput').value.trim() && REQ.motif) { el('motifInput').value = REQ.motif; }
+
+    onMotifChange();
+    onHoraireModeChange();
+    onDateChange();
+}
+
 // ---- Init ----
 onEspaceChange();
 renderCal();
 if(el('telInput').value.trim().length>=8) onTelChange();
+initRequisition();
 </script>
 <?php require __DIR__ . '/includes/footer.php'; ?>

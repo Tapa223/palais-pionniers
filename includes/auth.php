@@ -454,6 +454,10 @@ if (!function_exists('annuler_reservations_concurrentes')) {
                   AND r.id != ?
                   AND r.statut = 'validee'
                   AND r.statut_paiement != 'paye'
+                  AND NOT (
+                      r.requisition_id IS NOT NULL
+                      AND r.statut_paiement = 'partiellement_paye'
+                  )
                   AND r.date_resa < ?
                   AND r.date_depart > ?
             ";
@@ -481,6 +485,10 @@ if (!function_exists('annuler_reservations_concurrentes')) {
                   AND r.id != ?
                   AND r.statut = 'validee'
                   AND r.statut_paiement != 'paye'
+                  AND NOT (
+                      r.requisition_id IS NOT NULL
+                      AND r.statut_paiement = 'partiellement_paye'
+                  )
                   AND r.date_resa = ?
                   AND r.heure_debut < ?
                   AND ADDTIME(
@@ -1135,6 +1143,16 @@ if (!function_exists('expirer_reservations_non_payees')) {
                 WHERE r.statut = 'validee'
                   AND r.statut_paiement != 'paye'
                   AND r.date_validation IS NOT NULL
+                  /*
+                   * Une réservation issue d'une réquisition qui porte déjà
+                   * des paiements transférés (solde restant à régler) n'est
+                   * jamais annulée automatiquement : l'argent encaissé
+                   * resterait sinon rattaché à une réservation expirée.
+                   */
+                  AND NOT (
+                      r.requisition_id IS NOT NULL
+                      AND r.statut_paiement = 'partiellement_paye'
+                  )
             ");
 
             $candidates =
@@ -1204,5 +1222,688 @@ if (!function_exists('expirer_reservations_non_payees')) {
                 "Réservation #{$r['id']} annulée automatiquement (délai 48h dépassé)"
             );
         }
+    }
+}
+
+/*
+|--------------------------------------------------------------------------
+| RÉQUISITIONS → NOUVELLE RÉSERVATION NORMALE
+|--------------------------------------------------------------------------
+| Fonctions partagées par reserver.php, traitement-reservation.php,
+| mon-compte.php, admin/reservations.php et admin/requisition-detail.php.
+| Elles ne créent aucun circuit parallèle : la nouvelle réservation reste
+| une réservation normale (en_attente → validation admin_espaces → suite
+| normale), simplement rattachée à sa réquisition via
+| reservations.requisition_id.
+*/
+
+if (!function_exists('horaire_reservation_erreur')) {
+    /**
+     * Contrôle serveur des horaires d'une réservation en mode créneau.
+     *
+     * Reprend exactement les règles des listes de reserver.php :
+     * format HH:MM, pas de 30 minutes, début de 07:00 à 21:30,
+     * fin de 08:00 à 22:30, fin strictement après le début.
+     *
+     * Retourne null si les horaires sont valides, sinon un message.
+     */
+    function horaire_reservation_erreur(
+        string $debut,
+        string $fin
+    ): ?string {
+
+        $format = '/^(?:[01]\d|2[0-3]):(?:00|30)$/';
+
+        if (
+            !preg_match($format, $debut)
+            || !preg_match($format, $fin)
+        ) {
+            return "Horaires invalides : merci de choisir l'heure de début et de fin dans les listes proposées (par tranches de 30 minutes).";
+        }
+
+        if ($debut < '07:00' || $debut > '21:30') {
+            return "L'heure de début doit être comprise entre 07:00 et 21:30.";
+        }
+
+        if ($fin < '08:00' || $fin > '22:30') {
+            return "L'heure de fin doit être comprise entre 08:00 et 22:30.";
+        }
+
+        if ($fin <= $debut) {
+            return "L'heure de fin doit être après l'heure de début.";
+        }
+
+        return null;
+    }
+}
+
+if (!function_exists('montant_attendu_reservation')) {
+    /**
+     * Montant attendu d'une réservation, calculé à partir de son tarif
+     * et de son espace.
+     *
+     * Formule strictement identique à celle déjà utilisée dans
+     * admin/paiements.php et generer_bon.php :
+     * tarif × nuitées × quantité (+ petit-déjeuner 5 000 / nuit / chambre
+     * en séjour, + supplément VIP en créneau).
+     *
+     * Retourne 0 si le tarif n'est plus connu (même comportement que
+     * admin/paiements.php, qui ne fixe alors aucun montant de référence).
+     */
+    function montant_attendu_reservation(
+        PDO $pdo,
+        int $reservationId
+    ): float {
+
+        $stmt = $pdo->prepare("
+            SELECT
+                r.heure_debut,
+                r.date_resa,
+                r.date_depart,
+                r.quantite,
+                r.petit_dejeuner,
+                r.vip,
+                t.montant AS tarif_montant,
+                e.prix_vip
+            FROM reservations r
+            JOIN espaces e
+                ON e.id = r.espace_id
+            LEFT JOIN tarifs t
+                ON t.id = r.tarif_id
+            WHERE r.id = ?
+        ");
+
+        $stmt->execute([$reservationId]);
+
+        $r = $stmt->fetch();
+
+        if (!$r) {
+            return 0.0;
+        }
+
+        $estSejour = empty($r['heure_debut']);
+
+        $nuitees = $estSejour
+            ? max(
+                1,
+                (int) (
+                    (strtotime((string) $r['date_depart']) - strtotime((string) $r['date_resa']))
+                    / 86400
+                )
+            )
+            : 1;
+
+        $quantite = max(1, (int) ($r['quantite'] ?? 1));
+
+        $montant = $r['tarif_montant']
+            ? ((float) $r['tarif_montant'] * $nuitees * $quantite)
+            : 0.0;
+
+        if ($estSejour && $r['petit_dejeuner']) {
+            $montant += 5000 * $nuitees * $quantite;
+        }
+
+        if (!$estSejour && !empty($r['vip'])) {
+            $montant += (float) ($r['prix_vip'] ?? 0);
+        }
+
+        return round($montant, 2);
+    }
+}
+
+if (!function_exists('reservation_requisition_active')) {
+    /**
+     * Nouvelle réservation encore active rattachée à une réquisition.
+     *
+     * Une réservation refusée, annulée ou expirée ne compte plus :
+     * le client peut alors refaire une demande dans le cadre de la
+     * même réquisition.
+     */
+    function reservation_requisition_active(
+        PDO $pdo,
+        int $requisitionId,
+        bool $verrouiller = false
+    ): ?array {
+
+        $stmt = $pdo->prepare("
+            SELECT
+                id,
+                statut,
+                statut_paiement,
+                espace_id,
+                date_resa,
+                date_depart,
+                heure_debut,
+                heure_fin
+            FROM reservations
+            WHERE requisition_id = ?
+              AND statut IN ('en_attente', 'validee', 'requisitionnee')
+            ORDER BY id DESC
+            LIMIT 1
+        " . ($verrouiller ? ' FOR UPDATE' : ''));
+
+        $stmt->execute([$requisitionId]);
+
+        $row = $stmt->fetch();
+
+        return $row ?: null;
+    }
+}
+
+if (!function_exists('requisition_contexte_nouvelle_reservation')) {
+    /**
+     * Vérifie qu'un client peut créer une nouvelle réservation dans le
+     * cadre d'une réquisition, et retourne le contexte de la réservation
+     * d'origine.
+     *
+     * Contrôles :
+     * - la réquisition existe et la réservation d'origine appartient
+     *   au client connecté ;
+     * - le choix du client est « nouvelle_date » ou « autre_espace » ;
+     * - la réquisition est encore ouverte (choix_recu / en_traitement) ;
+     * - la réservation d'origine est bien « requisitionnee » ;
+     * - aucune nouvelle réservation active n'existe déjà.
+     *
+     * Avec $verrouiller = true, les lignes sont verrouillées (FOR UPDATE) :
+     * à appeler dans une transaction.
+     *
+     * @return array{ok: bool, erreur: ?string, code: ?string, req: ?array}
+     */
+    function requisition_contexte_nouvelle_reservation(
+        PDO $pdo,
+        int $requisitionId,
+        int $userId,
+        bool $verrouiller = false
+    ): array {
+
+        $stmt = $pdo->prepare("
+            SELECT
+                rm.id               AS requisition_id,
+                rm.reservation_id   AS reservation_origine_id,
+                rm.choix_client,
+                rm.details_choix,
+                rm.statut           AS requisition_statut,
+                r.user_id,
+                r.espace_id,
+                r.tarif_id,
+                r.date_resa,
+                r.date_depart,
+                r.heure_debut,
+                r.heure_fin,
+                r.quantite,
+                r.petit_dejeuner,
+                r.vip,
+                r.motif,
+                r.statut            AS reservation_statut,
+                e.nom               AS espace_nom,
+                e.mode_reservation
+            FROM requisitions_ministerielles rm
+            JOIN reservations r
+                ON r.id = rm.reservation_id
+            JOIN espaces e
+                ON e.id = r.espace_id
+            WHERE rm.id = ?
+              AND r.user_id = ?
+            LIMIT 1
+        " . ($verrouiller ? ' FOR UPDATE' : ''));
+
+        $stmt->execute([$requisitionId, $userId]);
+
+        $req = $stmt->fetch();
+
+        if (!$req) {
+            return [
+                'ok'     => false,
+                'erreur' => "Cette réquisition est introuvable ou ne vous appartient pas.",
+                'code'   => 'introuvable',
+                'req'    => null,
+            ];
+        }
+
+        if (!in_array($req['choix_client'], ['nouvelle_date', 'autre_espace'], true)) {
+            return [
+                'ok'     => false,
+                'erreur' => "Cette réquisition ne concerne pas une nouvelle date ou un autre espace.",
+                'code'   => 'choix',
+                'req'    => $req,
+            ];
+        }
+
+        if (
+            !in_array($req['requisition_statut'], ['choix_recu', 'en_traitement'], true)
+            || $req['reservation_statut'] !== 'requisitionnee'
+        ) {
+            return [
+                'ok'     => false,
+                'erreur' => "Cette réquisition n'est plus ouverte à une nouvelle réservation.",
+                'code'   => 'fermee',
+                'req'    => $req,
+            ];
+        }
+
+        $active = reservation_requisition_active(
+            $pdo,
+            $requisitionId,
+            $verrouiller
+        );
+
+        if ($active) {
+            return [
+                'ok'     => false,
+                'erreur' => "Une nouvelle réservation (#{$active['id']}) est déjà en cours pour cette réquisition.",
+                'code'   => 'active',
+                'req'    => $req,
+            ];
+        }
+
+        $req['nuits'] = !empty($req['date_depart'])
+            ? max(
+                1,
+                (int) (
+                    (strtotime($req['date_depart']) - strtotime($req['date_resa']))
+                    / 86400
+                )
+            )
+            : 0;
+
+        return [
+            'ok'     => true,
+            'erreur' => null,
+            'code'   => null,
+            'req'    => $req,
+        ];
+    }
+}
+
+if (!function_exists('creneau_occupe_par_reservation_payee')) {
+    /**
+     * Retourne l'identifiant d'une réservation validée ET déjà (totalement
+     * ou partiellement) payée qui occupe le créneau demandé sur le même
+     * espace, sinon null.
+     *
+     * Même règle de chevauchement que tarif_disponible() (marge de 2h
+     * après la fin de la réservation existante), appliquée à l'espace
+     * comme annuler_reservations_concurrentes().
+     *
+     * Utilisée uniquement pour les réservations issues d'une réquisition :
+     * un paiement déjà encaissé ne doit jamais être rattaché à un créneau
+     * qu'un autre client a déjà définitivement réglé.
+     */
+    function creneau_occupe_par_reservation_payee(
+        PDO $pdo,
+        int $espaceId,
+        string $date,
+        string $heureDebut,
+        string $heureFin,
+        ?int $excludeId = null
+    ): ?int {
+
+        $sql = "
+            SELECT id
+            FROM reservations
+            WHERE espace_id = ?
+              AND date_resa = ?
+              AND statut = 'validee'
+              AND statut_paiement IN ('paye', 'partiellement_paye')
+              AND heure_debut IS NOT NULL
+              AND heure_debut < ?
+              AND ADDTIME(heure_fin, '02:00:00') > ?
+        ";
+
+        $params = [
+            $espaceId,
+            $date,
+            $heureFin,
+            $heureDebut,
+        ];
+
+        if ($excludeId) {
+            $sql .= " AND id != ?";
+            $params[] = $excludeId;
+        }
+
+        $sql .= " LIMIT 1";
+
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+
+        $id = $stmt->fetchColumn();
+
+        return $id ? (int) $id : null;
+    }
+}
+
+if (!function_exists('chevauche_reservation_origine')) {
+    /**
+     * Vrai si la période demandée recouvre le créneau (ou le séjour)
+     * réquisitionné de la réservation d'origine, sur le même espace.
+     *
+     * Une réservation « requisitionnee » n'est plus comptée comme une
+     * occupation normale : sans ce contrôle, le client pourrait
+     * reprendre exactement le créneau que l'institution occupe.
+     */
+    function chevauche_reservation_origine(
+        array $origine,
+        int $espaceId,
+        string $dateResa,
+        ?string $dateDepart,
+        ?string $heureDebut,
+        ?string $heureFin
+    ): bool {
+
+        if ((int) $origine['espace_id'] !== $espaceId) {
+            return false;
+        }
+
+        if (!empty($origine['date_depart'])) {
+
+            if (!$dateDepart) {
+                return false;
+            }
+
+            return $dateResa < $origine['date_depart']
+                && $dateDepart > $origine['date_resa'];
+        }
+
+        if (
+            $dateResa !== $origine['date_resa']
+            || !$heureDebut
+            || !$heureFin
+            || empty($origine['heure_debut'])
+            || empty($origine['heure_fin'])
+        ) {
+            return false;
+        }
+
+        $debutOrigine = strtotime($origine['heure_debut']);
+        $finOrigineMarge = strtotime($origine['heure_fin']) + 2 * 3600;
+
+        return $debutOrigine < strtotime($heureFin)
+            && $finOrigineMarge > strtotime($heureDebut);
+    }
+}
+
+if (!function_exists('transferer_paiements_requisition')) {
+    /**
+     * Rattache à la nouvelle réservation les paiements déjà encaissés sur
+     * la réservation d'origine d'une réquisition.
+     *
+     * - aucun paiement n'est créé : les lignes existantes de `paiements`
+     *   changent seulement de reservation_id (montant, date, mode,
+     *   référence, agent et numéro de reçu restent identiques) ;
+     * - chaque ligne transférée reçoit une trace dans `paiements.note` ;
+     * - le statut de paiement de la nouvelle réservation est recalculé à
+     *   partir du montant attendu de SON tarif ;
+     * - l'ancienne réservation garde son statut « requisitionnee », son
+     *   statut de paiement repasse à « non_paye » (elle ne porte plus
+     *   aucun encaissement) et reçoit une trace dans note_admin ;
+     * - un éventuel trop-perçu est conservé dans
+     *   operations_requisition.montant_concerne pour être traité par le
+     *   comptable via le remboursement existant.
+     *
+     * Idempotent : un second appel ne trouve plus de paiement sur la
+     * réservation d'origine et ne modifie rien.
+     *
+     * DOIT être appelée à l'intérieur d'une transaction.
+     */
+    function transferer_paiements_requisition(
+        PDO $pdo,
+        int $nouvelleReservationId
+    ): array {
+
+        $resultat = [
+            'transfere'   => 0.0,
+            'nb'          => 0,
+            'du'          => 0.0,
+            'total'       => 0.0,
+            'statut'      => null,
+            'solde'       => 0.0,
+            'trop_percu'  => 0.0,
+            'origine_id'  => null,
+            'requisition_id' => null,
+        ];
+
+        $stmt = $pdo->prepare("
+            SELECT id, requisition_id
+            FROM reservations
+            WHERE id = ?
+            FOR UPDATE
+        ");
+        $stmt->execute([$nouvelleReservationId]);
+        $nouvelle = $stmt->fetch();
+
+        if (!$nouvelle || empty($nouvelle['requisition_id'])) {
+            return $resultat;
+        }
+
+        $requisitionId = (int) $nouvelle['requisition_id'];
+
+        $stmt = $pdo->prepare("
+            SELECT reservation_id
+            FROM requisitions_ministerielles
+            WHERE id = ?
+            FOR UPDATE
+        ");
+        $stmt->execute([$requisitionId]);
+        $origineId = (int) $stmt->fetchColumn();
+
+        $resultat['origine_id'] = $origineId ?: null;
+        $resultat['requisition_id'] = $requisitionId;
+
+        if (!$origineId || $origineId === $nouvelleReservationId) {
+            return $resultat;
+        }
+
+        $stmt = $pdo->prepare("
+            SELECT id, montant
+            FROM paiements
+            WHERE reservation_id = ?
+            FOR UPDATE
+        ");
+        $stmt->execute([$origineId]);
+        $paiementsOrigine = $stmt->fetchAll();
+
+        if (!$paiementsOrigine) {
+            return $resultat;
+        }
+
+        $transfere = 0.0;
+
+        foreach ($paiementsOrigine as $p) {
+            $transfere += (float) $p['montant'];
+        }
+
+        $trace = '[Réquisition #' . $requisitionId . '] Paiement transféré de la réservation #'
+            . $origineId . ' vers la réservation #' . $nouvelleReservationId
+            . ' le ' . date('d/m/Y à H:i') . '.';
+
+        $pdo->prepare("
+            UPDATE paiements
+            SET
+                reservation_id = ?,
+                note = CONCAT(
+                    COALESCE(note, ''),
+                    CASE WHEN note IS NULL OR note = '' THEN '' ELSE '\n' END,
+                    ?
+                )
+            WHERE reservation_id = ?
+        ")->execute([
+            $nouvelleReservationId,
+            $trace,
+            $origineId,
+        ]);
+
+        $stmt = $pdo->prepare("
+            SELECT COALESCE(SUM(montant), 0)
+            FROM paiements
+            WHERE reservation_id = ?
+        ");
+        $stmt->execute([$nouvelleReservationId]);
+        $total = (float) $stmt->fetchColumn();
+
+        $du = montant_attendu_reservation($pdo, $nouvelleReservationId);
+
+        /*
+         * Même règle que admin/paiements.php : sans montant de référence
+         * connu, la réservation est considérée comme payée.
+         */
+        $statut = ($du > 0 && $total < $du)
+            ? 'partiellement_paye'
+            : 'paye';
+
+        $solde = $du > 0 ? max(0.0, $du - $total) : 0.0;
+        $tropPercu = $du > 0 ? max(0.0, $total - $du) : 0.0;
+
+        $pdo->prepare("
+            UPDATE reservations
+            SET
+                statut_paiement = ?,
+                date_limite_solde = NULL,
+                paiement_notifie = 0
+            WHERE id = ?
+        ")->execute([
+            $statut,
+            $nouvelleReservationId,
+        ]);
+
+        $pdo->prepare("
+            UPDATE reservations
+            SET
+                statut_paiement = 'non_paye',
+                date_limite_solde = NULL,
+                note_admin = CONCAT(
+                    COALESCE(note_admin, ''),
+                    CASE WHEN note_admin IS NULL OR note_admin = '' THEN '' ELSE '\n' END,
+                    ?
+                )
+            WHERE id = ?
+        ")->execute([
+            '[Réquisition #' . $requisitionId . '] '
+                . number_format($transfere, 0, ',', ' ')
+                . ' FCFA encaissés transférés vers la nouvelle réservation #'
+                . $nouvelleReservationId . ' le ' . date('d/m/Y à H:i') . '.',
+            $origineId,
+        ]);
+
+        $description = 'Paiements transférés vers la réservation #' . $nouvelleReservationId
+            . ' : ' . number_format($transfere, 0, ',', ' ') . ' FCFA'
+            . ' — montant attendu : ' . number_format($du, 0, ',', ' ') . ' FCFA'
+            . ($solde > 0 ? ' — solde à régler : ' . number_format($solde, 0, ',', ' ') . ' FCFA' : '')
+            . ($tropPercu > 0 ? ' — trop-perçu à rembourser : ' . number_format($tropPercu, 0, ',', ' ') . ' FCFA' : '')
+            . '.';
+
+        $stmt = $pdo->prepare("
+            SELECT id
+            FROM operations_requisition
+            WHERE requisition_id = ?
+            ORDER BY id DESC
+            LIMIT 1
+            FOR UPDATE
+        ");
+        $stmt->execute([$requisitionId]);
+        $operationId = (int) $stmt->fetchColumn();
+
+        if ($operationId > 0) {
+            $pdo->prepare("
+                UPDATE operations_requisition
+                SET
+                    montant_concerne = CASE WHEN ? > 0 THEN ? ELSE montant_concerne END,
+                    description = CONCAT(
+                        COALESCE(description, ''),
+                        CASE WHEN description IS NULL OR description = '' THEN '' ELSE '\n' END,
+                        ?
+                    )
+                WHERE id = ?
+            ")->execute([
+                $tropPercu,
+                $tropPercu,
+                $description,
+                $operationId,
+            ]);
+        }
+
+        log_activity(
+            'requisition_paiement_transfere',
+            'reservations',
+            $description . ' (réquisition #' . $requisitionId . ', réservation d\'origine #' . $origineId . ')'
+        );
+
+        $resultat['transfere'] = $transfere;
+        $resultat['nb'] = count($paiementsOrigine);
+        $resultat['du'] = $du;
+        $resultat['total'] = $total;
+        $resultat['statut'] = $statut;
+        $resultat['solde'] = $solde;
+        $resultat['trop_percu'] = $tropPercu;
+
+        return $resultat;
+    }
+}
+
+if (!function_exists('requisition_suivi_nouvelle_reservation')) {
+    /**
+     * État de la nouvelle réservation rattachée à une réquisition
+     * (reservations.requisition_id) et du trop-perçu éventuel issu du
+     * transfert des paiements lors de sa validation.
+     */
+    function requisition_suivi_nouvelle_reservation(PDO $pdo, int $requisitionId): array
+    {
+        $stmt = $pdo->prepare("
+            SELECT
+                n.id,
+                n.statut,
+                n.statut_paiement,
+                n.date_resa,
+                n.date_depart,
+                n.heure_debut,
+                n.heure_fin,
+                e.nom AS espace_nom,
+                (
+                    SELECT COALESCE(SUM(p.montant), 0)
+                    FROM paiements p
+                    WHERE p.reservation_id = n.id
+                ) AS total_paye
+            FROM reservations n
+            JOIN espaces e ON e.id = n.espace_id
+            WHERE n.requisition_id = ?
+            ORDER BY n.id DESC
+        ");
+        $stmt->execute([$requisitionId]);
+        $liste = $stmt->fetchAll();
+
+        $validee = null;
+        foreach ($liste as $n) {
+            if (in_array($n['statut'], ['validee', 'requisitionnee'], true)) {
+                $validee = $n;
+                break;
+            }
+        }
+
+        $stmt = $pdo->prepare("
+            SELECT montant_concerne
+            FROM operations_requisition
+            WHERE requisition_id = ?
+            ORDER BY id DESC
+            LIMIT 1
+        ");
+        $stmt->execute([$requisitionId]);
+        $tropPercu = $validee ? (float)$stmt->fetchColumn() : 0.0;
+
+        $stmt = $pdo->prepare("
+            SELECT COUNT(*)
+            FROM remboursements
+            WHERE requisition_id = ?
+              AND resultat = 'effectue'
+        ");
+        $stmt->execute([$requisitionId]);
+        $rembourse = (int)$stmt->fetchColumn() > 0;
+
+        return [
+            'liste'      => $liste,
+            'validee'    => $validee,
+            'trop_percu' => $tropPercu,
+            'rembourse'  => $rembourse,
+            'a_rembourser' => $validee !== null && $tropPercu > 0 && !$rembourse,
+        ];
     }
 }

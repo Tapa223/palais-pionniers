@@ -197,10 +197,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$readonly) {
                              * depuis le choix client.
                              */
 
+                            /*
+                             * Même correspondance que lors du choix client
+                             * (mon-compte.php) : « autre_espace » est enregistré
+                             * comme « changement_espace » dans l'ENUM
+                             * operations_requisition.type_operation.
+                             */
+                            $typeOperationSecours = [
+                                'annulation'    => 'annulation',
+                                'remboursement' => 'remboursement',
+                                'nouvelle_date' => 'nouvelle_date',
+                                'autre_espace'  => 'changement_espace',
+                            ][$rqAction['choix_client']] ?? 'autre';
+
                             $stmt->execute([
                                 $id,
                                 $rqAction['reservation_id'],
-                                $rqAction['choix_client'],
+                                $typeOperationSecours,
                                 $_SESSION['user_id']
                             ]);
                         }
@@ -248,11 +261,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$readonly) {
 
             elseif ($action === 'traiter_remboursement') {
 
-                if ($rqAction['choix_client'] !== 'remboursement') {
+                /*
+                 * Deux cas utilisent ce remboursement existant :
+                 * - le choix « remboursement » du client ;
+                 * - le trop-perçu constaté lorsqu'une nouvelle réservation
+                 *   (nouvelle date / autre espace) moins chère a été validée
+                 *   et que les paiements y ont été rattachés. Dans ce cas les
+                 *   montants sont fixés côté serveur.
+                 */
+                $suiviTrop = in_array($rqAction['choix_client'], ['nouvelle_date', 'autre_espace'], true)
+                    ? requisition_suivi_nouvelle_reservation($pdo, $id)
+                    : null;
+
+                $estTropPercu = $suiviTrop !== null && $suiviTrop['a_rembourser'];
+
+                if ($rqAction['choix_client'] !== 'remboursement' && !$estTropPercu) {
 
                     $msg = [
                         'err',
                         'Cette opération ne correspond pas à un remboursement.'
+                    ];
+
+                } elseif ($estTropPercu && (
+                    (float)($_POST['montant_a_rembourser'] ?? 0) <= 0
+                    || (float)($_POST['montant_a_rembourser'] ?? 0) > $suiviTrop['trop_percu']
+                )) {
+
+                    $msg = [
+                        'err',
+                        'Le montant à rembourser doit être compris entre 1 et '
+                        . number_format($suiviTrop['trop_percu'], 0, ',', ' ')
+                        . ' FCFA (trop-perçu constaté).'
                     ];
 
                 } elseif ($rqAction['statut'] === 'cloturee') {
@@ -264,8 +303,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$readonly) {
 
                 } else {
 
-                    $montantVerse = (float)($_POST['montant_paye'] ?? 0);
+                    $montantVerse = $estTropPercu
+                        ? (float)$suiviTrop['validee']['total_paye']
+                        : (float)($_POST['montant_paye'] ?? 0);
                     $montantARembourser = (float)($_POST['montant_a_rembourser'] ?? 0);
+                    $motifRemboursement = $estTropPercu
+                        ? 'Remboursement du trop-perçu suite à réquisition ministérielle (nouvelle réservation #'
+                            . (int)$suiviTrop['validee']['id'] . ')'
+                        : 'Remboursement suite à réquisition ministérielle';
                     $mode = trim($_POST['mode'] ?? '');
                     $reference = trim($_POST['reference'] ?? '');
                     $resultat = trim($_POST['resultat'] ?? '');
@@ -376,7 +421,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$readonly) {
                                     $montantVerse,
                                     $montantARembourser,
                                     $montantARembourser,
-                                    'Remboursement suite à réquisition ministérielle',
+                                    $motifRemboursement,
                                     $mode,
                                     $reference,
                                     $_SESSION['user_id'],
@@ -418,7 +463,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$readonly) {
                                     $montantVerse,
                                     $montantARembourser,
                                     $montantARembourser,
-                                    'Remboursement suite à réquisition ministérielle',
+                                    $motifRemboursement,
                                     $mode,
                                     $reference,
                                     $_SESSION['user_id'],
@@ -539,7 +584,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$readonly) {
                     $reference = trim($_POST['reference'] ?? '');
                     $note = trim($_POST['note'] ?? '');
 
-                    if ($resultat === '') {
+                    /*
+                     * Nouvelle date / autre espace : la réquisition n'est
+                     * traitée que si la nouvelle réservation existe réellement
+                     * et a été validée, et qu'aucun trop-perçu n'attend
+                     * d'être remboursé.
+                     */
+                    $suiviOperation = in_array($rqAction['choix_client'], ['nouvelle_date', 'autre_espace'], true)
+                        ? requisition_suivi_nouvelle_reservation($pdo, $id)
+                        : null;
+
+                    if ($suiviOperation !== null && $suiviOperation['validee'] === null) {
+
+                        $msg = [
+                            'err',
+                            'La nouvelle réservation du client n’existe pas encore ou n’a pas été validée par l’administration des espaces : la réquisition ne peut pas être clôturée.'
+                        ];
+
+                    } elseif ($suiviOperation !== null && $suiviOperation['a_rembourser']) {
+
+                        $msg = [
+                            'err',
+                            'Un trop-perçu de '
+                            . number_format($suiviOperation['trop_percu'], 0, ',', ' ')
+                            . ' FCFA doit d’abord être remboursé (formulaire de remboursement).'
+                        ];
+
+                    } elseif ($resultat === '') {
 
                         $msg = [
                             'err',
@@ -786,6 +857,30 @@ $libelleStatut =
     ?? ($rq['statut'] ?? '—');
 
 $estRemboursement = ($choixClient === 'remboursement');
+
+$estNouvelleReservation = in_array($choixClient, ['nouvelle_date', 'autre_espace'], true);
+
+$suivi = $estNouvelleReservation
+    ? requisition_suivi_nouvelle_reservation($pdo, $id)
+    : null;
+
+$tropPercuARembourser = $suivi !== null && $suivi['a_rembourser'];
+
+$libellesStatutResa = [
+    'en_attente'     => 'En attente de validation',
+    'validee'        => 'Validée',
+    'refusee'        => 'Refusée',
+    'annulee'        => 'Annulée',
+    'expiree'        => 'Expirée',
+    'requisitionnee' => 'Réquisitionnée',
+];
+
+$libellesPaiementResa = [
+    'non_paye'           => 'Non payée',
+    'attente_paiement'   => 'En attente de paiement',
+    'partiellement_paye' => 'Partiellement payée',
+    'paye'               => 'Payée',
+];
 
 $estCloturee = in_array(
     $rq['statut'],
@@ -1254,6 +1349,110 @@ require __DIR__ . '/_admin_header.php';
             </section>
 
             <!-- =============================================
+                 NOUVELLE RÉSERVATION (nouvelle date / autre espace)
+            ============================================== -->
+
+            <?php if ($estNouvelleReservation): ?>
+
+                <section class="bg-white rounded-2xl border border-indigo-200 shadow-sm overflow-hidden">
+
+                    <div class="px-5 py-4 border-b border-indigo-100 flex items-center gap-3 bg-indigo-50/50">
+
+                        <div class="w-9 h-9 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center">
+                            <i class="fas fa-calendar-plus"></i>
+                        </div>
+
+                        <div>
+                            <h2 class="text-sm font-black text-indigo-700 uppercase tracking-wide">
+                                Nouvelle réservation du client
+                            </h2>
+
+                            <p class="text-[10px] text-indigo-600/70">
+                                Réservation normale rattachée à cette réquisition
+                            </p>
+                        </div>
+
+                    </div>
+
+                    <div class="p-5 space-y-3">
+
+                        <?php if (!$suivi['liste']): ?>
+
+                            <div class="rounded-2xl bg-slate-50 border border-slate-200 p-4">
+                                <p class="text-sm font-bold text-slate-600">
+                                    Le client n’a pas encore déposé sa nouvelle réservation.
+                                </p>
+                                <p class="text-xs text-slate-500 mt-1">
+                                    Il la finalise depuis son espace client ; elle suivra ensuite
+                                    la validation habituelle par l’administration des espaces.
+                                </p>
+                            </div>
+
+                        <?php else: ?>
+
+                            <?php foreach ($suivi['liste'] as $n): ?>
+
+                                <div class="rounded-2xl border p-4 <?= in_array($n['statut'], ['validee', 'requisitionnee'], true)
+                                    ? 'bg-emerald-50 border-emerald-200'
+                                    : ($n['statut'] === 'en_attente' ? 'bg-amber-50 border-amber-200' : 'bg-slate-50 border-slate-200') ?>">
+
+                                    <div class="flex items-start justify-between gap-3 flex-wrap">
+
+                                        <div>
+                                            <p class="text-sm font-black text-slate-800">
+                                                Réservation #<?= (int)$n['id'] ?> — <?= e($n['espace_nom']) ?>
+                                            </p>
+
+                                            <p class="text-xs text-slate-600 mt-1">
+                                                <?php if (!empty($n['heure_debut'])): ?>
+                                                    Le <?= date('d/m/Y', strtotime($n['date_resa'])) ?>
+                                                    de <?= e(substr($n['heure_debut'], 0, 5)) ?> à <?= e(substr($n['heure_fin'], 0, 5)) ?>
+                                                <?php else: ?>
+                                                    Du <?= date('d/m/Y', strtotime($n['date_resa'])) ?>
+                                                    au <?= date('d/m/Y', strtotime($n['date_depart'])) ?>
+                                                <?php endif; ?>
+                                            </p>
+                                        </div>
+
+                                        <div class="text-right">
+                                            <p class="text-[10px] font-black uppercase text-slate-500">
+                                                <?= e($libellesStatutResa[$n['statut']] ?? $n['statut']) ?>
+                                            </p>
+                                            <p class="text-[10px] font-bold text-slate-400 mt-0.5">
+                                                <?= e($libellesPaiementResa[$n['statut_paiement']] ?? $n['statut_paiement']) ?>
+                                                · <?= number_format((float)$n['total_paye'], 0, ',', ' ') ?> FCFA versés
+                                            </p>
+                                        </div>
+
+                                    </div>
+
+                                </div>
+
+                            <?php endforeach; ?>
+
+                        <?php endif; ?>
+
+                        <?php if ($suivi['trop_percu'] > 0): ?>
+
+                            <div class="rounded-2xl p-4 border <?= $suivi['rembourse'] ? 'bg-emerald-50 border-emerald-200' : 'bg-orange-50 border-orange-200' ?>">
+                                <p class="text-sm font-black <?= $suivi['rembourse'] ? 'text-emerald-800' : 'text-orange-800' ?>">
+                                    Trop-perçu : <?= number_format($suivi['trop_percu'], 0, ',', ' ') ?> FCFA
+                                    — <?= $suivi['rembourse'] ? 'remboursé' : 'à rembourser' ?>
+                                </p>
+                                <p class="text-xs text-slate-600 mt-1">
+                                    La nouvelle réservation coûte moins cher que le montant déjà encaissé.
+                                </p>
+                            </div>
+
+                        <?php endif; ?>
+
+                    </div>
+
+                </section>
+
+            <?php endif; ?>
+
+            <!-- =============================================
                  REMBOURSEMENT
             ============================================== -->
 
@@ -1655,9 +1854,15 @@ require __DIR__ . '/_admin_header.php';
                     <?php if (
                         !$readonly
                         && $estEnTraitement
-                        && $estRemboursement
-                        && !$remboursement
-                    ): ?>
+                        && (($estRemboursement && !$remboursement) || $tropPercuARembourser)
+                    ):
+                        $montantPayeFormulaire = $tropPercuARembourser
+                            ? (float)$suivi['validee']['total_paye']
+                            : $montantPaye;
+                        $montantARembourserFormulaire = $tropPercuARembourser
+                            ? $suivi['trop_percu']
+                            : $montantPaye;
+                    ?>
 
                         <div class="pt-1">
 
@@ -1668,6 +1873,10 @@ require __DIR__ . '/_admin_header.php';
                                     <i class="fas fa-circle-info text-amber-600 mt-0.5"></i>
 
                                     <p class="text-[11px] text-amber-800 leading-5">
+                                        <?php if ($tropPercuARembourser): ?>
+                                        <strong>Trop-perçu de <?= number_format($suivi['trop_percu'], 0, ',', ' ') ?> FCFA</strong>
+                                        sur la nouvelle réservation #<?= (int)$suivi['validee']['id'] ?>.
+                                        <?php endif; ?>
                                         Le remboursement doit être enregistré avec son montant,
                                         son mode et sa référence. La réquisition ne sera clôturée
                                         que lorsque le remboursement est marqué comme effectué.
@@ -1708,7 +1917,8 @@ require __DIR__ . '/_admin_header.php';
                                         name="montant_paye"
                                         min="0"
                                         step="1"
-                                        value="<?= e((string)$montantPaye) ?>"
+                                        value="<?= e((string)$montantPayeFormulaire) ?>"
+                                        <?= $tropPercuARembourser ? 'readonly' : '' ?>
                                         required
                                         class="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-bold text-slate-700 outline-none focus:border-primary"
                                     >
@@ -1726,7 +1936,8 @@ require __DIR__ . '/_admin_header.php';
                                         name="montant_a_rembourser"
                                         min="0"
                                         step="1"
-                                        value="<?= e((string)$montantPaye) ?>"
+                                        <?= $tropPercuARembourser ? 'max="' . e((string)$suivi['trop_percu']) . '"' : '' ?>
+                                        value="<?= e((string)$montantARembourserFormulaire) ?>"
                                         required
                                         class="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-bold text-slate-700 outline-none focus:border-primary"
                                     >
@@ -1837,8 +2048,32 @@ require __DIR__ . '/_admin_header.php';
                     <?php if (
                         !$readonly
                         && $estEnTraitement
+                        && $estNouvelleReservation
+                        && !$estCloturee
+                        && ($suivi['validee'] === null || $tropPercuARembourser)
+                    ): ?>
+
+                        <div class="rounded-xl bg-indigo-50 border border-indigo-200 p-3">
+                            <p class="text-[11px] text-indigo-800 leading-5">
+                                <i class="fas fa-circle-info mr-1"></i>
+                                <?php if ($suivi['validee'] === null): ?>
+                                    La clôture sera possible lorsque la nouvelle réservation du client
+                                    aura été validée par l’administration des espaces.
+                                <?php else: ?>
+                                    Enregistrez d’abord le remboursement du trop-perçu :
+                                    la réquisition sera alors clôturée.
+                                <?php endif; ?>
+                            </p>
+                        </div>
+
+                    <?php endif; ?>
+
+                    <?php if (
+                        !$readonly
+                        && $estEnTraitement
                         && !$estRemboursement
                         && !$estCloturee
+                        && (!$estNouvelleReservation || ($suivi['validee'] !== null && !$tropPercuARembourser))
                     ): ?>
 
                         <div class="pt-1">

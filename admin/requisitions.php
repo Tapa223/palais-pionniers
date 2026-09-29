@@ -124,6 +124,30 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 /*
+                 * Nouvelle date / autre espace : même règle que
+                 * requisition-detail.php — pas de clôture sans nouvelle
+                 * réservation validée, ni avec un trop-perçu non remboursé.
+                 */
+                if (
+                    $action === 'traiter_operation'
+                    && in_array($requisition['choix_client'], ['nouvelle_date', 'autre_espace'], true)
+                ) {
+                    $suiviNouvelle = requisition_suivi_nouvelle_reservation($pdo, $id);
+
+                    if ($suiviNouvelle['validee'] === null) {
+                        throw new RuntimeException(
+                            'La nouvelle réservation du client n’existe pas encore ou n’a pas été validée : la réquisition ne peut pas être clôturée.'
+                        );
+                    }
+
+                    if ($suiviNouvelle['a_rembourser']) {
+                        throw new RuntimeException(
+                            'Un trop-perçu doit d’abord être remboursé depuis le dossier de la réquisition.'
+                        );
+                    }
+                }
+
+                /*
                  * Prise en charge.
                  */
                 if ($action === 'prendre_en_charge') {

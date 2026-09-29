@@ -30,6 +30,108 @@ if (!$readonly && isset($_POST['action'])) {
             goto finValider;
         }
 
+        /*
+         * Réservation issue d'une réquisition (nouvelle date / autre espace) :
+         * même validation par admin_espaces, mais faite dans une transaction
+         * qui vérifie la réquisition et rattache les paiements déjà encaissés
+         * sur la réservation d'origine (aucun nouvel encaissement n'est créé).
+         */
+        if (!empty($resa['requisition_id'])) {
+            $reqIdVal = (int)$resa['requisition_id'];
+            try {
+                $pdo->beginTransaction();
+
+                $lock = $pdo->prepare("SELECT statut FROM reservations WHERE id = ? FOR UPDATE");
+                $lock->execute([$id]);
+                if ($lock->fetchColumn() !== 'en_attente') {
+                    throw new RuntimeException("Cette demande n'est plus en attente de validation.");
+                }
+
+                $reqLock = $pdo->prepare("SELECT statut FROM requisitions_ministerielles WHERE id = ? FOR UPDATE");
+                $reqLock->execute([$reqIdVal]);
+                $reqStatut = $reqLock->fetchColumn();
+                if (!in_array($reqStatut, ['choix_recu', 'en_traitement'], true)) {
+                    throw new RuntimeException("La réquisition #$reqIdVal n'est plus ouverte : cette demande ne peut pas être validée.");
+                }
+
+                $autre = $pdo->prepare("SELECT id FROM reservations WHERE requisition_id = ? AND id != ? AND statut IN ('validee','requisitionnee') LIMIT 1");
+                $autre->execute([$reqIdVal, $id]);
+                if ($autreId = $autre->fetchColumn()) {
+                    throw new RuntimeException("La réservation #$autreId est déjà validée pour la réquisition #$reqIdVal.");
+                }
+
+                if (!empty($resa['date_depart'])) {
+                    if (!tarif_disponible($pdo, (int)$resa['tarif_id'], $resa['date_resa'], $resa['date_depart'], null, null, $id, (int)$resa['quantite'])) {
+                        throw new RuntimeException("Plus assez de chambres disponibles sur cette période pour valider cette demande.");
+                    }
+                } elseif ($occupant = creneau_occupe_par_reservation_payee($pdo, (int)$resa['espace_id'], $resa['date_resa'], $resa['heure_debut'], $resa['heure_fin'], $id)) {
+                    throw new RuntimeException("Le créneau est déjà occupé par la réservation #$occupant, validée et réglée.");
+                }
+
+                $pdo->prepare("UPDATE reservations SET statut = 'validee', date_validation = NOW(), notification_vue = 0 WHERE id = ?")
+                    ->execute([$id]);
+
+                $transfert = transferer_paiements_requisition($pdo, $id);
+
+                // Comme après un encaissement : les autres demandes validées non payées
+                // sur ce créneau sont départagées (mode créneau uniquement).
+                $annulees = ($transfert['transfere'] > 0 && empty($resa['date_depart']))
+                    ? annuler_reservations_concurrentes($pdo, $id)
+                    : [];
+
+                log_activity('reservation_validee', 'reservations', "Réservation #$id validée (réquisition #$reqIdVal)");
+
+                $pdo->commit();
+
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) $pdo->rollBack();
+                $msg = ['error', $e instanceof RuntimeException ? e($e->getMessage()) : 'Validation impossible : erreur technique.'];
+                if (!$e instanceof RuntimeException) error_log('Validation réservation réquisition #' . $id . ' : ' . $e->getMessage());
+                goto finValider;
+            }
+
+            $dateTxt = date('d/m/Y', strtotime($resa['date_resa']));
+            $fmt = fn($m) => number_format((float)$m, 0, ',', ' ');
+
+            if ($transfert['transfere'] > 0) {
+                $suiteClient = " Le paiement déjà versé ({$fmt($transfert['transfere'])} FCFA) a été rattaché à cette nouvelle réservation";
+                if ($transfert['statut'] === 'paye') {
+                    $suiteClient .= ' : aucun nouveau paiement n\'est nécessaire.';
+                    if ($transfert['trop_percu'] > 0) {
+                        $suiteClient .= " Le trop-perçu de {$fmt($transfert['trop_percu'])} FCFA vous sera remboursé par le service comptable.";
+                    }
+                } else {
+                    $suiteClient .= " : il reste {$fmt($transfert['solde'])} FCFA à régler au guichet.";
+                }
+                notify('admin_comptable', 'reservation_validee',
+                    "Réquisition #$reqIdVal : réservation #$id validée pour «{$resa['espace_nom']}» le $dateTxt — {$fmt($transfert['transfere'])} FCFA transférés"
+                    . ($transfert['solde'] > 0 ? ", solde à encaisser : {$fmt($transfert['solde'])} FCFA" : '')
+                    . ($transfert['trop_percu'] > 0 ? ", trop-perçu à rembourser : {$fmt($transfert['trop_percu'])} FCFA" : '') . '.',
+                    "requisition-detail.php?id=$reqIdVal"
+                );
+            } else {
+                $suiteClient = " Merci de régler au guichet avant le " . date('d/m/Y à H:i', limite_paiement(date('Y-m-d H:i:s'))) . " — en cas de créneau partagé avec une autre demande, la salle revient au premier qui règle le paiement.";
+                notify('admin_comptable', 'reservation_validee',
+                    "Réservation validée pour «{$resa['espace_nom']}» le $dateTxt — {$resa['nom_complet']} (réquisition #$reqIdVal) : paiement à encaisser",
+                    "paiements.php"
+                );
+            }
+
+            notify('superadmin', 'reservation_validee',
+                "Réservation validée pour «{$resa['espace_nom']}» le $dateTxt — {$resa['nom_complet']} (réquisition #$reqIdVal)",
+                "reservations.php"
+            );
+            notify('', 'reservation_validee',
+                "Votre nouvelle réservation pour « {$resa['espace_nom']} » (suite à la réquisition) est validée !" . $suiteClient,
+                "mon-compte.php", (int)$resa['user_id']
+            );
+
+            $msg = ['ok', 'Réservation confirmée (réquisition #' . $reqIdVal . ').'
+                . ($transfert['transfere'] > 0 ? ' ' . $fmt($transfert['transfere']) . ' FCFA déjà encaissés y ont été rattachés.' : ' Le comptable a été notifié pour l\'encaissement.')
+                . ($annulees ? ' ' . count($annulees) . ' demande(s) concurrente(s) annulée(s).' : '')];
+            goto finValider;
+        }
+
         $estSejourResaVal = !empty($resa['date_depart']);
 
         $stmt = $pdo->prepare("UPDATE reservations SET statut = 'validee', date_validation = NOW(), notification_vue = 0 WHERE id = ?");
@@ -53,6 +155,15 @@ if (!$readonly && isset($_POST['action'])) {
         finValider:
 
     } elseif ($action === 'refuser') {
+        // Une réservation issue d'une réquisition qui porte déjà des paiements transférés
+        // ne peut pas être refusée ici : l'argent resterait rattaché à une demande refusée.
+        $chkReq = $pdo->prepare("SELECT r.requisition_id, (SELECT COUNT(*) FROM paiements p WHERE p.reservation_id = r.id) AS nb_paiements FROM reservations r WHERE r.id = ?");
+        $chkReq->execute([$id]);
+        $chkReq = $chkReq->fetch();
+        if ($chkReq && !empty($chkReq['requisition_id']) && (int)$chkReq['nb_paiements'] > 0) {
+            $msg = ['error', 'Cette réservation (réquisition #' . (int)$chkReq['requisition_id'] . ') porte déjà des paiements : elle ne peut pas être refusée. Contactez le service comptable.'];
+            goto finRefus;
+        }
         $stmt = $pdo->prepare("UPDATE reservations SET statut = 'refusee', notification_vue = 0 WHERE id = ?");
         $stmt->execute([$id]); log_activity('reservation_refusee','reservations','Réservation #'.($id??0).' refusée — Note: '.(trim($_POST['note_admin']??'')?:'-'));
 
@@ -70,12 +181,35 @@ if (!$readonly && isset($_POST['action'])) {
                 "mon-compte.php", (int)$resaRefus['user_id']
             );
         }
+        if ($chkReq && !empty($chkReq['requisition_id'])) {
+            $reqIdRefus = (int)$chkReq['requisition_id'];
+            if ($resaRefus) {
+                notify('', 'reservation_refusee',
+                    "Votre réquisition reste ouverte : vous pouvez déposer une nouvelle demande depuis votre espace (bouton « Finaliser ma nouvelle réservation »).",
+                    "mon-compte.php", (int)$resaRefus['user_id']
+                );
+            }
+            notify('admin_comptable', 'reservation_refusee',
+                "Réquisition #$reqIdRefus : la nouvelle réservation #$id du client a été refusée. Le client peut en déposer une autre.",
+                "requisition-detail.php?id=$reqIdRefus"
+            );
+        }
         $msg = ['error', 'Réservation refusée.'];
+        finRefus:
 
     } elseif ($action === 'annuler') {
+        // Une réservation réquisitionnée ne revient jamais « en attente » :
+        // son devenir est géré par la réquisition.
+        $chkStatut = $pdo->prepare("SELECT statut FROM reservations WHERE id = ?");
+        $chkStatut->execute([$id]);
+        if ($chkStatut->fetchColumn() === 'requisitionnee') {
+            $msg = ['error', 'Une réservation réquisitionnée ne peut pas être remise en attente : son traitement se fait depuis la réquisition.'];
+            goto finAnnuler;
+        }
         $stmt = $pdo->prepare("UPDATE reservations SET statut = 'en_attente', notification_vue = 0 WHERE id = ?");
         $stmt->execute([$id]); log_activity('reservation_en_attente','reservations','Réservation #'.($id??0).' remise en attente');
         $msg = ['ok', 'La demande est de nouveau en attente.'];
+        finAnnuler:
     } elseif ($action === 'requisitionner') {
         if (!is_superadmin() && $role !== 'admin_comptable') {
             $msg = ['error', 'Seuls la Direction ou le Comptable peuvent déclencher une réquisition institutionnelle.'];
@@ -176,6 +310,11 @@ require __DIR__ . '/_admin_header.php';
 
                     <td class="p-6">
                         <div class="font-black text-primary uppercase text-sm"><?= htmlspecialchars($res['espace_nom']) ?></div>
+                        <?php if (!empty($res['requisition_id'])): ?>
+                            <div class="mt-1 text-[9px] font-black uppercase tracking-widest text-amber-600">
+                                <i class="fas fa-landmark mr-1"></i>Suite à la réquisition #<?= (int)$res['requisition_id'] ?>
+                            </div>
+                        <?php endif; ?>
                         <div class="flex flex-wrap gap-2 mt-2">
                             <?php if($res['tarif_nom']): ?>
                                 <span class="text-[9px] bg-slate-100 text-slate-600 px-2 py-1 rounded font-black uppercase tracking-tighter">
@@ -219,10 +358,12 @@ require __DIR__ . '/_admin_header.php';
                             'refusee'    => 'bg-rose-50 text-rose-600 border-rose-100',
                             'annulee'    => 'bg-slate-100 text-slate-500 border-slate-200',
                             'expiree'    => 'bg-slate-100 text-slate-500 border-slate-200',
+                            'requisitionnee' => 'bg-amber-50 text-amber-700 border-amber-100',
                         ];
                         $labels = [
                             'validee' => 'Confirmé', 'refusee' => 'Refusé', 'en_attente' => 'En attente',
                             'annulee' => 'Annulée', 'expiree' => 'Expirée (48h)',
+                            'requisitionnee' => 'Réquisitionnée',
                         ];
                         $label = $labels[$res['statut']] ?? $res['statut'];
                         ?>
@@ -254,7 +395,7 @@ require __DIR__ . '/_admin_header.php';
                                     Refuser
                                 </button>
 
-                            <?php else: ?>
+                            <?php elseif ($res['statut'] !== 'requisitionnee'): ?>
                                 <button name="action" value="annuler" class="bg-slate-900 text-white px-4 py-2 rounded-xl hover:bg-black transition text-[10px] font-black uppercase tracking-widest">
                                     Annuler
                                 </button>

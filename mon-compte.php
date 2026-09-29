@@ -551,6 +551,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'deman
 
 
 // ============================================================
+// RETOUR D'UNE NOUVELLE RÉSERVATION LIÉE À UNE RÉQUISITION
+// ============================================================
+if ($msg === null) {
+
+    if (($_GET['success'] ?? '') === 'requisition') {
+
+        $msg = [
+            'ok',
+            'Votre nouvelle réservation a bien été envoyée. Elle suit le circuit habituel et sera examinée par l’administration.'
+        ];
+
+    } elseif (!empty($_GET['requisition_erreur'])) {
+
+        // Codes fixes : aucun texte libre venant de l'URL n'est affiché
+        $messagesRequisition = [
+            'introuvable' => 'Cette réquisition est introuvable ou ne vous appartient pas.',
+            'choix'       => 'Cette réquisition ne concerne pas une nouvelle date ou un autre espace.',
+            'fermee'      => 'Cette réquisition n’est plus ouverte à une nouvelle réservation.',
+            'active'      => 'Une nouvelle réservation est déjà en cours pour cette réquisition.',
+        ];
+
+        $msg = [
+            'err',
+            $messagesRequisition[$_GET['requisition_erreur']]
+                ?? 'La nouvelle réservation n’a pas pu être enregistrée.'
+        ];
+    }
+}
+
+
+// ============================================================
 // NOTIFICATIONS DU CLIENT
 // ============================================================
 $notifsClient = $pdo->prepare("
@@ -832,7 +863,28 @@ $reservations = $pdo->prepare("
             WHERE rb.requisition_id = rm.id
             ORDER BY rb.id DESC
             LIMIT 1
-        ) AS remboursement_resultat
+        ) AS remboursement_resultat,
+
+        /* --------------------------------------------------------
+           NOUVELLE RÉSERVATION LIÉE (nouvelle date / autre espace)
+           -------------------------------------------------------- */
+        r.requisition_id AS requisition_origine_id,
+
+        (
+            SELECT n.id
+            FROM reservations n
+            WHERE n.requisition_id = rm.id
+            ORDER BY n.id DESC
+            LIMIT 1
+        ) AS nouvelle_resa_id,
+
+        (
+            SELECT n.statut
+            FROM reservations n
+            WHERE n.requisition_id = rm.id
+            ORDER BY n.id DESC
+            LIMIT 1
+        ) AS nouvelle_resa_statut
 
     FROM reservations r
 
@@ -1318,6 +1370,18 @@ require __DIR__ . '/includes/header.php';
               <h3 class="font-black text-primary text-base truncate">
                 <?= e($r['espace_nom']) ?>
               </h3>
+
+              <?php if (!empty($r['requisition_origine_id'])): ?>
+
+              <p class="text-[10px] font-black uppercase tracking-widest text-amber-600 mt-0.5">
+
+                <i class="fas fa-landmark mr-1"></i>
+
+                Suite à la réquisition n°<?= (int)$r['requisition_origine_id'] ?>
+
+              </p>
+
+              <?php endif; ?>
 
 
               <div class="flex flex-wrap items-center gap-3 mt-1.5 text-xs text-slate-500 font-semibold">
@@ -1986,6 +2050,91 @@ require __DIR__ . '/includes/header.php';
                   <?php endif; ?>
 
                 </div>
+
+
+                <!-- =================================================
+                     NOUVELLE DATE / AUTRE ESPACE : NOUVELLE RÉSERVATION
+                     ================================================= -->
+                <?php if (in_array($r['choix_client'], ['nouvelle_date', 'autre_espace'], true)):
+
+                    $nouvelleActive = !empty($r['nouvelle_resa_id'])
+                        && in_array($r['nouvelle_resa_statut'], ['en_attente', 'validee', 'requisitionnee'], true);
+
+                    $requisitionOuverte = in_array(
+                        $r['requisition_statut'] ?? '',
+                        ['choix_recu', 'en_traitement'],
+                        true
+                    );
+
+                    $libellesNouvelle = [
+                        'en_attente'     => 'en attente de validation',
+                        'validee'        => 'validée',
+                        'requisitionnee' => 'réquisitionnée',
+                        'refusee'        => 'refusée',
+                        'annulee'        => 'annulée',
+                        'expiree'        => 'expirée',
+                    ];
+                ?>
+
+                <div class="mt-3 bg-white/80 border border-amber-200 rounded-xl px-3 py-3">
+
+                  <?php if ($nouvelleActive): ?>
+
+                  <p class="text-xs font-bold text-amber-800">
+
+                    <i class="fas fa-link mr-1"></i>
+
+                    Nouvelle réservation n°<?= (int)$r['nouvelle_resa_id'] ?> :
+                    <?= e($libellesNouvelle[$r['nouvelle_resa_statut']] ?? $r['nouvelle_resa_statut']) ?>.
+
+                  </p>
+
+                  <p class="text-[11px] text-slate-500 mt-1">
+
+                    Elle apparaît dans la liste de vos réservations et suit le circuit habituel.
+
+                  </p>
+
+                  <?php elseif ($requisitionOuverte): ?>
+
+                  <?php if (!empty($r['nouvelle_resa_id'])): ?>
+
+                  <p class="text-[11px] text-slate-600 mb-2">
+
+                    Votre précédente demande (n°<?= (int)$r['nouvelle_resa_id'] ?>) a été
+                    <?= e($libellesNouvelle[$r['nouvelle_resa_statut']] ?? $r['nouvelle_resa_statut']) ?> :
+                    vous pouvez en déposer une nouvelle.
+
+                  </p>
+
+                  <?php endif; ?>
+
+                  <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+
+                    <p class="text-xs font-bold text-amber-800">
+
+                      <?= $r['choix_client'] === 'nouvelle_date'
+                          ? 'Finalisez votre nouvelle date en réservant le créneau souhaité.'
+                          : 'Finalisez votre changement d’espace en réservant l’espace souhaité.' ?>
+
+                    </p>
+
+                    <a href="reserver.php?requisition_id=<?= (int)$r['requisition_id'] ?>"
+                       class="inline-flex items-center justify-center gap-1.5 bg-amber-600 text-white text-[10px] font-black uppercase px-3 py-2 rounded-xl hover:bg-amber-700 transition flex-shrink-0">
+
+                      <i class="fas fa-calendar-plus"></i>
+
+                      Finaliser ma nouvelle réservation
+
+                    </a>
+
+                  </div>
+
+                  <?php endif; ?>
+
+                </div>
+
+                <?php endif; ?>
 
 
                 <!-- =================================================
