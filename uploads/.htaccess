@@ -1,0 +1,21 @@
+# Palais des Pionniers — dossier des photos envoyées.
+# Aucun script ne doit jamais être exécuté ici, quel que soit son nom.
+
+Options -Indexes -ExecCGI
+
+# PHP chargé en module Apache (cas de XAMPP) : moteur désactivé dans ce dossier
+<IfModule mod_php.c>
+    php_flag engine off
+</IfModule>
+<IfModule mod_php7.c>
+    php_flag engine off
+</IfModule>
+
+# Aucun gestionnaire de script pour ces extensions
+RemoveHandler .php .php3 .php4 .php5 .php7 .php8 .phtml .pht .phar .phps .cgi .pl .py .sh .asp .aspx .jsp
+RemoveType .php .php3 .php4 .php5 .php7 .php8 .phtml .pht .phar .phps
+
+# Accès refusé à tout fichier de script (le nom doit se terminer par une extension d'image autorisée)
+<FilesMatch "(?i)\.(php\d?|phtml|pht|phar|phps|cgi|pl|py|sh|asp|aspx|jsp|htaccess)$">
+    Require all denied
+</FilesMatch>

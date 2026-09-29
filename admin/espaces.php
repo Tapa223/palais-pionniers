@@ -10,10 +10,120 @@ $readonly = is_readonly_admin();
 if (isset($_GET['success'])) $msg = ['ok', 'Opération réalisée avec succès !'];
 if (isset($_GET['error']))   $msg = ['err', 'Une erreur est survenue.'];
 
+// Message détaillé après un envoi de photos (photos refusées, doublons…)
+if (!empty($_SESSION['espaces_flash'])) {
+    $msg = $_SESSION['espaces_flash'];
+    unset($_SESSION['espaces_flash']);
+}
+
+/*
+ * Photos de la galerie : formats, taille et nombre acceptés.
+ * Le type est vérifié sur le contenu réel du fichier (finfo + getimagesize),
+ * l'extension enregistrée est déduite de ce contenu, jamais du nom envoyé.
+ */
+const ESPACE_PHOTO_TYPES = [
+    'image/jpeg' => 'jpg',
+    'image/png'  => 'png',
+    'image/webp' => 'webp',
+];
+const ESPACE_PHOTO_TAILLE_MAX = 5 * 1024 * 1024; // 5 Mo par photo
+
+function taille_ini_octets(string $valeur): int
+{
+    $valeur = trim($valeur);
+    $unite  = strtolower(substr($valeur, -1));
+    $nombre = (int)$valeur;
+    return match ($unite) {
+        'g' => $nombre * 1024 ** 3,
+        'm' => $nombre * 1024 ** 2,
+        'k' => $nombre * 1024,
+        default => (int)$valeur,
+    };
+}
+
+// Limites effectives (les plus strictes entre l'application et php.ini)
+$photoTailleMax  = min(ESPACE_PHOTO_TAILLE_MAX, taille_ini_octets((string)ini_get('upload_max_filesize')) ?: ESPACE_PHOTO_TAILLE_MAX);
+$photoNombreMax  = max(1, (int)ini_get('max_file_uploads') ?: 20);
+$envoiTailleMax  = taille_ini_octets((string)ini_get('post_max_size'));
+
+/**
+ * Enregistre les photos envoyées pour un espace.
+ * Retourne [nombre ajoutées, liste des messages de refus].
+ */
+function enregistrer_photos_espace(PDO $pdo, int $espaceId, array $fichiers, int $tailleMax): array
+{
+    $ajoutees = 0;
+    $refus    = [];
+    $dossier  = __DIR__ . '/../uploads/';
+
+    // Empreintes des photos déjà en ligne pour cet espace (anti-doublon, sans colonne supplémentaire)
+    $empreintes = [];
+    $existantes = $pdo->prepare("SELECT chemin FROM espace_images WHERE espace_id = ?");
+    $existantes->execute([$espaceId]);
+    foreach ($existantes->fetchAll(PDO::FETCH_COLUMN) as $chemin) {
+        $cheminComplet = $dossier . basename($chemin);
+        if (is_file($cheminComplet)) {
+            $empreintes[sha1_file($cheminComplet)] = true;
+        }
+    }
+
+    $finfo = new finfo(FILEINFO_MIME_TYPE);
+
+    foreach ($fichiers['tmp_name'] ?? [] as $k => $tmp) {
+        $nomOrigine = basename((string)($fichiers['name'][$k] ?? 'fichier'));
+        $erreur     = (int)($fichiers['error'][$k] ?? UPLOAD_ERR_NO_FILE);
+
+        if ($erreur === UPLOAD_ERR_NO_FILE) {
+            continue;
+        }
+        if ($erreur === UPLOAD_ERR_INI_SIZE || $erreur === UPLOAD_ERR_FORM_SIZE) {
+            $refus[] = "« $nomOrigine » : fichier trop volumineux";
+            continue;
+        }
+        if ($erreur !== UPLOAD_ERR_OK || !is_uploaded_file($tmp)) {
+            $refus[] = "« $nomOrigine » : envoi incomplet";
+            continue;
+        }
+        if (filesize($tmp) > $tailleMax) {
+            $refus[] = "« $nomOrigine » : dépasse " . round($tailleMax / 1048576, 1) . " Mo";
+            continue;
+        }
+
+        $mime = $finfo->file($tmp);
+        if (!isset(ESPACE_PHOTO_TYPES[$mime]) || @getimagesize($tmp) === false) {
+            $refus[] = "« $nomOrigine » : format non accepté (JPG, PNG ou WebP uniquement)";
+            continue;
+        }
+
+        $empreinte = sha1_file($tmp);
+        if (isset($empreintes[$empreinte])) {
+            $refus[] = "« $nomOrigine » : photo déjà présente";
+            continue;
+        }
+
+        $fichier = 'esp_' . $espaceId . '_' . bin2hex(random_bytes(8)) . '.' . ESPACE_PHOTO_TYPES[$mime];
+        if (!move_uploaded_file($tmp, $dossier . $fichier)) {
+            $refus[] = "« $nomOrigine » : enregistrement impossible";
+            continue;
+        }
+
+        $pdo->prepare("INSERT INTO espace_images (espace_id, chemin) VALUES (?,?)")->execute([$espaceId, $fichier]);
+        $empreintes[$empreinte] = true;
+        $ajoutees++;
+    }
+
+    return [$ajoutees, $refus];
+}
+
 // ============================================================
 // ACTIONS POST (admin_espaces / superadmin uniquement)
 // ============================================================
-if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
+// Envoi dépassant post_max_size : PHP vide $_POST et $_FILES sans erreur visible
+if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST' && empty($_POST) && (int)($_SERVER['CONTENT_LENGTH'] ?? 0) > 0) {
+    $msg = ['err', 'Envoi trop volumineux (maximum ' . round($envoiTailleMax / 1048576) . ' Mo au total) : rien n\'a été enregistré. Ajoutez les photos en plusieurs fois.'];
+} elseif (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST' && !csrf_check($_POST['csrf_token'] ?? '')) {
+    $msg = ['err', 'Requête invalide ou expirée : rechargez la page et recommencez.'];
+} elseif (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
 
     // Suppression image
@@ -23,7 +133,7 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $img->execute([$imgId]);
         $img = $img->fetch();
         if ($img) {
-            @unlink(__DIR__ . '/../uploads/' . $img['chemin']);
+            @unlink(__DIR__ . '/../uploads/' . basename($img['chemin']));
             $pdo->prepare("DELETE FROM espace_images WHERE id = ?")->execute([$imgId]);
             log_activity("image_supprimee","espaces","Image supprimée de l'espace ID {$img['espace_id']}"); header("Location: espaces.php?edit={$img['espace_id']}&success=1"); exit;
         }
@@ -34,7 +144,7 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $id = (int)($_POST['id'] ?? 0);
         $imgs = $pdo->prepare("SELECT chemin FROM espace_images WHERE espace_id = ?");
         $imgs->execute([$id]);
-        foreach ($imgs->fetchAll() as $i) @unlink(__DIR__ . '/../uploads/' . $i['chemin']);
+        foreach ($imgs->fetchAll() as $i) @unlink(__DIR__ . '/../uploads/' . basename($i['chemin']));
         $pdo->prepare("DELETE FROM espaces WHERE id = ?")->execute([$id]); log_activity("espace_supprime","espaces","Espace ID $id supprimé"); header("Location: espaces.php?success=1"); exit;
     }
 
@@ -83,16 +193,13 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
             $s->execute([$nom, $slug, $cat, $cap, $desc, $equip, $modeResa, $gerantExterne, $gerantNom, $gerantPrenom, $gerantEmail, $gerantContact, $gerantUserId, $typeBail, $optionVip, $prixVip, $dispo, $id]); log_activity("espace_modifie","espaces","Espace modifié : $nom");
         }
 
-        // Upload galerie
+        // Upload galerie (contrôlé : type réel, taille, doublons)
+        $photosRefusees = [];
+        $photosAjoutees = 0;
         if (!empty($_FILES['galerie']['name'][0])) {
-            foreach ($_FILES['galerie']['tmp_name'] as $k => $tmp) {
-                if ($_FILES['galerie']['error'][$k] === 0) {
-                    $ext  = strtolower(pathinfo($_FILES['galerie']['name'][$k], PATHINFO_EXTENSION));
-                    $file = "esp_{$id}_" . uniqid() . ".{$ext}";
-                    if (move_uploaded_file($tmp, __DIR__ . '/../uploads/' . $file)) {
-                        $pdo->prepare("INSERT INTO espace_images (espace_id, chemin) VALUES (?,?)")->execute([$id, $file]);
-                    }
-                }
+            [$photosAjoutees, $photosRefusees] = enregistrer_photos_espace($pdo, $id, $_FILES['galerie'], $photoTailleMax);
+            if ($photosAjoutees > 0) {
+                log_activity("photos_ajoutees", "espaces", "$photosAjoutees photo(s) ajoutée(s) à l'espace ID $id");
             }
         }
 
@@ -125,6 +232,13 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
+        if ($photosRefusees) {
+            $_SESSION['espaces_flash'] = ['err', 'Espace enregistré'
+                . ($photosAjoutees ? " ($photosAjoutees photo(s) ajoutée(s))" : '')
+                . '. Photo(s) non ajoutée(s) : ' . implode(' ; ', $photosRefusees) . '.'];
+        } elseif ($photosAjoutees) {
+            $_SESSION['espaces_flash'] = ['ok', "Espace enregistré, $photosAjoutees photo(s) ajoutée(s)."];
+        }
         header("Location: espaces.php?edit={$id}&success=1"); exit;
     }
 }
@@ -213,7 +327,16 @@ require __DIR__ . '/_admin_header.php';
     </a>
   </div>
 
-  <form action="espaces.php" method="POST" enctype="multipart/form-data" class="p-6 md:p-8 space-y-7">
+  <?php if ($editId && !empty($imagesEdit)): ?>
+  <!-- Suppression d'une photo : formulaire séparé (jamais imbriqué dans le formulaire de l'espace) -->
+  <form id="formSupprPhoto" method="POST" action="espaces.php" class="hidden">
+    <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
+    <input type="hidden" name="action" value="delete_image">
+  </form>
+  <?php endif; ?>
+
+  <form id="formEspace" action="espaces.php" method="POST" enctype="multipart/form-data" class="p-6 md:p-8 space-y-7">
+    <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
     <input type="hidden" name="id" value="<?= $editId ?>">
 
     <!-- Infos principales -->
@@ -432,13 +555,23 @@ require __DIR__ . '/_admin_header.php';
         <i class="fas fa-images text-accent"></i> Galerie photos
       </p>
 
-      <!-- Upload -->
-      <label class="flex flex-col items-center justify-center w-full border-2 border-dashed border-slate-200 rounded-2xl py-8 cursor-pointer hover:border-primary hover:bg-primary/5 transition bg-slate-50">
+      <!-- Upload : les sélections successives s'ajoutent, envoi unique à l'enregistrement -->
+      <label id="zonePhotos" class="flex flex-col items-center justify-center w-full border-2 border-dashed border-slate-200 rounded-2xl py-8 px-4 text-center cursor-pointer hover:border-primary hover:bg-primary/5 transition bg-slate-50">
         <i class="fas fa-cloud-upload-alt text-2xl text-slate-300 mb-2"></i>
         <p class="text-sm font-bold text-slate-500">Cliquez pour ajouter des photos</p>
-        <p class="text-xs text-slate-400 mt-1">JPG, PNG · Plusieurs fichiers acceptés</p>
-        <input type="file" name="galerie[]" multiple accept="image/*" class="hidden">
+        <p class="text-xs text-slate-400 mt-1">JPG, PNG ou WebP · <?= round($photoTailleMax / 1048576, 1) ?> Mo maximum par photo · vous pouvez ajouter plusieurs fois</p>
+        <input type="file" id="inputPhotos" name="galerie[]" multiple accept="image/jpeg,image/png,image/webp" class="hidden"
+               data-taille-max="<?= (int)$photoTailleMax ?>" data-nombre-max="<?= (int)$photoNombreMax ?>" data-envoi-max="<?= (int)$envoiTailleMax ?>">
       </label>
+      <p id="photosMessage" class="hidden mt-2 text-xs font-bold text-accent"></p>
+
+      <!-- Photos sélectionnées, pas encore enregistrées -->
+      <div id="photosEnAttente" class="hidden mt-4">
+        <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">
+          <span id="photosEnAttenteNombre">0</span> photo(s) à ajouter — enregistrées au clic sur « <?= $editId ? 'Enregistrer les modifications' : 'Créer l\'espace' ?> »
+        </p>
+        <div id="photosEnAttenteGrille" class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-3"></div>
+      </div>
 
       <!-- Photos existantes -->
       <?php if (!empty($imagesEdit)): ?>
@@ -449,14 +582,11 @@ require __DIR__ . '/_admin_header.php';
           <div class="group relative aspect-square rounded-xl overflow-hidden border-2 border-slate-100 shadow-sm">
             <img src="../uploads/<?= e($img['chemin']) ?>" class="w-full h-full object-cover group-hover:scale-105 transition duration-300" alt="">
             <div class="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
-              <form method="POST">
-                <input type="hidden" name="action"   value="delete_image">
-                <input type="hidden" name="image_id" value="<?= $img['id'] ?>">
-                <button type="submit" onclick="return confirm('Supprimer cette photo ?')"
-                        class="w-9 h-9 bg-accent text-white rounded-xl flex items-center justify-center hover:scale-110 transition shadow">
-                  <i class="fas fa-trash text-xs"></i>
-                </button>
-              </form>
+              <button type="submit" form="formSupprPhoto" name="image_id" value="<?= (int)$img['id'] ?>" formnovalidate
+                      onclick="return confirm('Supprimer cette photo ?')" title="Supprimer cette photo"
+                      class="w-9 h-9 bg-accent text-white rounded-xl flex items-center justify-center hover:scale-110 transition shadow">
+                <i class="fas fa-trash text-xs"></i>
+              </button>
             </div>
           </div>
           <?php endforeach; ?>
@@ -553,6 +683,7 @@ require __DIR__ . '/_admin_header.php';
                 <i class="fas fa-edit"></i>
               </a>
               <form method="POST" onsubmit="return confirm('Supprimer cet espace et toutes ses photos ?')">
+                <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
                 <input type="hidden" name="id"     value="<?= $esp['id'] ?>">
                 <input type="hidden" name="action" value="delete_espace">
                 <button type="submit"
@@ -661,7 +792,7 @@ function removeTarif(btn) {
 // Sécurité : renumérote les cases "Bail" juste avant l'envoi, pour qu'elles
 // restent toujours alignées avec l'ordre réel des lignes de tarif à ce
 // moment-là (même après des ajouts/suppressions dynamiques).
-document.querySelector('form').addEventListener('submit', function() {
+document.getElementById('formEspace')?.addEventListener('submit', function() {
     document.querySelectorAll('#tarifsContainer .tarif-row').forEach((row, idx) => {
         const hidden = row.querySelector('.tarif-bail-hidden');
         const checkbox = row.querySelector('input[type="checkbox"][name^="tarif_bail"]');
@@ -670,14 +801,69 @@ document.querySelector('form').addEventListener('submit', function() {
     });
 });
 
-// Preview upload photos
-document.querySelector('input[type="file"]').addEventListener('change', function(e) {
-    const files = Array.from(e.target.files);
-    if (!files.length) return;
-    const label = e.target.closest('label');
-    label.querySelector('p').textContent = files.length + ' fichier(s) sélectionné(s)';
-    label.classList.add('border-primary', 'bg-primary/5');
-});
+// Photos : sélection cumulative (les sélections successives s'ajoutent),
+// retrait individuel avant envoi, doublons ignorés. Envoi unique avec le formulaire.
+(function () {
+    const input = document.getElementById('inputPhotos');
+    if (!input || typeof DataTransfer === 'undefined') return;
+    const zone = document.getElementById('zonePhotos');
+    const bloc = document.getElementById('photosEnAttente');
+    const grille = document.getElementById('photosEnAttenteGrille');
+    const nombre = document.getElementById('photosEnAttenteNombre');
+    const message = document.getElementById('photosMessage');
+    const tailleMax = parseInt(input.dataset.tailleMax, 10);
+    const nombreMax = parseInt(input.dataset.nombreMax, 10);
+    const envoiMax = parseInt(input.dataset.envoiMax, 10) || 0;
+    const typesOk = ['image/jpeg', 'image/png', 'image/webp'];
+    let selection = [];                       // fichiers retenus
+    const cle = f => f.name + '|' + f.size + '|' + f.lastModified;
+
+    function afficherMessage(lignes) {
+        message.textContent = lignes.join(' ');
+        message.classList.toggle('hidden', lignes.length === 0);
+    }
+    function synchroniser() {
+        const dt = new DataTransfer();
+        selection.forEach(f => dt.items.add(f));
+        input.files = dt.files;
+        grille.querySelectorAll('img').forEach(i => URL.revokeObjectURL(i.src));
+        grille.innerHTML = '';
+        selection.forEach((f, index) => {
+            const carte = document.createElement('div');
+            carte.className = 'relative aspect-square rounded-xl overflow-hidden border-2 border-primary/20 shadow-sm bg-slate-50';
+            const img = document.createElement('img');
+            img.src = URL.createObjectURL(f);
+            img.alt = '';
+            img.className = 'w-full h-full object-cover';
+            const retirer = document.createElement('button');
+            retirer.type = 'button';
+            retirer.title = 'Retirer cette photo';
+            retirer.setAttribute('aria-label', 'Retirer ' + f.name);
+            retirer.className = 'absolute top-1.5 right-1.5 w-8 h-8 bg-white text-accent rounded-lg flex items-center justify-center shadow';
+            retirer.innerHTML = '<i class="fas fa-times text-xs"></i>';
+            retirer.addEventListener('click', () => { selection.splice(index, 1); afficherMessage([]); synchroniser(); });
+            carte.append(img, retirer);
+            grille.appendChild(carte);
+        });
+        nombre.textContent = selection.length;
+        bloc.classList.toggle('hidden', selection.length === 0);
+        zone.classList.toggle('border-primary', selection.length > 0);
+    }
+    input.addEventListener('change', function () {
+        const refus = [];
+        Array.from(input.files).forEach(f => {
+            if (selection.some(s => cle(s) === cle(f))) { refus.push(`« ${f.name} » déjà sélectionnée.`); return; }
+            if (!typesOk.includes(f.type)) { refus.push(`« ${f.name} » : format non accepté (JPG, PNG, WebP).`); return; }
+            if (f.size > tailleMax) { refus.push(`« ${f.name} » : dépasse ${(tailleMax / 1048576).toFixed(1)} Mo.`); return; }
+            if (selection.length >= nombreMax) { refus.push(`Maximum ${nombreMax} photos par enregistrement : enregistrez puis ajoutez les suivantes.`); return; }
+            const total = selection.reduce((t, s) => t + s.size, 0) + f.size;
+            if (envoiMax && total > envoiMax * 0.95) { refus.push(`« ${f.name} » : volume total trop important pour un seul envoi, enregistrez d'abord.`); return; }
+            selection.push(f);
+        });
+        afficherMessage([...new Set(refus)]);
+        synchroniser();
+    });
+})();
 </script>
 
 <?php require __DIR__ . '/_admin_footer.php'; ?>
