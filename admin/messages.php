@@ -58,7 +58,7 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST' && csrf_check($_POST['cs
 
         // Réponse visible sur le compte client, si un compte correspond à cet email
         if ($viaSite && $msgOrig) {
-            $userMatch = $pdo->prepare("SELECT id FROM users WHERE email = ? AND role = 'user'");
+            $userMatch = $pdo->prepare("SELECT id FROM users WHERE email = ? AND role IN ('user','partenaire')");
             $userMatch->execute([$msgOrig['email']]);
             $userId = $userMatch->fetchColumn();
             if ($userId) {

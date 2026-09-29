@@ -61,6 +61,7 @@ $roleMini = [
     'admin_activites' => ['Admin Activités', 'bg-purple-100 text-purple-700'],
     'admin_messages'  => ['Admin Messages',  'bg-green-100 text-green-700'],
     'user'            => ['Utilisateur',     'bg-slate-100 text-slate-500'],
+    'partenaire'      => ['Partenaire',      'bg-indigo-50 text-indigo-700'],
 ];
 
 // ---- Construction requête ----

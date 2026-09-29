@@ -26,6 +26,78 @@ unset($_SESSION['partenaires_flash']);
 
 $installe = partenaires_disponibles($pdo);
 
+/*
+ * Compte utilisateur du partenaire (rôle « partenaire », users.partenaire_id).
+ * Mêmes règles à la création du partenaire et depuis sa fiche.
+ */
+$validerNouveauCompte = function () use ($pdo): array {
+    if (!role_partenaire_disponible($pdo)) {
+        throw new RuntimeException('Exécutez d\'abord la migration « migration_role_partenaire.sql ».');
+    }
+    $c = [
+        'nom'   => trim((string)($_POST['nom_complet'] ?? '')),
+        'email' => trim((string)($_POST['email_compte'] ?? '')),
+        'tel'   => trim((string)($_POST['telephone_compte'] ?? '')),
+        'mdp'   => (string)($_POST['mot_de_passe'] ?? ''),
+    ];
+    if (mb_strlen($c['nom']) < 2 || mb_strlen($c['nom']) > 200) {
+        throw new RuntimeException('Le nom du titulaire du compte est obligatoire.');
+    }
+    if (!filter_var($c['email'], FILTER_VALIDATE_EMAIL) || mb_strlen($c['email']) > 190) {
+        throw new RuntimeException('Identifiant de connexion (e-mail) invalide.');
+    }
+    if (mb_strlen($c['tel']) > 30) {
+        throw new RuntimeException('Téléphone du compte trop long.');
+    }
+    if (mb_strlen($c['mdp']) < 8) {
+        throw new RuntimeException('Le mot de passe initial doit contenir au moins 8 caractères.');
+    }
+    if ($c['mdp'] !== (string)($_POST['mot_de_passe_confirmation'] ?? '')) {
+        throw new RuntimeException('La confirmation du mot de passe ne correspond pas.');
+    }
+    $exist = $pdo->prepare("SELECT id FROM users WHERE email = ?");
+    $exist->execute([$c['email']]);
+    if ($exist->fetch()) {
+        throw new RuntimeException('Cet identifiant (e-mail) est déjà utilisé par un autre compte. Utilisez « rattacher un compte existant » ou un autre identifiant.');
+    }
+    return $c;
+};
+$insererCompte = function (array $c, int $pid) use ($pdo): int {
+    $pdo->prepare("INSERT INTO users (nom_complet, email, telephone, password_hash, role, partenaire_id, actif) VALUES (?,?,?,?, 'partenaire', ?, 1)")
+        ->execute([$c['nom'], $c['email'], $c['tel'] !== '' ? $c['tel'] : null, password_hash($c['mdp'], PASSWORD_DEFAULT), $pid]);
+    $uid = (int)$pdo->lastInsertId();
+    log_activity('partenaire_compte_cree', 'users', "Compte partenaire #$uid ({$c['email']}) créé pour le partenaire #$pid");
+    return $uid;
+};
+// Compte existant à rattacher : client ou partenaire sans autre rattachement
+$validerCompteExistant = function (int $pid) use ($pdo): array {
+    if (!role_partenaire_disponible($pdo)) {
+        throw new RuntimeException('Exécutez d\'abord la migration « migration_role_partenaire.sql ».');
+    }
+    $email = trim((string)($_POST['email_existant'] ?? $_POST['email_compte'] ?? ''));
+    $st = $pdo->prepare("SELECT id, nom_complet, role, partenaire_id FROM users WHERE email = ?");
+    $st->execute([$email]);
+    $u = $st->fetch();
+    if (!$u) {
+        throw new RuntimeException('Aucun compte ne correspond à cet identifiant. Créez plutôt un nouveau compte partenaire.');
+    }
+    if (!in_array($u['role'], ['user', 'partenaire'], true)) {
+        throw new RuntimeException('Un compte d\'administration ne peut pas être rattaché à un partenaire.');
+    }
+    if ($u['partenaire_id'] && (int)$u['partenaire_id'] !== $pid) {
+        throw new RuntimeException('Ce compte est déjà rattaché à un autre partenaire. Dissociez-le d\'abord.');
+    }
+    return $u;
+};
+$rattacherCompte = function (array $u, int $pid) use ($pdo): string {
+    $nouveauRole = 'partenaire';
+    $pdo->prepare("UPDATE users SET partenaire_id = ?, role = ? WHERE id = ?")->execute([$pid, $nouveauRole, (int)$u['id']]);
+    $nomP = (string)$pdo->query("SELECT nom FROM partenaires WHERE id = " . $pid)->fetchColumn();
+    notify('', 'partenaire_associe', "Votre compte est désormais un compte partenaire « $nomP » du Palais des Pionniers.", 'mon-compte.php', (int)$u['id']);
+    log_activity('partenaire_compte_associe', 'users', "Compte #{$u['id']} rattaché au partenaire #$pid (rôle $nouveauRole)");
+    return $nouveauRole;
+};
+
 if ($installe && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $retour = 'partenaires.php' . (!empty($_POST['partenaire_id']) ? '?id=' . (int)$_POST['partenaire_id'] : '');
     try {
@@ -67,11 +139,24 @@ if ($installe && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 log_activity('partenaire_modifie', 'users', "Partenaire #$pid modifié : {$champs['nom']}");
                 $_SESSION['partenaires_flash'] = ['ok', 'Partenaire mis à jour.'];
             } else {
+                // Un partenaire est créé avec son compte de connexion : nouveau compte
+                // (rôle « partenaire ») ou compte existant rattaché. Tout ou rien.
+                $modeCompte = ($_POST['compte_mode'] ?? 'nouveau') === 'existant' ? 'existant' : 'nouveau';
+                $compte = $modeCompte === 'nouveau' ? $validerNouveauCompte() : $validerCompteExistant(0);
+                $pdo->beginTransaction();
                 $pdo->prepare("INSERT INTO partenaires (nom, type, contact_nom, telephone, email, notes) VALUES (?,?,?,?,?,?)")
                     ->execute(array_values($valeurs));
                 $pid = (int)$pdo->lastInsertId();
                 log_activity('partenaire_cree', 'users', "Partenaire #$pid créé : {$champs['nom']}");
-                $_SESSION['partenaires_flash'] = ['ok', 'Partenaire créé. Associez-lui maintenant un ou plusieurs comptes.'];
+                if ($modeCompte === 'nouveau') {
+                    $insererCompte($compte, $pid);
+                    $texteCompte = "compte de connexion créé (identifiant « {$compte['email']} »). Communiquez le mot de passe initial au partenaire, qui pourra le modifier dans son espace.";
+                } else {
+                    $rattacherCompte($compte, $pid);
+                    $texteCompte = "compte « {$compte['nom_complet']} » rattaché.";
+                }
+                $pdo->commit();
+                $_SESSION['partenaires_flash'] = ['ok', "Partenaire « {$champs['nom']} » créé, $texteCompte"];
             }
             $retour = 'partenaires.php?id=' . $pid;
 
@@ -84,60 +169,18 @@ if ($installe && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 : 'Partenaire désactivé : ses comptes ne peuvent plus se connecter ni réserver (l\'historique reste attribué).'];
 
         } elseif ($action === 'creer_compte' && $pid) {
-            // Création du compte utilisateur « partenaire » par la Direction
-            if (!role_partenaire_disponible($pdo)) {
-                throw new RuntimeException('Exécutez d\'abord la migration « migration_role_partenaire.sql ».');
-            }
-            $nomC  = trim((string)($_POST['nom_complet'] ?? ''));
-            $email = trim((string)($_POST['email_compte'] ?? ''));
-            $tel   = trim((string)($_POST['telephone_compte'] ?? ''));
-            $mdp   = (string)($_POST['mot_de_passe'] ?? '');
-            if (mb_strlen($nomC) < 2 || mb_strlen($nomC) > 200) {
-                throw new RuntimeException('Le nom du titulaire du compte est obligatoire.');
-            }
-            if (!filter_var($email, FILTER_VALIDATE_EMAIL) || mb_strlen($email) > 190) {
-                throw new RuntimeException('Identifiant (e-mail) invalide.');
-            }
-            if (mb_strlen($mdp) < 8) {
-                throw new RuntimeException('Le mot de passe initial doit contenir au moins 8 caractères.');
-            }
-            if ($mdp !== (string)($_POST['mot_de_passe_confirmation'] ?? '')) {
-                throw new RuntimeException('La confirmation du mot de passe ne correspond pas.');
-            }
-            $exist = $pdo->prepare("SELECT id FROM users WHERE email = ?");
-            $exist->execute([$email]);
-            if ($exist->fetch()) {
-                throw new RuntimeException('Cet identifiant (e-mail) est déjà utilisé par un autre compte.');
-            }
+            // Compte supplémentaire (ou recréé) depuis la fiche partenaire
+            $compte = $validerNouveauCompte();
             if (!$pdo->query("SELECT actif FROM partenaires WHERE id = " . $pid)->fetchColumn()) {
                 throw new RuntimeException('Réactivez le partenaire avant de lui créer un compte.');
             }
-            $pdo->prepare("INSERT INTO users (nom_complet, email, telephone, password_hash, role, partenaire_id, actif) VALUES (?,?,?,?, 'partenaire', ?, 1)")
-                ->execute([$nomC, $email, $tel !== '' ? $tel : null, password_hash($mdp, PASSWORD_DEFAULT), $pid]);
-            $uidNouveau = (int)$pdo->lastInsertId();
-            log_activity('partenaire_compte_cree', 'users', "Compte partenaire #$uidNouveau ($email) créé pour le partenaire #$pid");
-            $_SESSION['partenaires_flash'] = ['ok', "Compte partenaire créé : identifiant « $email ». Communiquez le mot de passe initial au partenaire, qui pourra le modifier dans son espace."];
+            $insererCompte($compte, $pid);
+            $_SESSION['partenaires_flash'] = ['ok', "Compte partenaire créé : identifiant « {$compte['email']} ». Communiquez le mot de passe initial au partenaire, qui pourra le modifier dans son espace."];
 
         } elseif ($action === 'associer' && $pid) {
             // Rattacher un compte existant (client) : il devient un compte « partenaire »
-            $email = trim((string)($_POST['email_compte'] ?? ''));
-            $st = $pdo->prepare("SELECT id, nom_complet, role, partenaire_id FROM users WHERE email = ?");
-            $st->execute([$email]);
-            $u = $st->fetch();
-            if (!$u) {
-                throw new RuntimeException('Aucun compte ne correspond à cet identifiant. Créez plutôt le compte partenaire ci-dessus.');
-            }
-            if (!in_array($u['role'], ['user', 'partenaire'], true)) {
-                throw new RuntimeException('Un compte d\'administration ne peut pas être rattaché à un partenaire.');
-            }
-            if ($u['partenaire_id'] && (int)$u['partenaire_id'] !== $pid) {
-                throw new RuntimeException('Ce compte est déjà rattaché à un autre partenaire. Dissociez-le d\'abord.');
-            }
-            $nouveauRole = role_partenaire_disponible($pdo) ? 'partenaire' : $u['role'];
-            $pdo->prepare("UPDATE users SET partenaire_id = ?, role = ? WHERE id = ?")->execute([$pid, $nouveauRole, (int)$u['id']]);
-            $nomP = (string)$pdo->query("SELECT nom FROM partenaires WHERE id = " . $pid)->fetchColumn();
-            notify('', 'partenaire_associe', "Votre compte est désormais un compte partenaire « $nomP » du Palais des Pionniers.", 'mon-compte.php', (int)$u['id']);
-            log_activity('partenaire_compte_associe', 'users', "Compte #{$u['id']} rattaché au partenaire #$pid (rôle $nouveauRole)");
+            $u = $validerCompteExistant($pid);
+            $rattacherCompte($u, $pid);
             $_SESSION['partenaires_flash'] = ['ok', "Compte « {$u['nom_complet']} » rattaché au partenaire."];
 
         } elseif ($action === 'dissocier' && $pid) {
@@ -182,8 +225,19 @@ if ($installe && $_SERVER['REQUEST_METHOD'] === 'POST') {
             throw new RuntimeException('Action non reconnue.');
         }
     } catch (RuntimeException $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
         $_SESSION['partenaires_flash'] = ['err', $e->getMessage()];
+        if (($action ?? '') === 'enregistrer' && empty($pid)) {
+            $retour = 'partenaires.php?nouveau=1';
+            // Champs de la fiche conservés (jamais les mots de passe)
+            $_SESSION['partenaires_saisie'] = array_intersect_key($_POST, array_flip(['nom', 'type', 'contact_nom', 'telephone', 'email', 'notes', 'compte_mode', 'nom_complet', 'email_compte', 'telephone_compte', 'email_existant']));
+        }
     } catch (PDOException $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
         error_log('partenaires.php : ' . $e->getMessage());
         $_SESSION['partenaires_flash'] = ['err', 'Erreur technique : opération non enregistrée.'];
     }
@@ -212,9 +266,25 @@ if ($installe) {
     ")->fetchAll();
     foreach ($partenaires as &$p) {
         $p['nb_resas'] = 0; $p['revenus'] = 0.0; $p['reste'] = 0.0;
+        $p['comptes'] = []; $p['derniere_resa'] = null;
     }
     unset($p);
     $index = array_flip(array_map(fn($p) => (int)$p['id'], $partenaires));
+
+    // Comptes de connexion rattachés (identifiant et état), pour la liste de suivi
+    foreach ($pdo->query("SELECT id, email, actif, role, partenaire_id FROM users WHERE partenaire_id IS NOT NULL ORDER BY nom_complet")->fetchAll() as $cpt) {
+        $i = $index[(int)$cpt['partenaire_id']] ?? null;
+        if ($i !== null) {
+            $partenaires[$i]['comptes'][] = $cpt;
+        }
+    }
+    // Dernière demande de réservation (toutes, y compris annulées)
+    foreach ($pdo->query("SELECT partenaire_id, MAX(created_at) AS derniere FROM reservations WHERE partenaire_id IS NOT NULL GROUP BY partenaire_id")->fetchAll() as $d) {
+        $i = $index[(int)$d['partenaire_id']] ?? null;
+        if ($i !== null) {
+            $partenaires[$i]['derniere_resa'] = $d['derniere'];
+        }
+    }
 
     $resas = $pdo->query("
         SELECT r.id, r.partenaire_id, r.statut, r.date_resa, r.date_depart, r.heure_debut, r.heure_fin,
@@ -265,6 +335,13 @@ if ($installe) {
 }
 $fcfa = fn($v) => number_format((float)$v, 0, ',', ' ');
 $edition = $detail ?? (isset($_GET['nouveau']) ? [] : null);
+// Saisie conservée après une erreur de création (jamais les mots de passe)
+$saisie = $_SESSION['partenaires_saisie'] ?? [];
+unset($_SESSION['partenaires_saisie']);
+if ($edition === [] && $saisie) {
+    $edition = $saisie;
+}
+$modeCompteSaisi = ($saisie['compte_mode'] ?? 'nouveau') === 'existant' ? 'existant' : 'nouveau';
 
 $pageTitle = 'Partenaires';
 require __DIR__ . '/_admin_header.php';
@@ -346,6 +423,40 @@ require __DIR__ . '/_admin_header.php';
       <label class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Notes (convention, conditions…)</label>
       <textarea name="notes" rows="2" class="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold text-primary outline-none focus:border-primary"><?= e($edition['notes'] ?? '') ?></textarea>
     </div>
+    <?php if (!$detail): ?>
+    <!-- Compte de connexion du partenaire (créé en même temps que la fiche) -->
+    <fieldset class="sm:col-span-2 rounded-xl bg-slate-50 p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <legend class="text-[10px] font-black uppercase tracking-widest text-slate-500 px-1">Compte de connexion du partenaire *</legend>
+      <div class="sm:col-span-2 flex flex-col sm:flex-row gap-2 text-xs font-bold text-primary">
+        <label class="flex items-center gap-2"><input type="radio" name="compte_mode" value="nouveau" <?= $modeCompteSaisi === 'nouveau' ? 'checked' : '' ?> onchange="modeComptePartenaire(this.value)"> Créer un nouveau compte (rôle partenaire)</label>
+        <label class="flex items-center gap-2"><input type="radio" name="compte_mode" value="existant" <?= $modeCompteSaisi === 'existant' ? 'checked' : '' ?> onchange="modeComptePartenaire(this.value)"> Rattacher un compte existant</label>
+      </div>
+      <div id="compteNouveau" class="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3 <?= $modeCompteSaisi === 'existant' ? 'hidden' : '' ?>">
+        <input type="text" name="nom_complet" value="<?= e($saisie['nom_complet'] ?? '') ?>" placeholder="Nom du titulaire du compte" autocomplete="off"
+               class="rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-bold text-primary outline-none focus:border-primary">
+        <input type="email" name="email_compte" value="<?= e($saisie['email_compte'] ?? '') ?>" placeholder="Identifiant de connexion (e-mail)" autocomplete="off"
+               class="rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-bold text-primary outline-none focus:border-primary">
+        <input type="text" name="telephone_compte" value="<?= e($saisie['telephone_compte'] ?? '') ?>" placeholder="Téléphone du titulaire (facultatif)"
+               class="rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-bold text-primary outline-none focus:border-primary">
+        <span class="hidden sm:block"></span>
+        <input type="password" name="mot_de_passe" minlength="8" autocomplete="new-password" placeholder="Mot de passe initial (8 caractères min.)"
+               class="rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-bold text-primary outline-none focus:border-primary">
+        <input type="password" name="mot_de_passe_confirmation" minlength="8" autocomplete="new-password" placeholder="Confirmation du mot de passe"
+               class="rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-bold text-primary outline-none focus:border-primary">
+      </div>
+      <div id="compteExistant" class="sm:col-span-2 <?= $modeCompteSaisi === 'existant' ? '' : 'hidden' ?>">
+        <input type="email" name="email_existant" value="<?= e($saisie['email_existant'] ?? '') ?>" placeholder="E-mail du compte client existant" autocomplete="off"
+               class="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-bold text-primary outline-none focus:border-primary">
+        <p class="text-[11px] text-slate-500 mt-1">Le compte deviendra un compte partenaire. Un compte d'administration ne peut pas être rattaché.</p>
+      </div>
+    </fieldset>
+    <script>
+    function modeComptePartenaire(mode) {
+        document.getElementById('compteNouveau').classList.toggle('hidden', mode !== 'nouveau');
+        document.getElementById('compteExistant').classList.toggle('hidden', mode !== 'existant');
+    }
+    </script>
+    <?php endif; ?>
     <div class="sm:col-span-2 flex justify-end gap-2">
       <a href="partenaires.php" class="px-4 py-2.5 rounded-xl text-xs font-black text-slate-400 hover:bg-slate-100 transition">Fermer</a>
       <button type="submit" class="bg-primary text-white text-xs font-black uppercase px-5 py-2.5 rounded-xl hover:bg-slate-800 transition">Enregistrer</button>
@@ -483,14 +594,25 @@ require __DIR__ . '/_admin_header.php';
   <div class="lg:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
     <div class="px-5 py-4 border-b border-slate-100"><h2 class="font-black text-primary text-sm uppercase italic">Par partenaire</h2></div>
     <div class="divide-y divide-slate-50">
-      <?php foreach ($partenaires as $p): ?>
-      <a href="partenaires.php?id=<?= (int)$p['id'] ?>" class="flex flex-wrap items-center justify-between gap-2 px-5 py-3 hover:bg-slate-50 transition <?= $detail && (int)$detail['id'] === (int)$p['id'] ? 'bg-indigo-50' : '' ?>">
-        <div>
+      <?php foreach ($partenaires as $p): $comptesP = $p['comptes']; ?>
+      <a href="partenaires.php?id=<?= (int)$p['id'] ?>" class="flex flex-wrap items-start justify-between gap-2 px-5 py-3 hover:bg-slate-50 transition <?= $detail && (int)$detail['id'] === (int)$p['id'] ? 'bg-indigo-50' : '' ?>">
+        <div class="min-w-0">
           <p class="font-black text-primary text-sm"><?= e($p['nom']) ?>
-            <?php if (!$p['actif']): ?><span class="text-[9px] font-black uppercase text-slate-400 ml-1">désactivé</span><?php endif; ?></p>
-          <p class="text-[11px] text-slate-400"><?= e($p['type'] ?: '—') ?> · <?= (int)$p['nb_comptes'] ?> compte(s)</p>
+            <span class="text-[9px] font-black uppercase px-2 py-0.5 rounded-full <?= $p['actif'] ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500' ?>"><?= $p['actif'] ? 'Actif' : 'Désactivé' ?></span></p>
+          <p class="text-[11px] text-slate-400"><?= e(implode(' · ', array_filter([$p['type'], $p['contact_nom'], $p['telephone']])) ?: '—') ?></p>
+          <p class="text-[11px] font-bold <?= $comptesP ? 'text-slate-500' : 'text-accent' ?>" style="overflow-wrap:anywhere">
+            <?php if (!$comptesP): ?>
+              <i class="fas fa-exclamation-triangle mr-1"></i>Aucun compte de connexion
+            <?php else: ?>
+              <i class="fas fa-user mr-1"></i><?php foreach ($comptesP as $k => $cpt): ?><?= $k ? ', ' : '' ?><?= e($cpt['email']) ?><?= !(int)$cpt['actif'] ? ' (bloqué)' : '' ?><?php endforeach; ?>
+            <?php endif; ?>
+          </p>
         </div>
-        <p class="text-xs font-bold text-slate-600"><?= (int)$p['nb_resas'] ?> réservation(s) · <span class="text-emerald-600 font-black"><?= $fcfa($p['revenus']) ?> FCFA</span></p>
+        <div class="text-right text-xs font-bold text-slate-600">
+          <p><?= (int)$p['nb_resas'] ?> réservation(s)</p>
+          <p>Payé <span class="text-emerald-600 font-black"><?= $fcfa($p['revenus']) ?></span> · Reste dû <span class="<?= $p['reste'] > 0 ? 'text-amber-600' : 'text-slate-400' ?> font-black"><?= $fcfa($p['reste']) ?></span> FCFA</p>
+          <p class="text-[11px] text-slate-400"><?= $p['derniere_resa'] ? 'Dernière demande le ' . date('d/m/Y', strtotime($p['derniere_resa'])) : 'Aucune réservation' ?></p>
+        </div>
       </a>
       <?php endforeach; ?>
       <?php if (!$partenaires): ?><p class="px-5 py-8 text-sm text-slate-400 text-center">Aucun partenaire enregistré.</p><?php endif; ?>

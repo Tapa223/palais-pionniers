@@ -19,6 +19,12 @@ $modeLabels = [
 
 $fcfa = fn($m) => number_format((float)$m, 0, ',', ' ');
 
+// Message de l'opération précédente (après redirection)
+if (!empty($_SESSION['paiements_flash'])) {
+    $msg = $_SESSION['paiements_flash'];
+    unset($_SESSION['paiements_flash']);
+}
+
 /*
  * Jeton à usage unique par formulaire : un double clic, un rechargement
  * ou un second onglet ne peuvent pas rejouer la même action.
@@ -330,7 +336,15 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 notify(...$n);
             }
 
-            $msg = ['ok', $msgOk];
+            /*
+             * Redirection après succès (Post/Redirect/Get) : actualiser la page
+             * affiche l'état à jour du dossier au lieu de renvoyer le formulaire
+             * (qui serait refusé par le jeton à usage unique et laisserait
+             * croire que le paiement n'est pas passé).
+             */
+            $_SESSION['paiements_flash'] = ['ok', $msgOk];
+            header('Location: paiements.php?resa=' . $resaId);
+            exit;
 
         } catch (Throwable $e) {
             if ($pdo->inTransaction()) {

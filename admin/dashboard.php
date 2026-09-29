@@ -227,7 +227,7 @@ foreach ($cards as [$label, $val, $icon, $color, $bg, $link]):
       </div>
       <i class="fas fa-arrow-right text-slate-200 text-xs group-hover:text-primary group-hover:translate-x-0.5 transition-all"></i>
     </div>
-    <div class="text-2xl font-black <?= $color ?>"><?= (int)$val ?></div>
+    <div class="text-2xl font-black <?= $color ?>"><?= e((string)$val) ?></div>
     <div class="text-xs font-semibold text-slate-500 mt-1 leading-tight"><?= $label ?></div>
   </a>
 <?php endforeach; ?>

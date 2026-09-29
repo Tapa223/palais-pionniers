@@ -2385,17 +2385,16 @@ if (!function_exists('partenaire_utilisateur')) {
      */
     function partenaire_utilisateur(PDO $pdo, int $userId): ?array
     {
-        if (!$userId || !partenaires_disponibles($pdo)) {
+        if (!$userId || !partenaires_disponibles($pdo) || !role_partenaire_disponible($pdo)) {
             return null;
         }
-        // Compte partenaire = rôle « partenaire » + fiche partenaire active
-        // (avant la migration du rôle : compte client associé)
+        // Compte partenaire = rôle « partenaire » + fiche partenaire active.
+        // Un compte « user » portant un partenaire_id n'est PAS un partenaire.
         $st = $pdo->prepare("
             SELECT p.*
             FROM users u
             JOIN partenaires p ON p.id = u.partenaire_id
-            WHERE u.id = ? AND p.actif = 1
-            " . (role_partenaire_disponible($pdo) ? "AND u.role = 'partenaire'" : "") . "
+            WHERE u.id = ? AND p.actif = 1 AND u.role = 'partenaire'
         ");
         $st->execute([$userId]);
         return $st->fetch() ?: null;

@@ -27,8 +27,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!$u || !password_verify($password, $u['password_hash'])) {
                 $errors[] = "Email ou mot de passe incorrect.";
             } elseif ($u['role'] === 'partenaire' && (!(int)$u['actif'] || !partenaire_utilisateur(db(), (int)$u['id']))) {
-                // Compte partenaire désactivé (compte ou organisation) : accès refusé
-                $errors[] = "Ce compte partenaire est désactivé. Contactez la Direction du Palais.";
+                // Compte partenaire bloqué, sans fiche partenaire ou fiche désactivée : accès refusé
+                $errors[] = empty($u['partenaire_id'])
+                    ? "Ce compte partenaire n'est rattaché à aucun partenaire. Contactez la Direction du Palais."
+                    : "Ce compte partenaire est désactivé. Contactez la Direction du Palais.";
             } else {
                 session_regenerate_id(true);
                 $_SESSION['user_id']     = (int)$u['id'];
@@ -44,6 +46,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     case 'admin_comptable':
                     case 'ministre':
                         $dest = 'admin/dashboard.php';
+                        break;
+                    case 'partenaire':
+                        // Espace partenaire (Mon compte, en-tête et synthèse partenaire)
+                        $dest = 'mon-compte.php';
                         break;
                     default:
                         $dest = $_GET['redirect'] ?? 'mon-compte.php';

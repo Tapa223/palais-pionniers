@@ -16,7 +16,7 @@ $stmt = $pdo->prepare("
     SELECT id, nom_complet, email, telephone
     FROM users
     WHERE (nom_complet LIKE ? OR email LIKE ? OR telephone LIKE ?)
-    AND role = 'user' AND actif = 1
+    AND role IN ('user','partenaire') AND actif = 1
     ORDER BY nom_complet ASC
     LIMIT 10
 ");
