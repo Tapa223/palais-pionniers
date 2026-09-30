@@ -19,6 +19,8 @@ $retourSuggestion = $_GET['suggestion'] ?? '';
     #suggestionOuvrir { animation: suggestionFlotte 3.6s ease-in-out infinite; }
     #suggestionOuvrir:hover, #suggestionOuvrir:focus-visible { animation-play-state: paused; }
   }
+  /* Alternance du libellé : changement en fondu doux, sans fondu si mouvement réduit */
+  @media (prefers-reduced-motion: reduce) { #suggestionLibelle { transition: none !important; } }
   @keyframes suggestionFlotte {
     0%, 100% { transform: translateY(0); }
     50%      { transform: translateY(-4px); }
@@ -30,7 +32,7 @@ $retourSuggestion = $_GET['suggestion'] ?? '';
      aria-label="Boîte à suggestions : envoyer une suggestion anonyme"
      class="flex items-center gap-2 bg-primary text-white rounded-full shadow-xl px-4 py-3 text-xs font-black tracking-wide hover:bg-accent transition">
     <i class="fas fa-comment-dots text-base"></i>
-    <span>Boîte à suggestions</span>
+    <span id="suggestionLibelle" aria-hidden="true" style="transition:opacity .4s ease">Boîte à suggestions</span>
   </a>
 </div>
 
@@ -111,5 +113,29 @@ $retourSuggestion = $_GET['suggestion'] ?? '';
             bouton.disabled = false;
         }
     });
+
+    // Libellé alterné discrètement (« Boîte à suggestions » / « Écrire une suggestion ? »).
+    // Sans JavaScript : « Boîte à suggestions » reste affiché. Pause au survol, au focus
+    // et pendant que la fenêtre est ouverte ; pas d'alternance si mouvement réduit demandé.
+    const libelle = document.getElementById('suggestionLibelle');
+    const bulle = document.getElementById('suggestionOuvrir');
+    const textes = ['Boîte à suggestions', 'Écrire une suggestion ?'];
+    const reduit = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    let indice = 0, enPause = false;
+    bulle.addEventListener('mouseenter', () => enPause = true);
+    bulle.addEventListener('mouseleave', () => enPause = false);
+    bulle.addEventListener('focus', () => enPause = true);
+    bulle.addEventListener('blur', () => enPause = false);
+    if (libelle && !reduit) {
+        setInterval(() => {
+            if (enPause || !modal.classList.contains('hidden') || document.hidden) return;
+            libelle.style.opacity = '0';
+            setTimeout(() => {
+                indice = (indice + 1) % textes.length;
+                libelle.textContent = textes[indice];
+                libelle.style.opacity = '1';
+            }, 400);
+        }, 6000);
+    }
 })();
 </script>

@@ -162,10 +162,28 @@ h1,h2,h3 { font-family:'Plus Jakarta Sans',Inter,sans-serif; letter-spacing:-.02
 
     <main class="flex-1 p-4 md:p-8">
       <div class="w-full max-w-[1600px] mx-auto">
-        <?php if (!empty($pageRetour) && is_array($pageRetour)): ?>
-        <!-- Retour vers la page parente (sous-pages uniquement), distinct de « Retour sur le site » en haut -->
-        <a href="<?= e($pageRetour[0]) ?>" id="retourPage"
-           class="inline-flex items-center gap-1.5 mb-4 px-3 py-1.5 rounded-full bg-white border border-slate-200 text-[11px] font-black uppercase tracking-tight text-primary hover:border-primary transition">
+        <?php
+          /*
+           * Flèche « Retour » : l'ancienne flèche de la barre du haut, déplacée ici
+           * pour ne pas être confondue avec « Retour sur le site ».
+           * Affichée sur les pages secondaires : page hors menu latéral, ou fiche /
+           * détail / formulaire (?id, ?edit, ?nouveau, ?add, ?resa).
+           * - $pageRetour = [href, libellé] : retour vers la page parente indiquée ;
+           * - $pageRetour = false : la page a déjà son propre lien retour ;
+           * - sinon : comportement d'origine (page précédente), repli sur le tableau de bord.
+           */
+          $pageCourante = basename($_SERVER['PHP_SELF']);
+          $estSecondaire = !isset($nav[$pageCourante])
+              || array_intersect_key($_GET, array_flip(['id', 'edit', 'nouveau', 'add', 'resa']));
+          $retourCls = 'inline-flex items-center gap-1.5 mb-4 px-3 py-1.5 rounded-full bg-white border border-slate-200 text-[11px] font-black uppercase tracking-tight text-primary hover:border-primary transition';
+        ?>
+        <?php if (isset($pageRetour) && is_array($pageRetour)): ?>
+        <a href="<?= e($pageRetour[0]) ?>" id="retourPage" class="<?= $retourCls ?>">
           <i class="fas fa-arrow-left text-[10px]"></i> <?= e($pageRetour[1] ?? 'Retour') ?>
         </a>
+        <?php elseif (($pageRetour ?? null) !== false && $estSecondaire && $pageCourante !== 'dashboard.php'): ?>
+        <button type="button" id="retourPage" class="<?= $retourCls ?>" title="Revenir à la page précédente"
+                onclick="if (history.length > 1) { history.back(); } else { location.href = 'dashboard.php'; }">
+          <i class="fas fa-arrow-left text-[10px]"></i> Retour
+        </button>
         <?php endif; ?>

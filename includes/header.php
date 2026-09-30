@@ -119,7 +119,7 @@ $currentUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https:/
               <span class="absolute -top-1 -right-1 w-4 h-4 bg-accent text-white text-[9px] font-black rounded-full flex items-center justify-center"><?= min($clientNotifs,9) ?><?= $clientNotifs>9?'+':'' ?></span>
               <?php endif; ?>
             </a>
-            <a href="<?= $prefix ?>mon-compte.php" class="text-sm font-medium hover:bg-slate-100 px-3 py-1.5 rounded-md"><?= $u['role'] === 'partenaire' ? 'Espace partenaire' : 'Mon compte' ?></a>
+            <a href="<?= $prefix ?>mon-compte.php" class="text-sm font-medium hover:bg-slate-100 px-3 py-1.5 rounded-md"><?= $u['role'] === 'partenaire' ? 'Espace admin' : 'Mon compte' ?></a>
           <?php endif; ?>
           
           <a href="<?= $prefix ?>logout.php" onclick="return confirm('Se déconnecter ?')" class="bg-accent text-white text-sm px-3 py-1.5 rounded-md font-bold">Déconnexion</a>
@@ -152,7 +152,7 @@ $currentUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https:/
             <?php if ($isAdminRole): ?>
                 <a href="<?= $prefix . $admin_link ?>" class="bg-primary text-white text-center py-2 rounded-lg font-bold uppercase tracking-wide text-[10px]"><i class="fas fa-user-shield mr-1"></i> Administration</a>
             <?php else: ?>
-                <a href="<?= $prefix ?>mon-compte.php" class="border-2 border-slate-200 text-primary text-center py-2 rounded-lg font-bold uppercase tracking-wide text-[10px]"><?= $u['role'] === 'partenaire' ? 'Espace partenaire' : 'Mon compte' ?></a>
+                <a href="<?= $prefix ?>mon-compte.php" class="border-2 border-slate-200 text-primary text-center py-2 rounded-lg font-bold uppercase tracking-wide text-[10px]"><?= $u['role'] === 'partenaire' ? 'Espace admin' : 'Mon compte' ?></a>
             <?php endif; ?>
             <a href="<?= $prefix ?>logout.php" class="bg-accent text-white text-center py-2 rounded-lg font-bold uppercase tracking-wide text-[10px]">Déconnexion</a>
         <?php else: ?>

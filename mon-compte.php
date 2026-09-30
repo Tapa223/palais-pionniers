@@ -1130,7 +1130,11 @@ if ($partenaireMoi && (($_GET['tab'] ?? '') === 'tableau-de-bord' || !isset($_GE
 }
 
 
-$pageTitle = $partenaireMoi ? "Espace partenaire — Palais des Pionniers" : "Mon espace — Palais des Pionniers";
+$pageTitle = $partenaireMoi ? "Espace admin — Palais des Pionniers" : "Mon espace — Palais des Pionniers";
+$libellesOngletsPartenaire = [
+    'tableau-de-bord' => 'Tableau de bord', 'reservations' => 'Mes réservations', 'services' => 'Services',
+    'profil' => 'Profil', 'messages' => 'Messages', 'notifications' => 'Notifications', 'baux' => 'Mes baux',
+];
 
 require __DIR__ . '/includes/header.php';
 ?>
@@ -1148,6 +1152,24 @@ require __DIR__ . '/includes/header.php';
 
       <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-5">
 
+        <?php if ($partenaireMoi): ?>
+        <!-- En-tête de l'espace de gestion du partenaire (droits limités à son organisation) -->
+        <div class="flex items-center gap-4 min-w-0">
+          <div class="w-14 h-14 rounded-2xl bg-accent flex items-center justify-center flex-shrink-0">
+            <i class="fas fa-handshake text-xl"></i>
+          </div>
+          <div class="min-w-0">
+            <p class="text-[10px] font-black uppercase tracking-widest text-white/60">
+              Espace admin <span class="text-white/30" style="margin:0 .25rem">·</span> <?= e($libellesOngletsPartenaire[$tab] ?? 'Tableau de bord') ?>
+            </p>
+            <h1 class="text-xl md:text-2xl font-black uppercase italic tracking-tight" style="overflow-wrap:anywhere"><?= e($partenaireMoi['nom']) ?></h1>
+            <p class="text-white/60 text-xs mt-0.5" style="overflow-wrap:anywhere">
+              <span class="inline-flex items-center gap-1 font-black uppercase tracking-widest text-[10px] text-white bg-white/10 px-2 py-0.5 rounded-full mr-1"><i class="fas fa-shield-alt"></i> Compte partenaire</span>
+              <?= e($me['nom_complet']) ?> · <?= e($me['email']) ?>
+            </p>
+          </div>
+        </div>
+        <?php else: ?>
         <div class="flex items-center gap-4">
 
           <div class="w-14 h-14 rounded-2xl bg-accent flex items-center justify-center font-black text-xl flex-shrink-0">
@@ -1194,15 +1216,10 @@ require __DIR__ . '/includes/header.php';
               <?= e($me['email']) ?>
             </p>
 
-            <?php if ($partenaireMoi): ?>
-            <p class="mt-1 inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-white bg-white/10 px-2.5 py-1 rounded-full">
-              <i class="fas fa-handshake"></i> Compte partenaire · <?= e($partenaireMoi['nom']) ?>
-            </p>
-            <?php endif; ?>
-
           </div>
 
         </div>
+        <?php endif; ?>
 
 
         <a href="reserver.php"
@@ -1217,6 +1234,7 @@ require __DIR__ . '/includes/header.php';
       </div>
 
 
+      <?php if (!($partenaireMoi && $tab === 'tableau-de-bord')): ?>
       <!-- STATS RAPIDES -->
       <div class="grid grid-cols-3 gap-3 mt-6">
 
@@ -1262,6 +1280,7 @@ require __DIR__ . '/includes/header.php';
         <?php endforeach; ?>
 
       </div>
+      <?php endif; ?>
 
       <?php if ($synthesePartenaire && $tab !== 'tableau-de-bord'): ?>
       <!-- SYNTHÈSE PARTENAIRE (réservations de tous les comptes du partenaire) -->
@@ -1401,7 +1420,7 @@ require __DIR__ . '/includes/header.php';
     <!-- Retour au tableau de bord partenaire (distinct de la navigation du site) -->
     <a href="?tab=tableau-de-bord" id="retourTableauBord"
        class="inline-flex items-center gap-1.5 mb-5 px-3 py-1.5 rounded-full bg-white border border-slate-200 text-[11px] font-black uppercase tracking-tight text-primary hover:border-primary transition">
-      <i class="fas fa-arrow-left text-[10px]"></i> Tableau de bord
+      <i class="fas fa-arrow-left text-[10px]"></i> Retour au tableau de bord
     </a>
     <?php endif; ?>
 
@@ -1430,102 +1449,123 @@ require __DIR__ . '/includes/header.php';
          ====================================================== -->
     <?php if ($tab === 'tableau-de-bord' && $partenaireMoi): ?>
     <?php
-      // Tableau de bord partenaire : uniquement les réservations de ce compte
-      // ($reservations) et la synthèse du partenaire déjà calculée plus haut.
+      /*
+       * Tableau de bord de l'espace partenaire (« Espace admin »).
+       * Présentation seulement : réservations de ce compte ($reservations),
+       * synthèse financière de son organisation ($synthesePartenaire),
+       * ses demandes de services ($mesServices). Aucune donnée d'un autre partenaire.
+       */
       $fmtD = fn($m) => number_format((float)$m, 0, ',', ' ');
       $aSuivre = array_values(array_filter($reservations, fn($r) => in_array($r['statut'], ['en_attente', 'validee'], true)));
       $dernieres = array_slice($reservations, 0, 5);
       $nbBons = count(array_filter($reservations, fn($r) => $r['statut'] === 'validee'));
+      $nbServicesEnCours = count(array_filter($mesServices, fn($d) => in_array($d['statut'], ['en_attente', 'en_cours'], true)));
+      $titreSection = 'text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3';
     ?>
-    <div class="space-y-6">
+    <div class="space-y-8">
 
-      <!-- Accès rapides aux fonctionnalités de l'espace partenaire -->
-      <div class="grid grid-cols-2 lg:grid-cols-3 gap-3">
-        <?php foreach ([
-            ['reserver.php', 'fa-plus-circle', 'Nouvelle réservation', 'Réserver un espace', 'bg-accent text-white', 'text-white/80'],
-            ['?tab=reservations', 'fa-calendar-check', 'Mes réservations', $stats['total'] . ' demande(s) · ' . $stats['en_attente'] . ' en attente', 'bg-white text-primary', 'text-slate-500'],
-            ['?tab=reservations', 'fa-file-invoice', 'Mes bons', $nbBons . ' bon(s) / facture(s) disponible(s)', 'bg-white text-primary', 'text-slate-500'],
-            ['?tab=services', 'fa-concierge-bell', 'Services', count($mesServices) . ' demande(s) de service', 'bg-white text-primary', 'text-slate-500'],
-            ['?tab=profil', 'fa-user', 'Mon profil', 'Nom, téléphone', 'bg-white text-primary', 'text-slate-500'],
-            ['?tab=profil#mot-de-passe', 'fa-key', 'Mot de passe', 'Modifier mon mot de passe', 'bg-white text-primary', 'text-slate-500'],
-        ] as [$href, $ico, $titre, $sous, $cls, $clsSous]): ?>
-        <a href="<?= e($href) ?>" class="<?= $cls ?> rounded-2xl border border-slate-100 shadow-sm p-4 hover:shadow-md transition flex items-start gap-3">
-          <i class="fas <?= $ico ?> text-lg mt-0.5"></i>
-          <span>
-            <span class="block text-sm font-black uppercase tracking-tight"><?= e($titre) ?></span>
-            <span class="block text-[11px] font-semibold <?= $clsSous ?>"><?= e($sous) ?></span>
-          </span>
-        </a>
-        <?php endforeach; ?>
-      </div>
-
-      <!-- Informations financières (partenaire) -->
-      <?php if ($synthesePartenaire): ?>
-      <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
-        <h2 class="font-black text-primary text-sm uppercase italic mb-3"><i class="fas fa-coins text-accent mr-1"></i> Situation financière — <?= e($partenaireMoi['nom']) ?></h2>
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <!-- VUE D'ENSEMBLE -->
+      <section>
+        <h2 class="<?= $titreSection ?>">Vue d'ensemble</h2>
+        <div class="grid grid-cols-2 lg:grid-cols-3 gap-3">
           <?php foreach ([
-              ['Réservations', (string)$synthesePartenaire['nb'], 'text-primary'],
-              ['Montant dû', $fmtD($synthesePartenaire['du']) . ' FCFA', 'text-primary'],
-              ['Payé', $fmtD($synthesePartenaire['paye']) . ' FCFA', 'text-emerald-600'],
-              ['Reste à régler', $fmtD($synthesePartenaire['reste']) . ' FCFA', 'text-amber-600'],
-          ] as [$lib, $val, $cls]): ?>
-          <div class="rounded-xl bg-slate-50 p-3">
-            <p class="text-[10px] font-black uppercase tracking-widest text-slate-400"><?= $lib ?></p>
-            <p class="text-base font-black <?= $cls ?>"><?= e($val) ?></p>
+              ['Réservations', (string)$stats['total'], 'fa-calendar-check', 'text-primary', 'bg-primary/5', 'demandes de ce compte'],
+              ['En attente', (string)$stats['en_attente'], 'fa-clock', 'text-amber-600', 'bg-amber-50', 'de validation par le Palais'],
+              ['Bons disponibles', (string)$nbBons, 'fa-file-invoice', 'text-sky-600', 'bg-sky-50', 'réservations validées'],
+              ['Montant payé', $fmtD($synthesePartenaire['paye'] ?? 0) . ' FCFA', 'fa-check-circle', 'text-emerald-600', 'bg-emerald-50', 'organisation'],
+              ['Reste à payer', $fmtD($synthesePartenaire['reste'] ?? 0) . ' FCFA', 'fa-coins', 'text-amber-600', 'bg-amber-50', 'réservations validées'],
+              ['Services en cours', (string)$nbServicesEnCours, 'fa-concierge-bell', 'text-purple-600', 'bg-purple-50', 'demandes non clôturées'],
+          ] as [$lib, $val, $ico, $col, $bg, $aide]): ?>
+          <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-5">
+            <div class="flex items-center justify-between gap-2 mb-3">
+              <span class="w-9 h-9 <?= $bg ?> rounded-xl flex items-center justify-center flex-shrink-0"><i class="fas <?= $ico ?> <?= $col ?> text-sm"></i></span>
+            </div>
+            <p class="text-xl sm:text-2xl font-black <?= $col ?>" style="overflow-wrap:anywhere"><?= e($val) ?></p>
+            <p class="text-xs font-bold text-slate-600 mt-0.5"><?= e($lib) ?></p>
+            <p class="text-[10px] text-slate-400"><?= e($aide) ?></p>
           </div>
           <?php endforeach; ?>
         </div>
-        <p class="text-[11px] text-slate-400 mt-2">Réservations de tous les comptes de votre organisation (hors refusées, annulées ou expirées). Les paiements sont enregistrés par le service comptable du Palais.</p>
-      </div>
-      <?php endif; ?>
+      </section>
 
-      <!-- Suivi des demandes en cours -->
-      <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-        <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-2">
-          <h2 class="font-black text-primary text-sm uppercase italic">Suivi de mes demandes</h2>
-          <a href="?tab=reservations" class="text-xs font-black text-accent hover:underline">Tout voir</a>
+      <!-- ACCÈS RAPIDES -->
+      <section>
+        <h2 class="<?= $titreSection ?>">Accès rapides</h2>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <?php foreach ([
+              ['reserver.php', 'fa-plus', 'Nouvelle réservation', 'Réserver un espace du Palais', true],
+              ['?tab=reservations', 'fa-calendar-check', 'Mes réservations', $stats['total'] . ' demande(s), dont ' . $stats['en_attente'] . ' en attente', false],
+              ['?tab=reservations', 'fa-file-invoice', 'Mes bons', $nbBons . ' bon(s) / facture(s) disponible(s)', false],
+              ['?tab=services', 'fa-concierge-bell', 'Services', count($mesServices) . ' demande(s) de service', false],
+              ['?tab=profil', 'fa-user', 'Mon profil', 'Nom et téléphone du compte', false],
+              ['?tab=profil#mot-de-passe', 'fa-key', 'Mot de passe', 'Modifier mon mot de passe', false],
+          ] as [$href, $ico, $titre, $sous, $principal]): ?>
+          <a href="<?= e($href) ?>" class="group bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex items-center gap-3 hover:border-primary transition">
+            <span class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 <?= $principal ? 'bg-accent text-white' : 'bg-primary/5 text-primary' ?>"><i class="fas <?= $ico ?>"></i></span>
+            <span class="min-w-0 flex-1">
+              <span class="block text-sm font-black text-primary"><?= e($titre) ?></span>
+              <span class="block text-[11px] font-semibold text-slate-400"><?= e($sous) ?></span>
+            </span>
+            <i class="fas fa-chevron-right text-[10px] text-slate-300 group-hover:text-primary transition"></i>
+          </a>
+          <?php endforeach; ?>
         </div>
-        <div class="divide-y divide-slate-50">
-          <?php foreach ($aSuivre as $r):
-            [$blib, $bcls] = $badgeConfig[$r['statut']] ?? $badgeConfig['annulee'];
-            $sfd = $r['statut'] === 'validee' ? situation_financiere_reservation($pdo, (int)$r['id']) : null;
-            if ($sfd) { [$blib, $bcls] = libelle_etat_financier($sfd['etat']); }
-          ?>
-          <div class="px-5 py-3 flex flex-wrap items-center justify-between gap-2">
-            <div class="min-w-0">
-              <p class="text-sm font-black text-primary"><span class="font-mono text-xs text-slate-400"><?= e(ref_resa((int)$r['id'])) ?></span> <?= e($r['espace_nom']) ?></p>
-              <p class="text-[11px] text-slate-400"><?= date('d/m/Y', strtotime($r['date_resa'])) ?><?= $sfd ? ' · payé ' . $fmtD($sfd['paye_net']) . ' / ' . $fmtD($sfd['net_du']) . ' FCFA' : '' ?></p>
+      </section>
+
+      <!-- SUIVI -->
+      <section class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
+        <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+          <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-2">
+            <h2 class="font-black text-primary text-sm uppercase italic">Suivi de mes demandes</h2>
+            <a href="?tab=reservations" class="text-[11px] font-black uppercase text-accent hover:underline">Tout voir</a>
+          </div>
+          <div class="divide-y divide-slate-50">
+            <?php foreach ($aSuivre as $r):
+              [$blib, $bcls] = $badgeConfig[$r['statut']] ?? $badgeConfig['annulee'];
+              $sfd = $r['statut'] === 'validee' ? situation_financiere_reservation($pdo, (int)$r['id']) : null;
+              if ($sfd) { [$blib, $bcls] = libelle_etat_financier($sfd['etat']); }
+            ?>
+            <div class="px-5 py-3 flex flex-wrap items-center justify-between gap-2">
+              <div class="min-w-0">
+                <p class="text-sm font-black text-primary" style="overflow-wrap:anywhere"><span class="font-mono text-xs text-slate-400"><?= e(ref_resa((int)$r['id'])) ?></span> <?= e($r['espace_nom']) ?></p>
+                <p class="text-[11px] text-slate-400"><?= date('d/m/Y', strtotime($r['date_resa'])) ?><?= $sfd ? ' · payé ' . $fmtD($sfd['paye_net']) . ' / ' . $fmtD($sfd['net_du']) . ' FCFA' : '' ?></p>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="text-[10px] font-black px-2.5 py-1 rounded-full border <?= $bcls ?>"><?= e($blib) ?></span>
+                <?php if ($r['statut'] === 'validee'): ?>
+                <a href="generer_bon.php?id=<?= (int)$r['id'] ?>" target="_blank" class="text-[10px] font-black uppercase px-3 py-1.5 rounded-xl bg-primary text-white hover:bg-slate-800 transition"><i class="fas fa-download mr-1"></i>Bon</a>
+                <?php endif; ?>
+              </div>
             </div>
-            <div class="flex items-center gap-2">
+            <?php endforeach; ?>
+            <?php if (!$aSuivre): ?>
+            <p class="px-5 py-6 text-sm text-slate-400 text-center">Aucune demande en cours. <a href="reserver.php" class="font-black text-accent hover:underline">Faire une réservation</a></p>
+            <?php endif; ?>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+          <div class="px-5 py-4 border-b border-slate-100"><h2 class="font-black text-primary text-sm uppercase italic">Activité récente</h2></div>
+          <div class="divide-y divide-slate-50">
+            <?php foreach ($dernieres as $r): [$blib, $bcls] = $badgeConfig[$r['statut']] ?? $badgeConfig['annulee']; ?>
+            <div class="px-5 py-3 flex flex-wrap items-center justify-between gap-2">
+              <div class="min-w-0">
+                <p class="text-sm font-bold text-primary" style="overflow-wrap:anywhere"><span class="font-mono text-xs text-slate-400"><?= e(ref_resa((int)$r['id'])) ?></span> <?= e($r['espace_nom']) ?></p>
+                <p class="text-[11px] text-slate-400">demandée le <?= date('d/m/Y', strtotime($r['created_at'])) ?></p>
+              </div>
               <span class="text-[10px] font-black px-2.5 py-1 rounded-full border <?= $bcls ?>"><?= e($blib) ?></span>
-              <?php if ($r['statut'] === 'validee'): ?>
-              <a href="generer_bon.php?id=<?= (int)$r['id'] ?>" target="_blank" class="text-[10px] font-black uppercase px-3 py-1.5 rounded-xl bg-primary text-white hover:bg-slate-800 transition"><i class="fas fa-download mr-1"></i>Bon</a>
-              <?php endif; ?>
             </div>
+            <?php endforeach; ?>
+            <?php if (!$dernieres): ?>
+            <p class="px-5 py-6 text-sm text-slate-400 text-center">Aucune activité pour le moment.</p>
+            <?php endif; ?>
           </div>
-          <?php endforeach; ?>
-          <?php if (!$aSuivre): ?>
-          <p class="px-5 py-6 text-sm text-slate-400 text-center">Aucune demande en cours. <a href="reserver.php" class="font-black text-accent hover:underline">Faire une réservation</a></p>
-          <?php endif; ?>
         </div>
-      </div>
 
-      <!-- Activité récente -->
-      <?php if ($dernieres): ?>
-      <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-        <div class="px-5 py-4 border-b border-slate-100"><h2 class="font-black text-primary text-sm uppercase italic">Activité récente</h2></div>
-        <div class="divide-y divide-slate-50">
-          <?php foreach ($dernieres as $r): [$blib, $bcls] = $badgeConfig[$r['statut']] ?? $badgeConfig['annulee']; ?>
-          <div class="px-5 py-3 flex flex-wrap items-center justify-between gap-2">
-            <p class="text-sm font-bold text-primary"><span class="font-mono text-xs text-slate-400"><?= e(ref_resa((int)$r['id'])) ?></span> <?= e($r['espace_nom']) ?>
-              <span class="text-[11px] font-semibold text-slate-400">· demandée le <?= date('d/m/Y', strtotime($r['created_at'])) ?></span></p>
-            <span class="text-[10px] font-black px-2.5 py-1 rounded-full border <?= $bcls ?>"><?= e($blib) ?></span>
-          </div>
-          <?php endforeach; ?>
-        </div>
-      </div>
-      <?php endif; ?>
+      </section>
+
+      <p class="text-[11px] text-slate-400">Espace de gestion réservé à votre organisation : les demandes sont validées par l'administration du Palais et les paiements enregistrés par son service comptable. Montants « payé » et « reste à payer » : ensemble des comptes de <?= e($partenaireMoi['nom']) ?>.</p>
 
     </div>
 

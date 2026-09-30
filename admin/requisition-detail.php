@@ -952,6 +952,7 @@ $statutClass =
 
 $pageTitle = 'Détail de la réquisition #' . $id;
 
+$pageRetour = false; // la page a déjà son propre lien retour
 require __DIR__ . '/_admin_header.php';
 ?>
 

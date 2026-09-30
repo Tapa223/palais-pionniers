@@ -157,6 +157,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     }
 }
 
+$pageRetour = false; // la page a déjà son propre lien retour
 require __DIR__ . '/_admin_header.php';
 ?>
 

@@ -79,6 +79,7 @@ if ($preselectId) {
 }
 
 $pageTitle = "Galerie des formations";
+$pageRetour = false; // la page a déjà son propre lien retour
 require __DIR__ . '/_admin_header.php';
 ?>
 
