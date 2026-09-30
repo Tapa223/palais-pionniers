@@ -1144,6 +1144,26 @@ if (!function_exists('notify')) {
     }
 }
 
+if (!function_exists('notifications_perimetre')) {
+    /**
+     * Périmètre des notifications d'un compte (clause WHERE + paramètres).
+     * - client : ses propres notifications (inchangé) ;
+     * - partenaire : les notifications de tous les comptes de SON organisation
+     *   (un événement n'est envoyé qu'une fois, au compte concerné : aucun doublon),
+     *   sauf les échanges personnels (réponse à un message de contact, rattachement).
+     */
+    function notifications_perimetre(PDO $pdo, int $userId): array
+    {
+        if (($_SESSION['role'] ?? '') === 'partenaire' && ($p = partenaire_utilisateur($pdo, $userId))) {
+            return [
+                "(destinataire_id = ? OR (type NOT IN ('reponse_message','partenaire_associe') AND destinataire_id IN (SELECT id FROM users WHERE partenaire_id = ? AND role = 'partenaire')))",
+                [$userId, (int)$p['id']],
+            ];
+        }
+        return ['destinataire_id = ?', [$userId]];
+    }
+}
+
 if (!function_exists('count_notifications')) {
     function count_notifications(): int
     {
@@ -1156,6 +1176,14 @@ if (!function_exists('count_notifications')) {
             );
 
         try {
+
+            // Partenaire : notifications de son organisation (voir notifications_perimetre)
+            if ($role === 'partenaire') {
+                [$perimetre, $paramsPerimetre] = notifications_perimetre(db(), $uid);
+                $stmt = db()->prepare("SELECT COUNT(*) FROM notifications WHERE lu = 0 AND (destinataire_role = ? OR $perimetre)");
+                $stmt->execute(array_merge([$role], $paramsPerimetre));
+                return (int)$stmt->fetchColumn();
+            }
 
             $stmt =
                 db()->prepare("

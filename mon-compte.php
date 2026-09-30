@@ -624,15 +624,17 @@ if ($msg === null) {
 // ============================================================
 // NOTIFICATIONS DU CLIENT
 // ============================================================
+// Partenaire : notifications de son organisation ; client : les siennes (inchangé)
+[$perimetreNotifs, $paramsNotifs] = notifications_perimetre($pdo, (int)$user_id);
 $notifsClient = $pdo->prepare("
     SELECT *
     FROM notifications
-    WHERE destinataire_id = ?
+    WHERE $perimetreNotifs
     ORDER BY lu ASC, created_at DESC
     LIMIT 20
 ");
 
-$notifsClient->execute([$user_id]);
+$notifsClient->execute($paramsNotifs);
 
 $notifsClient = $notifsClient->fetchAll();
 
@@ -645,14 +647,17 @@ $notifsNonLues = count(
 );
 
 
-if ($notifsNonLues > 0) {
+// Client : notifications marquées lues à l'ouverture de son espace (inchangé).
+// Partenaire : seulement à l'ouverture de l'onglet Notifications, pour que la
+// pastille de sa barre latérale reflète réellement les notifications non lues.
+if ($notifsNonLues > 0 && (!is_partenaire() || ($_GET['tab'] ?? '') === 'notifications')) {
 
     $pdo->prepare("
         UPDATE notifications
         SET lu = 1
-        WHERE destinataire_id = ?
+        WHERE $perimetreNotifs
           AND lu = 0
-    ")->execute([$user_id]);
+    ")->execute($paramsNotifs);
 }
 
 
@@ -724,14 +729,16 @@ if ($partenaireMoi) {
 // ------------------------------------------------------------
 // MES DEMANDES DE SERVICES (lavage automobile, support publicitaire…)
 // ------------------------------------------------------------
+// Partenaire : demandes de services de tous les comptes de son organisation
 $mesServices = $pdo->prepare("
-    SELECT ds.*, s.nom AS service_nom, s.montant, s.unite
+    SELECT ds.*, s.nom AS service_nom, s.montant, s.unite, du.nom_complet AS demandeur_nom
     FROM demandes_services ds
     JOIN services_annexes s ON s.id = ds.service_id
-    WHERE ds.user_id = ?
+    JOIN users du ON du.id = ds.user_id
+    WHERE " . ($partenaireMoi ? "du.partenaire_id = ? AND du.role = 'partenaire'" : "ds.user_id = ?") . "
     ORDER BY ds.created_at DESC
 ");
-$mesServices->execute([(int)$user_id]);
+$mesServices->execute([$partenaireMoi ? (int)$partenaireMoi['id'] : (int)$user_id]);
 $mesServices = $mesServices->fetchAll();
 
 
@@ -817,6 +824,8 @@ $reservations = $pdo->prepare("
         r.*,
 
         e.nom AS espace_nom,
+
+        (SELECT du.nom_complet FROM users du WHERE du.id = r.user_id) AS demandeur_nom,
 
         t.libelle AS tarif_libelle,
         t.montant,
@@ -971,12 +980,13 @@ $reservations = $pdo->prepare("
     LEFT JOIN requisitions_ministerielles rm
         ON rm.reservation_id = r.id
 
-    WHERE r.user_id = ?
+    WHERE " . ($partenaireMoi ? "r.partenaire_id = ?" : "r.user_id = ?") . "
 
     ORDER BY r.created_at DESC
 ");
 
-$reservations->execute([$user_id]);
+// Partenaire : réservations de toute son organisation ; client : les siennes (inchangé)
+$reservations->execute([$partenaireMoi ? (int)$partenaireMoi['id'] : $user_id]);
 
 $reservations = $reservations->fetchAll();
 
@@ -1436,9 +1446,17 @@ if ($partenaireMoi) {
         <p class="text-sm text-slate-500 mt-0.5"><?= e($partenaireMoi['nom']) ?> — espace de gestion réservé à votre organisation</p>
       </div>
       <?php if (in_array($tab, ['tableau-de-bord', 'reservations', 'bons'], true)): ?>
-      <a href="reserver.php" class="flex items-center gap-2 bg-accent text-white text-xs font-black uppercase px-5 py-3 rounded-xl hover:bg-accent-dark transition shadow-sm">
-        <i class="fas fa-plus"></i> Nouvelle réservation
-      </a>
+      <div class="flex flex-wrap items-center gap-2">
+        <a href="export-partenaire.php?type=reservations" class="flex items-center gap-2 bg-white border border-slate-200 text-primary text-xs font-black uppercase px-4 py-3 rounded-xl hover:border-primary transition" title="Réservations et situation financière de votre organisation (CSV)">
+          <i class="fas fa-file-csv"></i> Réservations
+        </a>
+        <a href="export-partenaire.php?type=paiements" class="flex items-center gap-2 bg-white border border-slate-200 text-primary text-xs font-black uppercase px-4 py-3 rounded-xl hover:border-primary transition" title="Paiements enregistrés pour votre organisation (CSV)">
+          <i class="fas fa-file-csv"></i> Paiements
+        </a>
+        <a href="reserver.php" class="flex items-center gap-2 bg-accent text-white text-xs font-black uppercase px-5 py-3 rounded-xl hover:bg-accent-dark transition shadow-sm">
+          <i class="fas fa-plus"></i> Nouvelle réservation
+        </a>
+      </div>
       <?php endif; ?>
     </div>
     <?php endif; ?>
@@ -1471,7 +1489,7 @@ if ($partenaireMoi) {
     <?php
       /*
        * Tableau de bord de l'Espace admin partenaire — présentation uniquement :
-       * réservations de ce compte ($reservations), synthèse financière de son
+       * réservations de son organisation ($reservations), synthèse financière de son
        * organisation ($synthesePartenaire), ses demandes de services ($mesServices).
        */
       $fmtD = fn($m) => number_format((float)$m, 0, ',', ' ');
@@ -1486,7 +1504,7 @@ if ($partenaireMoi) {
       <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-2">
           <h2 class="font-black text-primary text-sm uppercase italic">Vue d'ensemble</h2>
-          <span class="hidden sm:inline text-[10px] font-black uppercase tracking-widest text-slate-400">Montants : ensemble des comptes de <?= e($partenaireMoi['nom']) ?></span>
+          <span class="hidden sm:inline text-[10px] font-black uppercase tracking-widest text-slate-400">Tous les comptes de <?= e($partenaireMoi['nom']) ?></span>
         </div>
         <div class="grid grid-cols-2 lg:grid-cols-3 bg-slate-100" style="gap:1px">
           <?php foreach ([
@@ -1548,7 +1566,7 @@ if ($partenaireMoi) {
             <div class="px-5 py-3 flex flex-wrap items-center justify-between gap-2 hover:bg-slate-50 transition">
               <div class="min-w-0">
                 <p class="text-sm font-bold text-primary" style="overflow-wrap:anywhere"><span class="font-mono text-xs text-slate-400"><?= e(ref_resa((int)$r['id'])) ?></span> <?= e($r['espace_nom']) ?></p>
-                <p class="text-[11px] text-slate-400">demandée le <?= date('d/m/Y', strtotime($r['created_at'])) ?></p>
+                <p class="text-[11px] text-slate-400">demandée le <?= date('d/m/Y', strtotime($r['created_at'])) ?> par <?= e($r['demandeur_nom'] ?? '') ?></p>
               </div>
               <span class="text-[10px] font-black px-2.5 py-1 rounded-full border <?= $bcls ?>"><?= e($blib) ?></span>
             </div>
@@ -1559,6 +1577,88 @@ if ($partenaireMoi) {
           </div>
         </div>
 
+      </div>
+
+      <?php
+        // Statistiques de l'organisation : uniquement ses réservations (partenaire_id) et
+        // les demandes de services de ses comptes (users.partenaire_id).
+        $pidStats = (int)$partenaireMoi['id'];
+        $parStatut = array_fill_keys(['en_attente', 'validee', 'refusee', 'annulee', 'expiree', 'requisitionnee'], 0);
+        $stS = $pdo->prepare("SELECT statut, COUNT(*) AS nb FROM reservations WHERE partenaire_id = ? GROUP BY statut");
+        $stS->execute([$pidStats]);
+        foreach ($stS->fetchAll() as $ls) { $parStatut[$ls['statut']] = (int)$ls['nb']; }
+        $totalOrg = array_sum($parStatut);
+        $stSv = $pdo->prepare("SELECT COUNT(*) AS nb, COALESCE(SUM(ds.statut IN ('realisee','traitee')), 0) AS realises FROM demandes_services ds JOIN users u ON u.id = ds.user_id WHERE u.partenaire_id = ?");
+        $stSv->execute([$pidStats]);
+        $servicesOrg = $stSv->fetch() ?: ['nb' => 0, 'realises' => 0];
+        $stE = $pdo->prepare("SELECT e.nom, COUNT(*) AS nb FROM reservations r JOIN espaces e ON e.id = r.espace_id WHERE r.partenaire_id = ? AND r.statut NOT IN ('refusee','annulee','expiree') GROUP BY e.id, e.nom ORDER BY nb DESC, e.nom LIMIT 5");
+        $stE->execute([$pidStats]);
+        $parEspaceOrg = $stE->fetchAll();
+        $moisNoms = ['01' => 'janv.', '02' => 'févr.', '03' => 'mars', '04' => 'avr.', '05' => 'mai', '06' => 'juin', '07' => 'juil.', '08' => 'août', '09' => 'sept.', '10' => 'oct.', '11' => 'nov.', '12' => 'déc.'];
+        $parMois = [];
+        for ($k = 5; $k >= 0; $k--) { $parMois[date('Y-m', strtotime("first day of -$k month"))] = 0; }
+        $stM = $pdo->prepare("SELECT DATE_FORMAT(created_at, '%Y-%m') AS mois, COUNT(*) AS nb FROM reservations WHERE partenaire_id = ? AND created_at >= ? GROUP BY mois");
+        $stM->execute([$pidStats, array_key_first($parMois) . '-01']);
+        foreach ($stM->fetchAll() as $lm) { if (isset($parMois[$lm['mois']])) { $parMois[$lm['mois']] = (int)$lm['nb']; } }
+        $maxMois = max(1, max($parMois));
+        $maxEspace = max(1, (int)($parEspaceOrg[0]['nb'] ?? 1));
+      ?>
+      <!-- STATISTIQUES DE L'ORGANISATION -->
+      <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden" id="statistiques">
+        <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-2">
+          <h2 class="font-black text-primary text-sm uppercase italic">Statistiques — <?= e($partenaireMoi['nom']) ?></h2>
+          <span class="hidden sm:inline text-[10px] font-black uppercase tracking-widest text-slate-400">Tous les comptes de l'organisation</span>
+        </div>
+        <div class="grid grid-cols-1 lg:grid-cols-3 bg-slate-100" style="gap:1px">
+          <div class="bg-white p-5">
+            <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">Réservations</p>
+            <?php foreach ([
+                ['Total', $totalOrg, 'text-primary'],
+                ['Validées', $parStatut['validee'], 'text-emerald-600'],
+                ['En attente', $parStatut['en_attente'], 'text-amber-600'],
+                ['Annulées / refusées / expirées', $parStatut['annulee'] + $parStatut['refusee'] + $parStatut['expiree'], 'text-slate-500'],
+                ['Réquisitionnées', $parStatut['requisitionnee'], 'text-slate-500'],
+            ] as [$libS, $valS, $clsS]): ?>
+            <div class="flex items-center justify-between py-1.5 border-b border-slate-50 text-sm">
+              <span class="text-slate-600"><?= e($libS) ?></span><span class="font-black <?= $clsS ?>"><?= (int)$valS ?></span>
+            </div>
+            <?php endforeach; ?>
+            <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 mt-4 mb-2">Finances et services</p>
+            <?php foreach ([
+                ['Montant payé', $fmtD($synthesePartenaire['paye'] ?? 0) . ' FCFA', 'text-emerald-600'],
+                ['Reste à payer', $fmtD($synthesePartenaire['reste'] ?? 0) . ' FCFA', 'text-amber-600'],
+                ['Services demandés', (int)$servicesOrg['nb'] . ' (' . (int)$servicesOrg['realises'] . ' réalisé' . ((int)$servicesOrg['realises'] > 1 ? 's' : '') . ')', 'text-purple-600'],
+            ] as [$libS, $valS, $clsS]): ?>
+            <div class="flex items-center justify-between py-1.5 border-b border-slate-50 text-sm">
+              <span class="text-slate-600"><?= e($libS) ?></span><span class="font-black <?= $clsS ?>"><?= e($valS) ?></span>
+            </div>
+            <?php endforeach; ?>
+          </div>
+          <div class="bg-white p-5">
+            <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">Demandes sur 6 mois</p>
+            <div class="space-y-2">
+              <?php foreach ($parMois as $mois => $nbM): ?>
+              <div class="flex items-center gap-3 text-xs">
+                <span class="w-14 text-slate-500 flex-shrink-0"><?= $moisNoms[substr($mois, 5, 2)] ?> <?= substr($mois, 2, 2) ?></span>
+                <span class="flex-1 h-2 rounded-full bg-slate-100 overflow-hidden"><span class="block h-2 rounded-full bg-primary" style="width:<?= round($nbM / $maxMois * 100) ?>%"></span></span>
+                <span class="w-6 text-right font-black text-primary"><?= $nbM ?></span>
+              </div>
+              <?php endforeach; ?>
+            </div>
+          </div>
+          <div class="bg-white p-5">
+            <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">Espaces les plus utilisés</p>
+            <div class="space-y-2">
+              <?php foreach ($parEspaceOrg as $le): ?>
+              <div class="text-xs">
+                <div class="flex items-center justify-between gap-2 mb-1"><span class="text-slate-600 truncate"><?= e($le['nom']) ?></span><span class="font-black text-primary"><?= (int)$le['nb'] ?></span></div>
+                <span class="block h-2 rounded-full bg-slate-100 overflow-hidden"><span class="block h-2 rounded-full bg-accent" style="width:<?= round((int)$le['nb'] / $maxEspace * 100) ?>%"></span></span>
+              </div>
+              <?php endforeach; ?>
+              <?php if (!$parEspaceOrg): ?><p class="text-xs text-slate-400">Aucune réservation pour le moment.</p><?php endif; ?>
+            </div>
+          </div>
+        </div>
       </div>
 
       <p class="text-[11px] text-slate-400">Les demandes sont validées par l'administration du Palais et les paiements enregistrés par son service comptable.</p>
@@ -1953,6 +2053,87 @@ if ($partenaireMoi) {
           </div>
 
 
+          <?php if ($partenaireMoi):
+            /*
+             * Suivi partenaire (consultation uniquement) : situation financière
+             * centrale et historique des paiements de CETTE réservation, qui
+             * appartient à l'organisation du compte connecté ($reservations est
+             * filtré par partenaire_id).
+             */
+            $sfp = situation_financiere_reservation($pdo, (int)$r['id']);
+            $paiementsResa = $pdo->prepare("SELECT id, montant, mode, reference, created_at FROM paiements WHERE reservation_id = ? ORDER BY created_at ASC, id ASC");
+            $paiementsResa->execute([(int)$r['id']]);
+            $paiementsResa = $paiementsResa->fetchAll();
+            [$etatLibP, $etatClsP] = libelle_etat_financier($sfp['etat'] ?? '');
+            $fmtP = fn($m) => number_format((float)$m, 0, ',', ' ');
+            $modesP = ['especes' => 'Espèces', 'orange_money' => 'Orange Money', 'moov_money' => 'Moov Money', 'virement' => 'Virement', 'cheque' => 'Chèque'];
+            $bonDispo = $r['statut'] === 'validee';
+            $echeanceP = $sfp['echeance_premier_paiement'] ?? $sfp['echeance_solde'] ?? null;
+          ?>
+          <!-- ==================================================
+               SUIVI PARTENAIRE : réservation et paiement
+               ================================================== -->
+          <div class="px-5 pb-5">
+            <?php if ((int)$r['user_id'] !== (int)$user_id): ?>
+            <p class="text-[11px] text-slate-500 mb-2"><i class="fas fa-user mr-1 text-primary"></i>Demandée par <strong><?= e($r['demandeur_nom'] ?? '') ?></strong> (autre compte de <?= e($partenaireMoi['nom']) ?>)</p>
+            <?php endif; ?>
+            <div class="rounded-xl border border-slate-100 overflow-hidden">
+              <div class="grid grid-cols-2 lg:grid-cols-3 bg-slate-100" style="gap:1px">
+                <div class="bg-white p-3">
+                  <p class="text-[10px] font-black uppercase tracking-widest text-slate-400">Ma réservation</p>
+                  <p class="mt-1"><span class="text-[10px] font-black px-2.5 py-1 rounded-full border <?= $bcls ?>"><?= e($blib) ?></span></p>
+                </div>
+                <div class="bg-white p-3">
+                  <p class="text-[10px] font-black uppercase tracking-widest text-slate-400">Mon paiement</p>
+                  <p class="mt-1"><span class="text-[10px] font-black px-2.5 py-1 rounded-full border <?= $etatClsP ?>"><?= e($etatLibP) ?></span></p>
+                </div>
+                <div class="bg-white p-3">
+                  <p class="text-[10px] font-black uppercase tracking-widest text-slate-400">Documents</p>
+                  <p class="text-xs font-bold mt-1 <?= $bonDispo ? 'text-emerald-600' : 'text-slate-400' ?>">
+                    <?php if ($bonDispo): ?>
+                      <a href="generer_bon.php?id=<?= (int)$r['id'] ?>" target="_blank" class="hover:underline"><i class="fas fa-file-invoice mr-1"></i><?= ($sfp['statut_paiement_calcule'] ?? '') === 'paye' ? 'Bon et facture disponibles' : 'Bon disponible' ?></a>
+                    <?php else: ?>
+                      <i class="fas fa-hourglass-half mr-1"></i>Après validation
+                    <?php endif; ?>
+                  </p>
+                </div>
+                <div class="bg-white p-3">
+                  <p class="text-[10px] font-black uppercase tracking-widest text-slate-400">Montant total</p>
+                  <p class="text-sm font-black text-primary mt-1"><?= $fmtP($sfp['net_du'] ?? 0) ?> FCFA</p>
+                  <?php if (($sfp['montant_reduction'] ?? 0) > 0): ?><p class="text-[10px] text-slate-400">après réduction de <?= $fmtP($sfp['montant_reduction']) ?> FCFA</p><?php endif; ?>
+                </div>
+                <div class="bg-white p-3">
+                  <p class="text-[10px] font-black uppercase tracking-widest text-slate-400">Payé</p>
+                  <p class="text-sm font-black text-emerald-600 mt-1"><?= $fmtP(max(0, $sfp['paye_net'] ?? 0)) ?> FCFA</p>
+                  <?php if (($sfp['total_rembourse'] ?? 0) > 0): ?><p class="text-[10px] text-slate-400">dont <?= $fmtP($sfp['total_rembourse']) ?> FCFA remboursés</p><?php endif; ?>
+                </div>
+                <div class="bg-white p-3">
+                  <p class="text-[10px] font-black uppercase tracking-widest text-slate-400">Reste à payer</p>
+                  <p class="text-sm font-black mt-1 <?= ($r['statut'] === 'validee' && ($sfp['solde'] ?? 0) > 0) ? 'text-amber-600' : 'text-slate-400' ?>"><?= $r['statut'] === 'validee' ? $fmtP($sfp['solde'] ?? 0) . ' FCFA' : '—' ?></p>
+                  <?php if ($r['statut'] === 'validee' && $echeanceP && ($sfp['solde'] ?? 0) > 0): ?><p class="text-[10px] <?= !empty($sfp['en_retard']) ? 'text-accent font-bold' : 'text-slate-400' ?>">avant le <?= date('d/m/Y à H:i', $echeanceP) ?></p><?php endif; ?>
+                </div>
+              </div>
+              <?php if ($paiementsResa): ?>
+              <details class="border-t border-slate-100">
+                <summary class="px-3 py-2 text-[11px] font-black uppercase tracking-widest text-primary cursor-pointer hover:bg-slate-50">
+                  <i class="fas fa-receipt mr-1"></i>Historique des paiements (<?= count($paiementsResa) ?>)
+                </summary>
+                <div class="divide-y divide-slate-50">
+                  <?php foreach ($paiementsResa as $pp): ?>
+                  <div class="px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <span class="font-mono text-slate-400"><?= e(ref_recu((int)$pp['id'], $pp['created_at'])) ?></span>
+                    <span class="text-slate-500"><?= date('d/m/Y à H:i', strtotime($pp['created_at'])) ?> · <?= e($modesP[$pp['mode']] ?? $pp['mode']) ?><?= $pp['reference'] ? ' · réf. ' . e($pp['reference']) : '' ?></span>
+                    <span class="font-black text-emerald-600"><?= $fmtP($pp['montant']) ?> FCFA</span>
+                  </div>
+                  <?php endforeach; ?>
+                </div>
+              </details>
+              <?php endif; ?>
+            </div>
+          </div>
+          <?php endif; ?>
+
+
           <!-- ==================================================
                NOTE ADMIN SI REFUSÉE
                ================================================== -->
@@ -2030,6 +2211,9 @@ if ($partenaireMoi) {
               </p>
 
 
+              <?php if ((int)$r['user_id'] !== (int)$user_id): ?>
+              <p class="text-xs font-bold text-amber-800"><i class="fas fa-user-lock mr-1"></i>Le choix est à faire par <?= e($r['demandeur_nom'] ?? 'le titulaire') ?>, titulaire de cette réservation.</p>
+              <?php else: ?>
               <form method="POST"
                     id="reqForm-<?= $r['requisition_id'] ?>"
                     class="space-y-3">
@@ -2229,6 +2413,7 @@ if ($partenaireMoi) {
                 </button>
 
               </form>
+              <?php endif; ?>
 
 
               <!-- =================================================
@@ -2394,6 +2579,7 @@ if ($partenaireMoi) {
 
                     </p>
 
+<?php if ((int)$r['user_id'] === (int)$user_id): ?>
                     <a href="reserver.php?requisition_id=<?= (int)$r['requisition_id'] ?>"
                        class="inline-flex items-center justify-center gap-1.5 bg-amber-600 text-white text-[10px] font-black uppercase px-3 py-2 rounded-xl hover:bg-amber-700 transition flex-shrink-0">
 
@@ -2402,6 +2588,9 @@ if ($partenaireMoi) {
                       Finaliser ma nouvelle réservation
 
                     </a>
+                    <?php else: ?>
+                    <span class="text-[10px] font-bold text-amber-800">À finaliser par <?= e($r['demandeur_nom'] ?? 'le titulaire') ?></span>
+                    <?php endif; ?>
 
                   </div>
 
@@ -2916,7 +3105,7 @@ if ($partenaireMoi) {
         <div class="flex flex-wrap items-start justify-between gap-2">
           <div>
             <p class="font-black text-primary text-sm"><?= e($ds['service_nom']) ?></p>
-            <p class="text-[11px] text-slate-400 mt-0.5">Demande du <?= date('d/m/Y à H:i', strtotime($ds['created_at'])) ?></p>
+            <p class="text-[11px] text-slate-400 mt-0.5">Demande du <?= date('d/m/Y à H:i', strtotime($ds['created_at'])) ?><?= $partenaireMoi ? ' · par ' . e($ds['demandeur_nom'] ?? '') : '' ?></p>
           </div>
           <span class="text-[9px] font-black uppercase px-2.5 py-1 rounded-full <?= $clsSrv ?>"><?= e($libSrv) ?></span>
         </div>

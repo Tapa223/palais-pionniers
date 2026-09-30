@@ -17,6 +17,10 @@ $estAdminAutorise = in_array(
     true
 );
 
+// Compte partenaire : accès aux documents de toute son organisation
+// (réservations portant son partenaire_id), jamais d'une autre.
+$partenaireDocs = $role === 'partenaire' ? partenaire_utilisateur($pdo, (int)($_SESSION['user_id'] ?? 0)) : null;
+
 /*
 |--------------------------------------------------------------------------
 | OUTILS
@@ -147,6 +151,7 @@ if ($type === 'remboursement') {
     $sql = "
         SELECT
             rb.*,
+            r.partenaire_id AS reservation_partenaire_id,
             r.date_resa,
             r.date_depart,
             r.heure_debut,
@@ -203,8 +208,12 @@ if ($type === 'remboursement') {
         true
     );
 
+    $memeOrganisation = $partenaireDocs
+        && (int) ($remboursement['reservation_partenaire_id'] ?? 0) === (int) $partenaireDocs['id'];
+
     if (
         !$estAdminAutorise &&
+        !$memeOrganisation &&
         (int) $remboursement['client_id'] !== (int) ($_SESSION['user_id'] ?? 0)
     ) {
         exit('Accès refusé.');
@@ -886,8 +895,14 @@ $sql = "
 $params = [$id];
 
 if (!$estAdminAutorise) {
-    $sql .= " AND r.user_id = ?";
-    $params[] = $_SESSION['user_id'];
+    if ($partenaireDocs) {
+        $sql .= " AND (r.user_id = ? OR r.partenaire_id = ?)";
+        $params[] = $_SESSION['user_id'];
+        $params[] = (int) $partenaireDocs['id'];
+    } else {
+        $sql .= " AND r.user_id = ?";
+        $params[] = $_SESSION['user_id'];
+    }
 }
 
 $stmt = $pdo->prepare($sql);

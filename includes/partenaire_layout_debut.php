@@ -19,13 +19,13 @@ $uLayout      = current_user();
 $ongletActif  = $ongletPartenaire ?? 'tableau-de-bord';
 $nomPartenaire = (string)($partenaireLayout['nom'] ?? 'Partenaire');
 
-// Compteurs de la navigation : données de ce compte uniquement
+// Compteurs de la navigation : données de l'organisation du partenaire uniquement
 $nbNotifsLayout = 0;
 $nbAttenteLayout = 0;
 try {
     $nbNotifsLayout = count_notifications();
-    $stAtt = db()->prepare("SELECT COUNT(*) FROM reservations WHERE user_id = ? AND statut = 'en_attente'");
-    $stAtt->execute([(int)$uLayout['id']]);
+    $stAtt = db()->prepare("SELECT COUNT(*) FROM reservations WHERE partenaire_id = ? AND statut = 'en_attente'");
+    $stAtt->execute([(int)($partenaireLayout['id'] ?? 0)]);
     $nbAttenteLayout = (int)$stAtt->fetchColumn();
 } catch (Exception $e) {
     // compteurs facultatifs

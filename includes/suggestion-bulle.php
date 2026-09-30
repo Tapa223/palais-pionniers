@@ -1,6 +1,6 @@
 <?php
 /*
- * Bulle « Boîte à suggestions » (page d'accueil) — boîte à suggestions anonyme.
+ * Bulle « Une suggestion ? » (page d'accueil) — boîte à suggestions anonyme.
  * Aucune connexion requise ; aucun élément d'identification envoyé.
  * Fonctionne aussi sans JavaScript (envoi classique puis retour à l'accueil).
  */
@@ -12,27 +12,36 @@ $_SESSION['suggestion_affichee'] = time();
 $retourSuggestion = $_GET['suggestion'] ?? '';
 ?>
 <style>
-  /* Léger flottement vertical, doux et continu (quelques pixels), mis en pause
-     au survol ou au focus ; aucun mouvement si l'utilisateur a demandé
-     à réduire les animations. */
+  /* Bulle « Une suggestion ? » : léger flottement vertical (quelques pixels) et
+     libellé qui apparaît en fondu puis « respire » doucement. Tout est mis en
+     pause au survol ou au focus, et supprimé si l'utilisateur a demandé à
+     réduire les animations. */
   @media (prefers-reduced-motion: no-preference) {
     #suggestionOuvrir { animation: suggestionFlotte 3.6s ease-in-out infinite; }
-    #suggestionOuvrir:hover, #suggestionOuvrir:focus-visible { animation-play-state: paused; }
+    #suggestionLibelle { display:inline-block; animation: suggestionApparait .8s ease-out both, suggestionRespire 3.6s ease-in-out .8s infinite; }
+    #suggestionOuvrir:hover, #suggestionOuvrir:focus-visible,
+    #suggestionOuvrir:hover #suggestionLibelle, #suggestionOuvrir:focus-visible #suggestionLibelle { animation-play-state: paused; }
   }
-  /* Alternance du libellé : changement en fondu doux, sans fondu si mouvement réduit */
-  @media (prefers-reduced-motion: reduce) { #suggestionLibelle { transition: none !important; } }
   @keyframes suggestionFlotte {
     0%, 100% { transform: translateY(0); }
     50%      { transform: translateY(-4px); }
+  }
+  @keyframes suggestionApparait {
+    from { opacity: 0; transform: translateX(4px); }
+    to   { opacity: 1; transform: none; }
+  }
+  @keyframes suggestionRespire {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: .78; }
   }
 </style>
 <div id="suggestion" class="fixed right-4 z-40" style="bottom:1rem">
   <!-- Lien réel (fonctionne sans JavaScript : la page se recharge avec la fenêtre ouverte) -->
   <a href="?suggestion=ouvrir#suggestionModal" id="suggestionOuvrir" role="button" aria-haspopup="dialog" aria-controls="suggestionModal"
-     aria-label="Boîte à suggestions : envoyer une suggestion anonyme"
+     aria-label="Une suggestion ? Envoyer une suggestion anonyme"
      class="flex items-center gap-2 bg-primary text-white rounded-full shadow-xl px-4 py-3 text-xs font-black tracking-wide hover:bg-accent transition">
     <i class="fas fa-comment-dots text-base"></i>
-    <span id="suggestionLibelle" aria-hidden="true" style="transition:opacity .4s ease">Boîte à suggestions</span>
+    <span id="suggestionLibelle" aria-hidden="true">Une suggestion ?</span>
   </a>
 </div>
 
@@ -114,28 +123,5 @@ $retourSuggestion = $_GET['suggestion'] ?? '';
         }
     });
 
-    // Libellé alterné discrètement (« Boîte à suggestions » / « Écrire une suggestion ? »).
-    // Sans JavaScript : « Boîte à suggestions » reste affiché. Pause au survol, au focus
-    // et pendant que la fenêtre est ouverte ; pas d'alternance si mouvement réduit demandé.
-    const libelle = document.getElementById('suggestionLibelle');
-    const bulle = document.getElementById('suggestionOuvrir');
-    const textes = ['Boîte à suggestions', 'Écrire une suggestion ?'];
-    const reduit = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    let indice = 0, enPause = false;
-    bulle.addEventListener('mouseenter', () => enPause = true);
-    bulle.addEventListener('mouseleave', () => enPause = false);
-    bulle.addEventListener('focus', () => enPause = true);
-    bulle.addEventListener('blur', () => enPause = false);
-    if (libelle && !reduit) {
-        setInterval(() => {
-            if (enPause || !modal.classList.contains('hidden') || document.hidden) return;
-            libelle.style.opacity = '0';
-            setTimeout(() => {
-                indice = (indice + 1) % textes.length;
-                libelle.textContent = textes[indice];
-                libelle.style.opacity = '1';
-            }, 400);
-        }, 6000);
-    }
 })();
 </script>

@@ -248,6 +248,18 @@ if (!$readonly && isset($_POST['action'])) {
         }
         $stmt = $pdo->prepare("UPDATE reservations SET statut = 'en_attente', notification_vue = 0 WHERE id = ?");
         $stmt->execute([$id]); log_activity('reservation_en_attente','reservations','Réservation #'.($id??0).' remise en attente');
+        // Compte partenaire : informé que sa réservation repasse en attente de validation
+        if (partenaires_disponibles($pdo) && $stmt->rowCount() === 1) {
+            $resaAtt = $pdo->prepare("SELECT r.user_id, r.partenaire_id, r.date_resa, e.nom AS espace_nom FROM reservations r JOIN espaces e ON e.id = r.espace_id WHERE r.id = ?");
+            $resaAtt->execute([$id]);
+            $resaAtt = $resaAtt->fetch();
+            if ($resaAtt && !empty($resaAtt['partenaire_id'])) {
+                notify('', 'reservation_en_attente',
+                    "Votre réservation " . ref_resa((int)$id) . " pour « {$resaAtt['espace_nom']} » du " . date('d/m/Y', strtotime($resaAtt['date_resa'])) . " est de nouveau en attente de validation par l'administration du Palais.",
+                    "mon-compte.php?tab=reservations", (int)$resaAtt['user_id']
+                );
+            }
+        }
         $msg = ['ok', 'La demande est de nouveau en attente.'];
         finAnnuler:
     } elseif ($action === 'requisitionner') {
