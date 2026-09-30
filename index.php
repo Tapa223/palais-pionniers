@@ -47,7 +47,7 @@ require __DIR__ . '/includes/header.php';
 <?php
 $heroSlidesTextes = [
     ['titre' => 'Le Temple du <br><span class="text-accent italic">Citoyen</span>', 'sujet' => "L'esprit civique d'une génération se forge ici."],
-    ['titre' => 'Ta Place T\'<br><span class="text-accent italic">Attend</span>',   'sujet' => "Sport, formation, civisme — rejoins-nous."],
+    ['titre' => 'Ta Place <br><span class="text-accent italic">T\'Attend</span>',   'sujet' => "Sport, formation, civisme — rejoins-nous."],
     ['titre' => 'Bâtir le Mali <br><span class="text-accent italic">de Demain</span>',   'sujet' => "Une jeunesse formée et unie."],
 ];
 ?>
@@ -55,7 +55,7 @@ $heroSlidesTextes = [
     <div class="absolute inset-0 bg-gradient-to-r from-primary/90 via-primary/30 to-transparent z-10"></div>
     <div id="heroCarousel" class="absolute inset-0 z-0">
         <?php 
-        $slides = ['assets/images/porte.jpeg', 'assets/images/adminis.jpeg', 'assets/images/groupewague.jpeg'];
+        $slides = ['assets/images/porte.jpeg', 'assets/images/adminis.jpeg', 'assets/images/groupewague.jpg'];
         foreach ($slides as $index => $src): 
         ?>
         <div class="carousel-img absolute inset-0 w-full h-full transition-opacity duration-1000 ease-in-out <?= $index === 0 ? 'opacity-100' : 'opacity-0' ?>">
@@ -334,13 +334,13 @@ $presentationSlides = $presentationSlides ? array_map(fn($g) => 'assets/images/g
 <?php $dDga = $direction['dga'] ?? null; if ($dDga): ?>
 <!-- ============================================
      5bis. MESSAGE DU DIRECTEUR GÉNÉRAL ADJOINT
-     ============================================ -->
-<section class="py-10 sm:py-24 bg-white">
+     ============================================ 
+ <section class="py-10 sm:py-24 bg-white">
     <div class="container mx-auto px-4">
         <div class="max-w-5xl mx-auto flex flex-col md:flex-row items-center gap-4 sm:gap-16">
             <div class="w-full md:w-2/5 flex justify-center">
                 <?php if (!empty($dDga['photo'])): ?>
-                <img src="assets/images/<?= e($dDga['photo']) ?>" class="w-36 h-44 sm:w-64 sm:h-64 object-cover rounded-2xl sm:rounded-[4rem] shadow-xl sm:shadow-2xl border-4 sm:border-8 border-slate-50" alt="<?= e($dDga['nom']) ?>">
+                <img src="assets/images/dga.jpeg?= e($dDga['photo']) ?>" class="w-36 h-44 sm:w-64 sm:h-64 object-cover rounded-2xl sm:rounded-[4rem] shadow-xl sm:shadow-2xl border-4 sm:border-8 border-slate-50" alt="<?= e($dDga['nom']) ?>">
                 <?php else: ?>
                 <div class="w-36 h-44 sm:w-64 sm:h-64 rounded-2xl sm:rounded-[4rem] shadow-xl sm:shadow-2xl border-4 sm:border-8 border-slate-50 bg-primary flex items-center justify-center">
                     <span class="text-white text-2xl sm:text-6xl font-black italic"><?= e(initiales($dDga['nom'])) ?></span>
@@ -372,7 +372,7 @@ $presentationSlides = $presentationSlides ? array_map(fn($g) => 'assets/images/g
             </div>
         </div>
     </div>
-</section>
+</section> -->
 <?php endif; ?>
 
 <?php if ($nbPersonnalites > 0): ?>
@@ -547,7 +547,7 @@ $servicesAccueil = $pdo->query("SELECT * FROM services_annexes WHERE actif = 1 O
      BANNIÈRE S'ENGAGER (avant le footer)
      ============================================ -->
 <section class="py-14 sm:py-24 relative overflow-hidden">
-    <img src="assets/images/groupewague.jpeg" class="absolute inset-0 w-full h-full object-cover scale-110 blur-sm" alt="">
+    <img src="assets/images/jeunes.jpeg" class="absolute inset-0 w-full h-full object-cover scale-110 blur-sm" alt="">
     <div class="absolute inset-0 bg-slate-900/60"></div>
     <div class="container mx-auto px-4 relative z-10 text-center">
         <div class="inline-block max-w-2xl bg-slate-900/75 rounded-[2rem] px-6 py-8 sm:px-14 sm:py-12">

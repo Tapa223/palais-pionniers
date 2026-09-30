@@ -185,8 +185,8 @@ $personnelAvecPhoto = array_values(array_filter($personnelActopos, fn($p) => !em
 <?php if ($personnelActopos): ?>
 <!-- ============================================
      5bis. NOTRE ÉQUIPE (carrousel personnel)
-     ============================================ -->
-<section class="py-10 sm:py-20 bg-slate-900 overflow-hidden">
+     ============================================ 
+     <section class="py-10 sm:py-20 bg-slate-900 overflow-hidden">
     <div class="container mx-auto px-4 text-center mb-6 sm:mb-14">
         <h2 class="text-accent font-black tracking-widest uppercase text-[10px] sm:text-sm mb-2 sm:mb-4">L'équipe au quotidien</h2>
         <h3 class="text-xl sm:text-4xl font-black text-white uppercase italic tracking-tighter">Notre Personnel</h3>
@@ -211,7 +211,7 @@ $personnelAvecPhoto = array_values(array_filter($personnelActopos, fn($p) => !em
     <?php else: ?>
     <p class="text-center text-[11px] text-white/40 italic px-4">Les photos de l'équipe seront affichées ici dès qu'elles seront ajoutées via l'administration.</p>
     <?php endif; ?>
-</section>
+</section> -->
 <?php endif; ?>
 
 <!-- ============================================

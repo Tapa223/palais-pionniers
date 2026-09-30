@@ -30,7 +30,7 @@
       <ul class="space-y-2 text-sm text-white/80">
         <li>Magnambougou / Dianéguéla, Bamako, Mali</li>
         <li>+223 76 45 42 59</li>
-        <li>sd_dicko@yahoo.fr</li>
+        <li>ppb@mjsports.gouv.ml</li>
       </ul>
     </div>
   </div>
