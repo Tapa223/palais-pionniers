@@ -149,7 +149,18 @@ if ($requisitionId > 0) {
 }
 
 $pageTitle = "Réserver un espace — Palais des Pionniers";
-require __DIR__ . '/includes/header.php';
+// Compte partenaire : le formulaire s'affiche dans l'Espace admin partenaire
+// (même enveloppe que son tableau de bord). Formulaire et traitement inchangés.
+$partenaireReservation = partenaire_utilisateur($pdo, (int)$_SESSION['user_id']);
+if ($partenaireReservation) {
+    $pageTitle         = "Nouvelle réservation — Espace admin — Palais des Pionniers";
+    $ongletPartenaire  = 'nouvelle';
+    $partenaireLayout  = $partenaireReservation;
+    require __DIR__ . '/includes/partenaire_layout_debut.php';
+} else {
+    require __DIR__ . '/includes/header.php';
+}
+$piedDePage = $partenaireReservation ? '/includes/partenaire_layout_fin.php' : '/includes/footer.php';
 
 if ($requisitionErreur):
 ?>
@@ -168,7 +179,7 @@ if ($requisitionErreur):
   </div>
 </div>
 <?php
-require __DIR__ . '/includes/footer.php';
+require __DIR__ . $piedDePage;
 exit;
 endif;
 ?>
@@ -208,6 +219,9 @@ endif;
     .has-sticky-bar { padding-bottom:5rem; }
     #submitBtnDesktop { display:none; }
   }
+  @media (min-width:768px) {
+    .espace-partenaire .mobile-sticky-bar { left:16rem; }
+  }
   @media (min-width:1024px) {
     .mobile-sticky-bar { display:none; }
     #submitBtnMobile { display:none; }
@@ -217,12 +231,16 @@ endif;
 <div class="bg-slate-50 min-h-screen">
 
   <!-- Header sticky -->
-  <div class="bg-white border-b border-slate-100 sticky top-0 z-40 shadow-sm">
+  <div class="bg-white border-b border-slate-100 <?= $partenaireReservation ? 'rounded-t-2xl' : 'sticky top-0 z-40' ?> shadow-sm">
     <div class="container mx-auto max-w-5xl px-4 py-3 flex items-center justify-between gap-4">
+      <?php if ($partenaireReservation): ?>
+      <span class="flex-shrink-0 text-[10px] font-black uppercase tracking-widest text-slate-400"><i class="fas fa-handshake mr-1"></i><span class="hidden sm:inline"><?= e($partenaireReservation['nom']) ?></span></span>
+      <?php else: ?>
       <a href="espaces.php" class="flex items-center gap-2 text-xs font-black text-slate-400 uppercase tracking-widest hover:text-primary transition flex-shrink-0">
         <i class="fas fa-arrow-left"></i>
         <span class="hidden sm:inline">Espaces</span>
       </a>
+      <?php endif; ?>
       <h1 class="text-sm font-black text-primary uppercase italic tracking-tighter text-center">
         Réserver un <span class="text-accent">espace</span>
       </h1>
@@ -1396,4 +1414,4 @@ renderCal();
 if(el('telInput').value.trim().length>=8) onTelChange();
 initRequisition();
 </script>
-<?php require __DIR__ . '/includes/footer.php'; ?>
+<?php require __DIR__ . $piedDePage; ?>

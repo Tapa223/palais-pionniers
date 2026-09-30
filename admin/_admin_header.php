@@ -166,15 +166,13 @@ h1,h2,h3 { font-family:'Plus Jakarta Sans',Inter,sans-serif; letter-spacing:-.02
           /*
            * Flèche « Retour » : l'ancienne flèche de la barre du haut, déplacée ici
            * pour ne pas être confondue avec « Retour sur le site ».
-           * Affichée sur les pages secondaires : page hors menu latéral, ou fiche /
-           * détail / formulaire (?id, ?edit, ?nouveau, ?add, ?resa).
+           * Affichée sur toutes les pages sauf le tableau de bord.
            * - $pageRetour = [href, libellé] : retour vers la page parente indiquée ;
            * - $pageRetour = false : la page a déjà son propre lien retour ;
            * - sinon : comportement d'origine (page précédente), repli sur le tableau de bord.
            */
           $pageCourante = basename($_SERVER['PHP_SELF']);
-          $estSecondaire = !isset($nav[$pageCourante])
-              || array_intersect_key($_GET, array_flip(['id', 'edit', 'nouveau', 'add', 'resa']));
+          $estSecondaire = true;
           $retourCls = 'inline-flex items-center gap-1.5 mb-4 px-3 py-1.5 rounded-full bg-white border border-slate-200 text-[11px] font-black uppercase tracking-tight text-primary hover:border-primary transition';
         ?>
         <?php if (isset($pageRetour) && is_array($pageRetour)): ?>
