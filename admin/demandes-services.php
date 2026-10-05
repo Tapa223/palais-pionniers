@@ -32,7 +32,22 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $note   = trim($_POST['note_traitement'] ?? '');
         $action = $_POST['action'] ?? ($cycle ? '' : 'marquer_traitee');
 
-        if (!$cycle) {
+        if ($action === 'supprimer') {
+            // Suppression d'une erreur ou d'un test : Direction uniquement
+            if (!is_superadmin()) {
+                $msg = ['err', 'Seule la Direction peut supprimer une demande.'];
+            } else {
+                $dSupp = $pdo->prepare("SELECT d.id, s.nom, u.nom_complet FROM demandes_services d JOIN services_annexes s ON s.id = d.service_id JOIN users u ON u.id = d.user_id WHERE d.id = ?");
+                $dSupp->execute([$id]);
+                if ($dSupp = $dSupp->fetch()) {
+                    $pdo->prepare("DELETE FROM demandes_services WHERE id = ?")->execute([$id]);
+                    log_activity('demande_service_supprimee', 'espaces', "Demande de service #$id supprimée (erreur ou test) — {$dSupp['nom']}, {$dSupp['nom_complet']}");
+                    $msg = ['ok', 'Demande supprimée définitivement.'];
+                } else {
+                    $msg = ['err', 'Demande introuvable.'];
+                }
+            }
+        } elseif (!$cycle) {
             // Base non migrée : ancien fonctionnement (en_attente → traitee)
             if ($id) {
                 $pdo->prepare("UPDATE demandes_services SET statut = 'traitee', traite_par = ?, date_traitement = NOW(), note_traitement = ? WHERE id = ? AND statut = 'en_attente'")
@@ -116,6 +131,7 @@ require __DIR__ . '/_admin_header.php';
       <h1 class="text-2xl font-black text-primary uppercase italic tracking-tight">Demandes de services</h1>
       <p class="text-sm text-slate-500 mt-0.5">Lavage automobile, support publicitaire et autres prestations demandées depuis les comptes clients</p>
     </div>
+    <a href="export.php?type=demandes_services" target="_blank" rel="noopener" class="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-black uppercase px-4 py-2.5 rounded-xl transition"><i class="fas fa-file-excel"></i> Exporter (Excel)</a>
   </div>
 
   <?php if ($msg): ?>
@@ -173,6 +189,14 @@ require __DIR__ . '/_admin_header.php';
         <input type="hidden" name="id" value="<?= (int)$d['id'] ?>">
         <input type="text" name="note_traitement" placeholder="Note (optionnel)" class="flex-1 min-w-[160px] rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-primary outline-none focus:border-primary">
         <button type="submit" class="bg-emerald-500 text-white text-[11px] font-black uppercase px-4 py-2 rounded-xl hover:bg-emerald-600 transition">Marquer traitée</button>
+      </form>
+      <?php endif; ?>
+      <?php if (is_superadmin()): ?>
+      <form method="POST" class="mt-3 text-right" onsubmit="return confirm('Supprimer définitivement cette demande de service ? (erreur ou test)')">
+        <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
+        <input type="hidden" name="action" value="supprimer">
+        <input type="hidden" name="id" value="<?= (int)$d['id'] ?>">
+        <button type="submit" class="text-[10px] font-black uppercase text-slate-400 hover:text-red-600 transition" title="Supprimer définitivement (erreur ou test)"><i class="fas fa-trash-alt mr-1"></i>Supprimer</button>
       </form>
       <?php endif; ?>
     </div>

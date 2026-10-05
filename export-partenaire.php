@@ -5,7 +5,7 @@
  * Périmètre : les réservations de l'organisation du partenaire CONNECTÉ
  * (reservations.partenaire_id = sa fiche partenaire), déterminé côté serveur
  * à partir de la session. Aucun identifiant n'est lu dans l'URL : seul le
- * type d'export (?type=reservations|paiements) est accepté.
+ * type d'export (?type=reservations|paiements|services) est accepté.
  *
  * Même format que les exports de l'administration (admin/export.php) :
  * UTF-8 avec BOM, séparateur « ; », montants entiers.
@@ -24,7 +24,7 @@ if (!$partenaire) {
 $pid = (int)$partenaire['id'];
 
 $type = (string)($_GET['type'] ?? 'reservations');
-if (!in_array($type, ['reservations', 'paiements'], true)) {
+if (!in_array($type, ['reservations', 'paiements', 'services'], true)) {
     http_response_code(400);
     exit('Type d\'export inconnu.');
 }
@@ -73,6 +73,25 @@ if ($type === 'reservations') {
             $fin2($s['net_du'] ?? 0), $fin2(max(0, $s['paye_net'] ?? 0)), $fin2($s['total_rembourse'] ?? 0),
             $r['statut'] === 'validee' ? $fin2($s['solde'] ?? 0) : '',
             $r['statut'] === 'validee' ? 'Oui' : 'Non',
+        ];
+    }
+} elseif ($type === 'services') {
+    // Demandes de services des comptes de l'organisation (même périmètre que l'onglet « Services »)
+    $st = $pdo->prepare("
+        SELECT ds.id, ds.created_at, ds.message, ds.statut, ds.note_traitement, s.nom AS service, s.montant, s.unite,
+               du.nom_complet AS compte
+        FROM demandes_services ds
+        JOIN services_annexes s ON s.id = ds.service_id
+        JOIN users du ON du.id = ds.user_id
+        WHERE du.partenaire_id = ? AND du.role = 'partenaire'
+        ORDER BY ds.created_at DESC
+    ");
+    $st->execute([$pid]);
+    $entetes = ['Demande', 'Date', 'Compte', 'Service', 'Tarif indicatif (FCFA)', 'Unité', 'Message', 'Statut', 'Réponse de l\'administration'];
+    foreach ($st->fetchAll() as $d) {
+        $lignes[] = [
+            (int)$d['id'], $dateH($d['created_at']), $texte($d['compte']), $texte($d['service']), $fin2($d['montant']), $d['unite'],
+            $texte($d['message']), libelle_statut_service((string)$d['statut'])[0], $texte($d['note_traitement'] ?? ''),
         ];
     }
 } else {

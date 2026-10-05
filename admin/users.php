@@ -48,6 +48,27 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
+        if ($action === 'supprimer_compte' && $id && $id !== $moi) {
+            // Compte client ou partenaire de test : suppression définitive (Direction uniquement)
+            $resumeSupp = resume_compte_client($pdo, $id);
+            if (!is_superadmin()) {
+                $msg = ['err', 'Seule la Direction peut supprimer un compte.'];
+            } elseif (!$resumeSupp) {
+                $msg = ['err', 'Seuls les comptes clients et partenaires peuvent être supprimés. Un compte d\'administration se désactive.'];
+            } elseif (strtolower(trim((string)($_POST['confirmation'] ?? ''))) !== strtolower($resumeSupp['email'])) {
+                $msg = ['err', 'Suppression non effectuée : pour confirmer, saisissez exactement l\'adresse e-mail du compte.'];
+                $_GET['supprimer'] = $id;
+            } else {
+                try {
+                    supprimer_compte_client($pdo, $id);
+                    $msg = ['ok', "Compte «{$resumeSupp['nom_complet']}» supprimé définitivement, avec ses réservations et ses demandes."];
+                } catch (Throwable $e) {
+                    error_log('Suppression compte #' . $id . ' : ' . $e->getMessage());
+                    $msg = ['err', 'La suppression n\'a pas pu être effectuée.'];
+                }
+            }
+        }
+
         if ($action === 'toggle_actif' && $id && $id !== $moi) {
             $uInfo = $pdo->prepare("SELECT nom_complet, actif, role FROM users WHERE id = ?");
             $uInfo->execute([$id]); $uInfo = $uInfo->fetch();
@@ -61,6 +82,30 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
+        if ($action === 'reset_password' && $id) {
+            // Réinitialisation par la Direction : l'ancien mot de passe n'est jamais lu ni affiché
+            // (seule son empreinte est remplacée). Son propre mot de passe se change depuis « Mon mot de passe ».
+            $cible = $pdo->prepare("SELECT nom_complet, role FROM users WHERE id = ?");
+            $cible->execute([$id]); $cible = $cible->fetch();
+            $nouveau = (string)($_POST['nouveau_mdp'] ?? '');
+            $confirm = (string)($_POST['nouveau_mdp_confirmation'] ?? '');
+            if (!$cible) {
+                $msg = ['err', 'Compte introuvable.'];
+            } elseif ($id === $moi) {
+                $msg = ['err', 'Pour votre propre compte, utilisez « Mon mot de passe ».'];
+            } elseif (strlen($nouveau) < 8) {
+                $msg = ['err', 'Le nouveau mot de passe doit contenir au moins 8 caractères.'];
+            } elseif ($nouveau !== $confirm) {
+                $msg = ['err', 'La confirmation ne correspond pas au nouveau mot de passe.'];
+            } else {
+                $pdo->prepare("UPDATE users SET password_hash = ? WHERE id = ?")
+                    ->execute([password_hash($nouveau, PASSWORD_DEFAULT), $id]);
+                $roleLabel = $roleMeta[$cible['role']][0] ?? $cible['role'];
+                log_activity('user_mdp_reinitialise', 'users', "Mot de passe réinitialisé pour «{$cible['nom_complet']}» ($roleLabel)");
+                $msg = ['ok', "Mot de passe de «{$cible['nom_complet']}» réinitialisé. Communiquez-le à la personne : elle pourra le personnaliser depuis « Mon mot de passe »."];
+            }
+        }
+
         if ($action === 'create_user') {
             $prenom  = trim($_POST['prenom']    ?? '');
             $nom_fam = trim($_POST['nom_fam']   ?? '');
@@ -71,8 +116,8 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if ($role === 'partenaire') {
                 $msg = ['err', 'Les comptes partenaires se créent depuis la page Partenaires, pour être rattachés à leur organisation.'];
-            } elseif (!$prenom || !$nom_fam || !filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($mdp) < 6) {
-                $msg = ['err', 'Tous les champs sont requis (mot de passe min. 6 caractères).'];
+            } elseif (!$prenom || !$nom_fam || !filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($mdp) < 8) {
+                $msg = ['err', 'Tous les champs sont requis (mot de passe min. 8 caractères).'];
             } else {
                 $exist = $pdo->prepare("SELECT id FROM users WHERE email = ?");
                 $exist->execute([$email]);
@@ -136,6 +181,8 @@ require __DIR__ . '/_admin_header.php';
     <h1 class="text-2xl font-black text-primary uppercase italic tracking-tight">Utilisateurs & Rôles</h1>
     <p class="text-sm text-slate-500 mt-0.5"><?= count($users) ?> compte(s) affiché(s)</p>
   </div>
+  <div class="flex items-center gap-2 flex-wrap">
+  <a href="export.php?type=utilisateurs" target="_blank" rel="noopener" class="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-black uppercase px-4 py-2.5 rounded-xl transition"><i class="fas fa-file-excel"></i> Exporter (Excel)</a>
   <?php if (!$readonly): ?>
   <button onclick="document.getElementById('createForm').classList.toggle('hidden')"
           class="flex items-center gap-2 bg-accent text-white text-xs font-black uppercase px-5 py-3 rounded-xl hover:bg-red-700 transition shadow-lg">
@@ -144,7 +191,28 @@ require __DIR__ . '/_admin_header.php';
   <?php else: ?>
   <span class="text-[10px] font-black text-slate-300 uppercase tracking-widest"><i class="fas fa-eye mr-1"></i> Lecture seule</span>
   <?php endif; ?>
+  </div>
 </div>
+
+<?php
+$compteSupp = (!$readonly && isset($_GET['supprimer']) && (!$msg || $msg[0] !== 'ok')) ? resume_compte_client($pdo, (int)$_GET['supprimer']) : null;
+if ($compteSupp): ?>
+<div id="confirmationSuppression" style="scroll-margin-top:5rem" class="mb-6 rounded-2xl border-2 border-red-200 bg-red-50 p-6">
+  <h2 class="font-black text-red-700 uppercase italic text-sm flex items-center gap-2"><i class="fas fa-trash-alt"></i> Supprimer le compte « <?= e($compteSupp['nom_complet']) ?> »</h2>
+  <p class="text-sm text-slate-700 mt-2">À utiliser pour un compte de test ou de formation. Le compte et tout ce qui lui appartient sont effacés définitivement : <strong><?= $compteSupp['reservations'] ?> réservation(s)</strong> avec leurs paiements (<?= number_format($compteSupp['encaisse'], 0, ',', ' ') ?> FCFA), réquisitions et documents, et <strong><?= $compteSupp['services'] ?> demande(s) de services</strong>. La suppression reste tracée dans le journal d'activité.</p>
+  <form method="POST" class="mt-4 flex flex-wrap items-end gap-3">
+    <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
+    <input type="hidden" name="action" value="supprimer_compte">
+    <input type="hidden" name="id" value="<?= (int)$compteSupp['id'] ?>">
+    <label class="block">
+      <span class="block text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">Pour confirmer, saisissez l'e-mail du compte : <?= e($compteSupp['email']) ?></span>
+      <input type="text" name="confirmation" required autocomplete="off" class="w-72 rounded-xl border-2 border-red-200 bg-white px-4 py-2.5 font-bold text-primary outline-none focus:border-accent text-sm">
+    </label>
+    <button type="submit" class="bg-red-600 text-white px-5 py-3 rounded-xl hover:bg-red-700 transition text-[10px] font-black uppercase tracking-widest"><i class="fas fa-trash-alt mr-1"></i>Supprimer définitivement</button>
+    <a href="users.php" class="px-4 py-3 rounded-xl text-[10px] font-black uppercase text-slate-500 hover:bg-white transition">Annuler</a>
+  </form>
+</div>
+<?php endif; ?>
 
 <?php if ($msg): ?>
 <div class="mb-5 rounded-2xl p-4 flex items-center gap-3 <?= $msg[0]==='ok' ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-red-50 border border-red-200 text-accent' ?>">
@@ -172,7 +240,7 @@ require __DIR__ . '/_admin_header.php';
       ['nom_fam','Nom *','text','COULIBALY'],
       ['email','Email *','email','email@exemple.ml'],
       ['telephone','Téléphone','tel','+223 XX XX XX XX'],
-      ['password','Mot de passe *','password','Min. 6 caractères'],
+      ['password','Mot de passe *','password','Min. 8 caractères'],
     ] as [$name,$label,$type,$ph]): ?>
     <div>
       <label class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2"><?= $label ?></label>
@@ -310,6 +378,12 @@ require __DIR__ . '/_admin_header.php';
               <div class="text-center text-slate-300"><i class="fas fa-eye text-xs"></i></div>
             <?php else: ?>
             <div class="flex items-center justify-center gap-2">
+              <button type="button" title="Réinitialiser le mot de passe"
+                      data-id="<?= (int)$u['id'] ?>" data-nom="<?= e($u['nom_complet']) ?>" data-role="<?= e($rl) ?>"
+                      onclick="ouvrirMdp(this)"
+                      class="btn-mdp w-8 h-8 flex items-center justify-center rounded-xl bg-amber-50 text-amber-600 hover:bg-amber-500 hover:text-white transition text-xs">
+                <i class="fas fa-key"></i>
+              </button>
               <form method="POST" class="inline">
                 <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
                 <input type="hidden" name="action" value="toggle_actif">
@@ -328,6 +402,12 @@ require __DIR__ . '/_admin_header.php';
                   <i class="fas fa-user-slash"></i>
                 </button>
               </form>
+              <?php if (in_array($u['role'], ['user', 'partenaire'], true)): ?>
+              <a href="users.php?supprimer=<?= (int)$u['id'] ?>#confirmationSuppression" title="Supprimer définitivement (compte de test)"
+                 class="w-8 h-8 flex items-center justify-center rounded-xl bg-red-50 text-red-400 hover:bg-red-500 hover:text-white transition text-xs">
+                <i class="fas fa-trash-alt"></i>
+              </a>
+              <?php endif; ?>
             </div>
             <?php endif; ?>
           </td>
@@ -338,5 +418,51 @@ require __DIR__ . '/_admin_header.php';
   </div>
   <?php endif; ?>
 </div>
+
+<?php if (!$readonly): ?>
+<!-- Réinitialisation du mot de passe d'un compte (Direction) -->
+<div id="modalMdp" class="hidden fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onclick="if(event.target===this)fermerMdp()">
+  <div class="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden" role="dialog" aria-modal="true" aria-labelledby="mdpTitre">
+    <div class="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50">
+      <h2 id="mdpTitre" class="font-black text-primary text-sm uppercase italic flex items-center gap-2"><i class="fas fa-key text-accent"></i> Réinitialiser le mot de passe</h2>
+      <button type="button" onclick="fermerMdp()" class="w-7 h-7 flex items-center justify-center rounded-full bg-white border border-slate-200 text-slate-400 hover:text-accent transition" aria-label="Fermer"><i class="fas fa-times text-xs"></i></button>
+    </div>
+    <form method="POST" class="p-6 space-y-4" onsubmit="return verifierMdp(this)">
+      <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
+      <input type="hidden" name="action" value="reset_password">
+      <input type="hidden" name="id" id="mdpId" value="">
+      <p class="text-sm text-slate-600">Compte : <span id="mdpNom" class="font-black text-primary"></span> <span id="mdpRole" class="text-[10px] font-black text-slate-400 uppercase"></span></p>
+      <p class="text-xs text-slate-500 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">L'ancien mot de passe n'est jamais affiché. Choisissez un nouveau mot de passe, communiquez-le à la personne ; elle pourra ensuite le personnaliser.</p>
+      <div>
+        <label class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Nouveau mot de passe (8 caractères min.)</label>
+        <input type="password" name="nouveau_mdp" minlength="8" required autocomplete="new-password" class="w-full rounded-xl border-2 border-slate-100 bg-slate-50 px-4 py-2.5 font-bold text-primary outline-none focus:border-primary text-sm">
+      </div>
+      <div>
+        <label class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Confirmation</label>
+        <input type="password" name="nouveau_mdp_confirmation" minlength="8" required autocomplete="new-password" class="w-full rounded-xl border-2 border-slate-100 bg-slate-50 px-4 py-2.5 font-bold text-primary outline-none focus:border-primary text-sm">
+      </div>
+      <div class="flex justify-end gap-2 pt-2 border-t border-slate-100">
+        <button type="button" onclick="fermerMdp()" class="text-xs font-black text-slate-400 hover:text-primary px-4 py-2.5 rounded-xl border border-slate-200 transition">Annuler</button>
+        <button type="submit" class="flex items-center gap-2 bg-primary text-white text-xs font-black uppercase px-5 py-2.5 rounded-xl hover:bg-slate-800 transition"><i class="fas fa-key"></i> Enregistrer le mot de passe</button>
+      </div>
+    </form>
+  </div>
+</div>
+<script>
+function ouvrirMdp(btn) {
+  document.getElementById('mdpId').value = btn.dataset.id;
+  document.getElementById('mdpNom').textContent = btn.dataset.nom;
+  document.getElementById('mdpRole').textContent = '· ' + btn.dataset.role;
+  const m = document.getElementById('modalMdp'); m.classList.remove('hidden');
+  m.querySelector('input[name=nouveau_mdp]').focus();
+}
+function fermerMdp() { const m = document.getElementById('modalMdp'); m.classList.add('hidden'); m.querySelector('form').reset(); }
+function verifierMdp(f) {
+  if (f.nouveau_mdp.value !== f.nouveau_mdp_confirmation.value) { alert('La confirmation ne correspond pas au nouveau mot de passe.'); return false; }
+  return confirm('Enregistrer ce nouveau mot de passe ?');
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape') fermerMdp(); });
+</script>
+<?php endif; ?>
 
 <?php require __DIR__ . '/_admin_footer.php'; ?>

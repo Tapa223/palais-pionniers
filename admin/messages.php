@@ -142,6 +142,8 @@ require __DIR__ . '/_admin_header.php';
     </h1>
     <p class="text-sm text-slate-500 mt-0.5"><?= count($messages) ?> message(s) affiché(s)</p>
   </div>
+  <div class="flex items-center gap-2 flex-wrap">
+  <a href="export.php?type=messages" target="_blank" rel="noopener" class="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-black uppercase px-4 py-2.5 rounded-xl transition"><i class="fas fa-file-excel"></i> Exporter (Excel)</a>
   <?php if ($totalNonLus && !$readonly): ?>
   <form method="POST">
     <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
@@ -151,6 +153,7 @@ require __DIR__ . '/_admin_header.php';
     </button>
   </form>
   <?php endif; ?>
+  </div>
 </div>
 
 <!-- Filtres -->
@@ -194,10 +197,10 @@ require __DIR__ . '/_admin_header.php';
   </form>
 </div>
 
-<div class="grid lg:grid-cols-5 gap-5">
+<div class="grid grid-cols-1 lg:grid-cols-5 gap-5">
 
   <!-- Liste messages -->
-  <div class="lg:col-span-2 space-y-2">
+  <div class="lg:col-span-2 space-y-2 min-w-0">
     <?php if (empty($messages)): ?>
       <div class="bg-white rounded-2xl border border-slate-100 p-12 text-center">
         <i class="fas fa-inbox text-4xl text-slate-200 mb-3"></i>

@@ -262,6 +262,27 @@ if (!$readonly && isset($_POST['action'])) {
         }
         $msg = ['ok', 'La demande est de nouveau en attente.'];
         finAnnuler:
+    } elseif ($action === 'supprimer') {
+        // Suppression définitive d'une erreur ou d'un test : Direction uniquement
+        if (!is_superadmin()) {
+            $msg = ['error', 'Seule la Direction peut supprimer une réservation.'];
+        } elseif (!dossier_reservation($pdo, $id)) {
+            $msg = ['error', 'Réservation introuvable : elle a peut-être déjà été supprimée.'];
+        } elseif (strtoupper(trim((string)($_POST['confirmation'] ?? ''))) !== ref_resa($id)) {
+            $msg = ['error', 'Suppression non effectuée : pour confirmer, saisissez exactement la référence ' . e(ref_resa($id)) . '.'];
+            $_GET['supprimer'] = $id;
+        } else {
+            try {
+                $dSupp = supprimer_dossier_reservation($pdo, $id);
+                $msg = ['ok', 'Dossier supprimé définitivement : ' . e(implode(', ', $dSupp['refs']))
+                    . ' (' . $dSupp['paiements'] . ' paiement(s), ' . number_format($dSupp['encaisse'], 0, ',', ' ') . ' FCFA). '
+                    . 'Il n\'apparaît plus dans les compteurs, les rapports ni les exports ; la suppression reste tracée dans le journal.'];
+            } catch (Throwable $e) {
+                error_log('Suppression réservation #' . $id . ' : ' . $e->getMessage());
+                $msg = ['error', 'La suppression n\'a pas pu être effectuée : rien n\'a été modifié.'];
+            }
+        }
+
     } elseif ($action === 'requisitionner') {
         if (!is_superadmin() && $role !== 'admin_comptable') {
             $msg = ['error', 'Seuls la Direction ou le Comptable peuvent déclencher une réquisition institutionnelle.'];
@@ -382,6 +403,41 @@ require __DIR__ . '/_admin_header.php';
             <i class="fas fa-file-excel"></i> Exporter en Excel
         </a>
     </div>
+
+    <?php
+    $dossierSupp = (is_superadmin() && isset($_GET['supprimer']) && (!$msg || $msg[0] !== 'ok'))
+        ? dossier_reservation($pdo, (int)$_GET['supprimer']) : null;
+    ?>
+    <?php if ($dossierSupp): $refSupp = ref_resa((int)$_GET['supprimer']); ?>
+        <div id="confirmationSuppression" style="scroll-margin-top:5rem" class="mb-6 rounded-2xl border-2 border-red-200 bg-red-50 p-6">
+            <h2 class="font-black text-red-700 uppercase italic text-sm flex items-center gap-2"><i class="fas fa-trash-alt"></i> Supprimer définitivement <?= e($refSupp) ?></h2>
+            <p class="text-sm text-slate-700 mt-2">À utiliser pour une erreur de saisie, un test ou une formation. La réservation et tout ce qui y est rattaché seront effacés, et n'apparaîtront plus dans les compteurs, les rapports ni les exports. La suppression reste tracée dans le journal d'activité.</p>
+            <dl class="grid sm:grid-cols-2 gap-3 text-sm mt-4">
+                <div><dt class="text-[10px] font-black uppercase tracking-widest text-slate-400">Client · espace · date</dt><dd class="font-bold text-slate-800"><?= e($dossierSupp['client']) ?> · <?= e($dossierSupp['espace']) ?> · <?= date('d/m/Y', strtotime($dossierSupp['date'])) ?></dd></div>
+                <div><dt class="text-[10px] font-black uppercase tracking-widest text-slate-400">Réservations supprimées</dt><dd class="font-bold text-slate-800"><?= e(implode(', ', $dossierSupp['refs'])) ?></dd></div>
+                <div><dt class="text-[10px] font-black uppercase tracking-widest text-slate-400">Paiements effacés</dt><dd class="font-bold text-slate-800"><?= $dossierSupp['paiements'] ?> · <?= number_format($dossierSupp['encaisse'], 0, ',', ' ') ?> FCFA</dd></div>
+                <div><dt class="text-[10px] font-black uppercase tracking-widest text-slate-400">Réquisition · remboursements</dt><dd class="font-bold text-slate-800"><?= $dossierSupp['requisitions'] ? e(implode(', ', array_map('ref_req', $dossierSupp['requisitions']))) : 'Aucune' ?><?= $dossierSupp['rembourse'] > 0 ? ' · ' . number_format($dossierSupp['rembourse'], 0, ',', ' ') . ' FCFA remboursés' : '' ?></dd></div>
+            </dl>
+            <?php if (count($dossierSupp['reservations']) > 1): ?>
+            <p class="text-xs font-bold text-red-700 mt-3"><i class="fas fa-link mr-1"></i>Ces réservations forment un même dossier de réquisition : elles sont supprimées ensemble.</p>
+            <?php endif; ?>
+            <?php if ($dossierSupp['encaisse'] > 0): ?>
+            <p class="text-xs font-bold text-red-700 mt-2"><i class="fas fa-exclamation-triangle mr-1"></i>Des paiements sont enregistrés : ne supprimez ce dossier que s'il s'agit bien d'une erreur ou d'un test.</p>
+            <?php endif; ?>
+            <form method="post" class="mt-4 flex flex-wrap items-end gap-3">
+                <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
+                <input type="hidden" name="id" value="<?= (int)$_GET['supprimer'] ?>">
+                <input type="hidden" name="action" value="supprimer">
+                <label class="block">
+                    <span class="block text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">Pour confirmer, saisissez <?= e($refSupp) ?></span>
+                    <input type="text" name="confirmation" required autocomplete="off" placeholder="<?= e($refSupp) ?>"
+                           class="rounded-xl border-2 border-red-200 bg-white px-4 py-2.5 font-black text-primary outline-none focus:border-accent text-sm uppercase">
+                </label>
+                <button type="submit" class="bg-red-600 text-white px-5 py-3 rounded-xl hover:bg-red-700 transition text-[10px] font-black uppercase tracking-widest"><i class="fas fa-trash-alt mr-1"></i>Supprimer définitivement</button>
+                <a href="reservations.php" class="px-4 py-3 rounded-xl text-[10px] font-black uppercase text-slate-500 hover:bg-white transition">Annuler</a>
+            </form>
+        </div>
+    <?php endif; ?>
 
     <?php if ($msg): ?>
         <div class="mb-6 p-4 rounded-xl border <?= $msg[0] === 'ok' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-red-50 text-red-800 border-red-200' ?>">
@@ -546,6 +602,11 @@ require __DIR__ . '/_admin_header.php';
                             <i class="fas fa-coins"></i> Acompte versé — solde au comptable
                         </p>
                         <?php endif; ?>
+                        <?php if (!empty($res['effectuee_le'])): ?>
+                        <p class="text-[9px] text-emerald-700 font-bold mt-1">
+                            <i class="fas fa-clipboard-check"></i> Effectuée le <?= date('d/m/Y', strtotime($res['effectuee_le'])) ?>
+                        </p>
+                        <?php endif; ?>
                     </td>
 
                     <td class="p-6 text-right">
@@ -632,6 +693,10 @@ require __DIR__ . '/_admin_header.php';
                         <div class="text-right mt-1.5">
                             <a href="observations.php?cible_type=reservation&cible_id=<?= $res['id'] ?>"
                                class="text-[10px] font-black text-slate-400 hover:text-accent transition"><i class="fas fa-eye mr-1"></i>Observer</a>
+                            <?php if (is_superadmin()): ?>
+                            <a href="reservations.php?supprimer=<?= (int)$res['id'] ?>#confirmationSuppression"
+                               class="ml-3 text-[10px] font-black text-slate-400 hover:text-red-600 transition" title="Supprimer cette réservation (erreur ou test)"><i class="fas fa-trash-alt mr-1"></i>Supprimer</a>
+                            <?php endif; ?>
                         </div>
                     </td>
                 </tr>

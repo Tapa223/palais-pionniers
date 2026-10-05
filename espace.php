@@ -197,6 +197,9 @@ require __DIR__ . '/includes/header.php';
                         </div>
                     </div>
                 </div>
+                <a href="faq.php#tutoriel-video" class="mt-5 inline-flex items-center gap-2 text-xs font-black uppercase tracking-tight text-primary hover:text-accent transition">
+                    <i class="fas fa-circle-play text-accent"></i> Voir le tutoriel et les questions fréquentes
+                </a>
             </div>
         </div>
 

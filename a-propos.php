@@ -7,7 +7,7 @@ $page = 'a-propos.php';
 
 // Images institutionnelles pour le carrousel du hero
 $heroPropos = array_values(array_filter(
-    ['assets/images/porte.jpeg', 'assets/images/adminis.jpeg', 'assets/images/groupewague.jpeg'],
+    ['assets/images/porte.jpeg', 'assets/images/adminis.jpeg', 'assets/images/groupewague.jpg'],
     fn($p) => file_exists(__DIR__ . '/' . $p)
 ));
 

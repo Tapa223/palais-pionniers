@@ -13,6 +13,35 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         $action = $_POST['action'] ?? '';
 
+        if ($action === 'supprimer') {
+            // Suppression d'une erreur ou d'un test : Direction uniquement
+            $id = (int)($_POST['id'] ?? 0);
+            if (!is_superadmin()) {
+                $msg = ['err', 'Seule la Direction peut supprimer une demande.'];
+            } else {
+                $dSupp = $pdo->prepare("SELECT nom, prenom FROM demandes_bail WHERE id = ?");
+                $dSupp->execute([$id]);
+                if ($dSupp = $dSupp->fetch()) {
+                    $pdo->beginTransaction();
+                    try {
+                        if (colonne_existe($pdo, 'demande_bail_espaces', 'demande_id')) {
+                            $pdo->prepare("DELETE FROM demande_bail_espaces WHERE demande_id = ?")->execute([$id]);
+                        }
+                        $pdo->prepare("DELETE FROM demandes_bail WHERE id = ?")->execute([$id]);
+                        $pdo->prepare("DELETE FROM notifications WHERE lien IN (?, ?)")->execute(["demandes-bail.php?id=$id", "admin/demandes-bail.php?id=$id"]);
+                        $pdo->commit();
+                        log_activity('demande_bail_supprimee', 'espaces', "Demande de bail #$id supprimée (erreur ou test) — " . trim(($dSupp['prenom'] ?? '') . ' ' . $dSupp['nom']));
+                        $msg = ['ok', 'Demande supprimée définitivement.'];
+                    } catch (Throwable $e) {
+                        $pdo->rollBack();
+                        $msg = ['err', 'La suppression n\'a pas pu être effectuée.'];
+                    }
+                } else {
+                    $msg = ['err', 'Demande introuvable.'];
+                }
+            }
+        }
+
         if ($action === 'traiter') {
             $id      = (int)($_POST['id'] ?? 0);
             $statut  = in_array($_POST['statut'] ?? '', ['acceptee','refusee'], true) ? $_POST['statut'] : null;
@@ -142,12 +171,15 @@ require __DIR__ . '/_admin_header.php';
       <h1 class="text-2xl font-black text-primary uppercase italic tracking-tight">Demandes de bail</h1>
       <p class="text-sm text-slate-500 mt-0.5"><?= $nbEnAttente ?> demande(s) en attente de traitement</p>
     </div>
+    <div class="flex items-center gap-2 flex-wrap">
+    <a href="export.php?type=demandes_bail" target="_blank" rel="noopener" class="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-black uppercase px-4 py-2.5 rounded-xl transition"><i class="fas fa-file-excel"></i> Exporter (Excel)</a>
     <?php if (!$readonly): ?>
     <button onclick="document.getElementById('formGuichet').classList.toggle('hidden')"
             class="flex items-center gap-2 bg-accent text-white text-xs font-black uppercase px-5 py-3 rounded-xl hover:bg-accent-dark transition shadow-lg">
       <i class="fas fa-store"></i> Saisir une demande au guichet
     </button>
     <?php endif; ?>
+    </div>
   </div>
 
   <?php if ($msg): ?>
@@ -260,6 +292,14 @@ require __DIR__ . '/_admin_header.php';
         <input type="text" name="note_traitement" placeholder="Note (optionnel)" class="flex-1 min-w-[160px] rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-primary outline-none focus:border-primary">
         <button type="submit" name="statut" value="acceptee" class="bg-emerald-500 text-white text-[11px] font-black uppercase px-4 py-2 rounded-xl hover:bg-emerald-600 transition">Accepter</button>
         <button type="submit" name="statut" value="refusee" class="bg-red-50 text-accent text-[11px] font-black uppercase px-4 py-2 rounded-xl hover:bg-red-500 hover:text-white transition">Refuser</button>
+      </form>
+      <?php endif; ?>
+      <?php if (is_superadmin()): ?>
+      <form method="POST" class="mt-3 text-right" onsubmit="return confirm('Supprimer définitivement cette demande de bail ? (erreur ou test)')">
+        <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
+        <input type="hidden" name="action" value="supprimer">
+        <input type="hidden" name="id" value="<?= (int)$d['id'] ?>">
+        <button type="submit" class="text-[10px] font-black uppercase text-slate-400 hover:text-red-600 transition" title="Supprimer définitivement (erreur ou test)"><i class="fas fa-trash-alt mr-1"></i>Supprimer</button>
       </form>
       <?php endif; ?>
     </div>

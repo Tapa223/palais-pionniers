@@ -353,11 +353,14 @@ require __DIR__ . '/_admin_header.php';
     <h1 class="text-2xl font-black text-primary uppercase italic tracking-tight">Partenaires</h1>
     <p class="text-sm text-slate-500 mt-0.5">Organismes et institutions qui réservent directement les espaces du Palais</p>
   </div>
+  <div class="flex items-center gap-2 flex-wrap">
+  <?php if ($installe): ?><a href="export.php?type=partenaires" target="_blank" rel="noopener" class="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-black uppercase px-4 py-2.5 rounded-xl transition"><i class="fas fa-file-excel"></i> Exporter (Excel)</a><?php endif; ?>
   <?php if ($installe && $peutGerer): ?>
   <a href="partenaires.php?nouveau=1" class="flex items-center gap-2 bg-accent text-white text-xs font-black uppercase px-5 py-3 rounded-xl hover:bg-accent-dark transition shadow-sm">
     <i class="fas fa-plus"></i> Nouveau partenaire
   </a>
   <?php endif; ?>
+  </div>
 </div>
 
 <?php if ($msg): ?>

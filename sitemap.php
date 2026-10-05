@@ -18,6 +18,7 @@ echo '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
   <url><loc><?= e($base) ?>/formations.php</loc><priority>0.8</priority></url>
   <url><loc><?= e($base) ?>/personnalites.php</loc><priority>0.7</priority></url>
   <url><loc><?= e($base) ?>/a-propos.php</loc><priority>0.7</priority></url>
+  <url><loc><?= e($base) ?>/faq.php</loc><priority>0.6</priority></url>
   <url><loc><?= e($base) ?>/contact.php</loc><priority>0.6</priority></url>
   <url><loc><?= e($base) ?>/sengager.php</loc><priority>0.8</priority></url>
   <url><loc><?= e($base) ?>/demande-bail.php</loc><priority>0.5</priority></url>
@@ -33,8 +34,8 @@ echo '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
   <?php endforeach; ?>
 
   <!-- Formations -->
-  <?php foreach ($pdo->query("SELECT slug FROM formations") as $row): ?>
-  <url><loc><?= e($base) ?>/formation.php?slug=<?= urlencode($row['slug']) ?></loc><priority>0.6</priority></url>
+  <?php foreach ($pdo->query("SELECT id FROM formations WHERE actif = 1") as $row): ?>
+  <url><loc><?= e($base) ?>/formation.php?id=<?= (int)$row['id'] ?></loc><priority>0.6</priority></url>
   <?php endforeach; ?>
 
   <!-- Personnalités -->

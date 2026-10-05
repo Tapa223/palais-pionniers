@@ -12,7 +12,20 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $msg = ['err', 'Requête invalide.'];
     } else {
         $id = (int)($_POST['id'] ?? 0);
-        if ($id) {
+        if ($id && ($_POST['action'] ?? '') === 'supprimer') {
+            // Suppression d'une erreur ou d'un test : Direction uniquement
+            if (!is_superadmin()) {
+                $msg = ['err', 'Seule la Direction peut supprimer une inscription.'];
+            } else {
+                $jSupp = $pdo->prepare("SELECT nom, prenom FROM jeunes_engages WHERE id = ?");
+                $jSupp->execute([$id]);
+                if ($jSupp = $jSupp->fetch()) {
+                    $pdo->prepare("DELETE FROM jeunes_engages WHERE id = ?")->execute([$id]);
+                    log_activity('jeune_engage_supprime', 'activites', "Inscription « S'engager » #$id supprimée (erreur ou test) — " . trim(($jSupp['prenom'] ?? '') . ' ' . $jSupp['nom']));
+                    $msg = ['ok', 'Inscription supprimée définitivement.'];
+                }
+            }
+        } elseif ($id) {
             $pdo->prepare("UPDATE jeunes_engages SET statut = 'contacte' WHERE id = ?")->execute([$id]);
             $msg = ['ok', 'Marqué comme contacté.'];
         }
@@ -43,8 +56,8 @@ require __DIR__ . '/_admin_header.php';
   </div>
 
   <?php if ($msg): ?>
-  <div class="mb-5 rounded-2xl p-4 flex items-center gap-3 bg-green-50 border border-green-200 text-green-700">
-    <i class="fas fa-check-circle text-green-500"></i>
+  <div class="mb-5 rounded-2xl p-4 flex items-center gap-3 <?= $msg[0] === 'ok' ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-red-50 border border-red-200 text-accent' ?>">
+    <i class="fas <?= $msg[0] === 'ok' ? 'fa-check-circle text-green-500' : 'fa-exclamation-circle' ?>"></i>
     <span class="font-bold text-sm"><?= e($msg[1]) ?></span>
   </div>
   <?php endif; ?>
@@ -72,6 +85,14 @@ require __DIR__ . '/_admin_header.php';
       </form>
       <?php elseif ($j['statut'] === 'contacte'): ?>
       <span class="text-[10px] font-black uppercase px-3 py-1.5 rounded-full bg-emerald-100 text-emerald-700 flex-shrink-0">Contacté</span>
+      <?php endif; ?>
+      <?php if (is_superadmin()): ?>
+      <form method="POST" class="flex-shrink-0" onsubmit="return confirm('Supprimer définitivement cette inscription ? (erreur ou test)')">
+        <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
+        <input type="hidden" name="action" value="supprimer">
+        <input type="hidden" name="id" value="<?= (int)$j['id'] ?>">
+        <button type="submit" class="text-[10px] font-black uppercase text-slate-400 hover:text-red-600 transition" title="Supprimer définitivement (erreur ou test)"><i class="fas fa-trash-alt mr-1"></i>Supprimer</button>
+      </form>
       <?php endif; ?>
     </div>
     <?php endforeach; ?>

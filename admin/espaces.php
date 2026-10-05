@@ -336,6 +336,8 @@ require __DIR__ . '/_admin_header.php';
     <h1 class="text-2xl font-black text-primary uppercase italic tracking-tight">Gestion des Espaces</h1>
     <p class="text-sm text-slate-500 mt-0.5">Infrastructures, galeries photos et tarifs</p>
   </div>
+  <div class="flex items-center gap-2 flex-wrap">
+  <a href="export.php?type=espaces" target="_blank" rel="noopener" class="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-black uppercase px-4 py-2.5 rounded-xl transition"><i class="fas fa-file-excel"></i> Exporter (Excel)</a>
   <?php if (!$readonly): ?>
   <a href="?add=1"
      class="flex items-center gap-2 bg-accent text-white text-xs font-black uppercase px-5 py-3 rounded-xl hover:bg-accent-dark transition shadow-lg shadow-accent/20">
@@ -344,6 +346,7 @@ require __DIR__ . '/_admin_header.php';
   <?php else: ?>
   <span class="text-[10px] font-black text-slate-300 uppercase tracking-widest"><i class="fas fa-eye mr-1"></i> Lecture seule</span>
   <?php endif; ?>
+  </div>
 </div>
 
 <?php if ($msg): ?>

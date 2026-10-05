@@ -22,6 +22,7 @@
         <li><a href="a-propos.php" class="hover:text-white">À propos</a></li>
         <li><a href="personnalites.php" class="hover:text-white">Icônes</a></li>
         <li><a href="sengager.php" class="hover:text-white">S'engager</a></li>
+        <li><a href="faq.php" class="hover:text-white">FAQ</a></li>
         <li><a href="contact.php" class="hover:text-white">Contact</a></li>
       </ul>
     </div>

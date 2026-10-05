@@ -64,6 +64,20 @@ if (!function_exists('require_role')) {
             exit;
         }
 
+        // Compte d'administration : rôle et statut relus en base à chaque page,
+        // pour qu'un blocage ou un changement de rôle décidé par la Direction
+        // s'applique immédiatement, sans attendre une nouvelle connexion.
+        $etat = db()->prepare("SELECT role, actif FROM users WHERE id = ?");
+        $etat->execute([(int)$_SESSION['user_id']]);
+        $etat = $etat->fetch();
+        if (!$etat || !(int)$etat['actif']) {
+            $_SESSION = [];
+            session_destroy();
+            header('Location: ../login.php');
+            exit;
+        }
+        $_SESSION['role'] = $etat['role'];
+
         $role = $_SESSION['role'] ?? 'user';
 
         $allowed = is_array($roles)
@@ -633,6 +647,19 @@ if (!function_exists('admin_nav')) {
                 ]
             ],
 
+            'suivi.php' => [
+                'fas fa-clipboard-check',
+                'Suivi',
+                [
+                    'superadmin',
+                    'ministre',
+                    'admin_espaces',
+                    'admin_activites',
+                    'admin_messages',
+                    'admin_comptable'
+                ]
+            ],
+
             'paiements.php' => [
                 'fas fa-cash-register',
                 'Paiements',
@@ -757,6 +784,17 @@ if (!function_exists('admin_nav')) {
                     'superadmin',
                     'ministre',
                     'admin_activites'
+                ]
+            ],
+
+            'faq.php' => [
+                'fas fa-circle-question',
+                'FAQ',
+                [
+                    'superadmin',
+                    'ministre',
+                    'admin_activites',
+                    'admin_espaces'
                 ]
             ],
 
@@ -922,26 +960,34 @@ if (!function_exists('admin_nav_badges')) {
                     AND choix_client IS NOT NULL
                 ")->fetchColumn();
 
-            $stmtBaux =
-                $pdo->prepare("
-                    SELECT COUNT(*)
-                    FROM espaces e
-                    WHERE e.gerant_externe IS NOT NULL
-                      AND e.gerant_externe != ''
-                      AND NOT EXISTS (
-                          SELECT 1
-                          FROM bail_paiements bp
-                          WHERE bp.espace_id = e.id
-                            AND bp.mois = ?
-                      )
-                ");
+            // Baux sans loyer enregistré pour la période en cours
+            // (même règle que la page Baux : début de période selon le type de bail)
+            $espacesBail = $pdo->query("
+                SELECT id, type_bail
+                FROM espaces
+                WHERE gerant_externe IS NOT NULL
+                  AND gerant_externe != ''
+            ")->fetchAll();
 
-            $stmtBaux->execute([
-                date('Y-m-01')
-            ]);
+            $stmtBaux = $pdo->prepare("
+                SELECT COUNT(*)
+                FROM bail_paiements
+                WHERE espace_id = ?
+                  AND periode_debut = ?
+            ");
 
-            $badges['baux.php'] =
-                (int) $stmtBaux->fetchColumn();
+            $nbBauxAttente = 0;
+            foreach ($espacesBail as $espBail) {
+                $stmtBaux->execute([
+                    (int) $espBail['id'],
+                    periode_actuelle_debut((string) ($espBail['type_bail'] ?: 'mensuel')),
+                ]);
+                if ((int) $stmtBaux->fetchColumn() === 0) {
+                    $nbBauxAttente++;
+                }
+            }
+
+            $badges['baux.php'] = $nbBauxAttente;
 
             $badges['demandes-bail.php'] =
                 (int) $pdo->query("
@@ -949,6 +995,11 @@ if (!function_exists('admin_nav_badges')) {
                     FROM demandes_bail
                     WHERE statut = 'en_attente'
                 ")->fetchColumn();
+
+            // Suivi : réservations payées terminées, pas encore cochées « Effectuée »
+            if (suivi_disponible($pdo)) {
+                $badges['suivi.php'] = compter_suivi($pdo, 'a_confirmer');
+            }
 
         } catch (Exception $e) {
 
@@ -2381,6 +2432,14 @@ if (!function_exists('partenaires_disponibles')) {
     }
 }
 
+if (!function_exists('faq_disponible')) {
+    /** Module FAQ installé (database/migration_faq.sql exécuté). */
+    function faq_disponible(PDO $pdo): bool
+    {
+        return colonne_existe($pdo, 'faq', 'question');
+    }
+}
+
 if (!function_exists('role_partenaire_disponible')) {
     /** Le rôle « partenaire » existe dans users.role (migration exécutée). */
     function role_partenaire_disponible(PDO $pdo): bool
@@ -3200,5 +3259,308 @@ if (!function_exists('reporter_reduction_requisition')) {
         );
 
         return $montant;
+    }
+}
+
+if (!function_exists('dossier_reservation')) {
+    /**
+     * Périmètre d'un dossier de réservation, pour la suppression d'une erreur ou d'un test.
+     * Une réservation liée à une réquisition (réservation initiale ou nouvelle réservation)
+     * entraîne tout le dossier : les paiements y ont pu être transférés de l'une à l'autre.
+     *
+     * Renvoie : reservations (ids), requisitions (ids), paiements (nombre), encaisse (montant),
+     *           rembourse (montant), refs (libellés RESA-…), client, espace, date.
+     */
+    function dossier_reservation(PDO $pdo, int $id): ?array
+    {
+        $st = $pdo->prepare("SELECT r.id, r.requisition_id, r.date_resa, e.nom AS espace, u.nom_complet AS client
+                             FROM reservations r JOIN espaces e ON e.id = r.espace_id JOIN users u ON u.id = r.user_id
+                             WHERE r.id = ?");
+        $st->execute([$id]);
+        $base = $st->fetch();
+        if (!$base) {
+            return null;
+        }
+        $resas = [$id];
+        $reqs  = [];
+        if (colonne_existe($pdo, 'requisitions_ministerielles', 'id')) {
+            // Élargit jusqu'à stabilité : réquisitions de ces réservations et réservations issues de ces réquisitions
+            do {
+                $avant = count($resas) + count($reqs);
+                $in = implode(',', array_map('intval', $resas));
+                foreach ($pdo->query("SELECT id FROM requisitions_ministerielles WHERE reservation_id IN ($in)")->fetchAll(PDO::FETCH_COLUMN) as $q) {
+                    $reqs[] = (int)$q;
+                }
+                if (colonne_existe($pdo, 'reservations', 'requisition_id')) {
+                    foreach ($pdo->query("SELECT requisition_id FROM reservations WHERE id IN ($in) AND requisition_id IS NOT NULL")->fetchAll(PDO::FETCH_COLUMN) as $q) {
+                        $reqs[] = (int)$q;
+                    }
+                    $reqs = array_values(array_unique($reqs));
+                    if ($reqs) {
+                        $inq = implode(',', $reqs);
+                        foreach ($pdo->query("SELECT id FROM reservations WHERE requisition_id IN ($inq)
+                                              UNION SELECT reservation_id FROM requisitions_ministerielles WHERE id IN ($inq)")->fetchAll(PDO::FETCH_COLUMN) as $r) {
+                            $resas[] = (int)$r;
+                        }
+                    }
+                }
+                $resas = array_values(array_unique($resas));
+                $reqs  = array_values(array_unique($reqs));
+            } while (count($resas) + count($reqs) > $avant);
+        }
+        sort($resas);
+        $in = implode(',', $resas);
+        $pay = $pdo->query("SELECT COUNT(*) AS n, COALESCE(SUM(montant), 0) AS total FROM paiements WHERE reservation_id IN ($in)")->fetch();
+        $rembourse = 0.0;
+        if (colonne_existe($pdo, 'remboursements', 'id')) {
+            $cond = "reservation_id IN ($in)" . ($reqs ? ' OR requisition_id IN (' . implode(',', $reqs) . ')' : '');
+            $col  = colonne_existe($pdo, 'remboursements', 'montant_rembourse') ? 'montant_rembourse' : 'montant';
+            try {
+                $rembourse = (float)$pdo->query("SELECT COALESCE(SUM($col), 0) FROM remboursements WHERE $cond")->fetchColumn();
+            } catch (PDOException $e) {
+                $rembourse = 0.0;
+            }
+        }
+        return [
+            'reservations' => $resas,
+            'requisitions' => $reqs,
+            'paiements'    => (int)$pay['n'],
+            'encaisse'     => (float)$pay['total'],
+            'rembourse'    => $rembourse,
+            'refs'         => array_map('ref_resa', $resas),
+            'client'       => (string)$base['client'],
+            'espace'       => (string)$base['espace'],
+            'date'         => (string)$base['date_resa'],
+        ];
+    }
+}
+
+if (!function_exists('supprimer_dossier_reservation')) {
+    /**
+     * Supprime définitivement un dossier de réservation (erreur de saisie, test, formation)
+     * et tout ce qui s'y rattache : paiements, réductions, réquisitions, opérations,
+     * remboursements, observations et notifications pointant vers le dossier.
+     * Réservé à la Direction (contrôle fait par l'appelant). Transaction : tout ou rien.
+     * Renvoie le résumé du dossier supprimé (voir dossier_reservation()).
+     */
+    function supprimer_dossier_reservation(PDO $pdo, int $id): array
+    {
+        $d = dossier_reservation($pdo, $id);
+        if (!$d) {
+            throw new RuntimeException('Réservation introuvable.');
+        }
+        $in   = implode(',', $d['reservations']);
+        $inq  = $d['requisitions'] ? implode(',', $d['requisitions']) : '0';
+        $paiementIds = $pdo->query("SELECT id FROM paiements WHERE reservation_id IN ($in)")->fetchAll(PDO::FETCH_COLUMN);
+        $inp  = $paiementIds ? implode(',', array_map('intval', $paiementIds)) : '0';
+        $existe = fn(string $t, string $c = 'id') => colonne_existe($pdo, $t, $c);
+
+        $pdo->beginTransaction();
+        try {
+            $rembIds = [];
+            if ($existe('remboursements')) {
+                $rembIds = $pdo->query("SELECT id FROM remboursements WHERE reservation_id IN ($in) OR requisition_id IN ($inq)")->fetchAll(PDO::FETCH_COLUMN);
+                $pdo->exec("DELETE FROM remboursements WHERE reservation_id IN ($in) OR requisition_id IN ($inq)");
+            }
+            if ($existe('operations_requisition')) {
+                $pdo->exec("DELETE FROM operations_requisition WHERE reservation_id IN ($in) OR requisition_id IN ($inq)");
+            }
+            if ($existe('reductions_accordees')) {
+                $redIds = $pdo->query("SELECT id FROM reductions_accordees WHERE reservation_id IN ($in)")->fetchAll(PDO::FETCH_COLUMN);
+                if ($redIds && $existe('reductions_accordees', 'reportee_de')) {
+                    $inr = implode(',', array_map('intval', $redIds));
+                    $pdo->exec("UPDATE reductions_accordees SET reportee_de = NULL WHERE reportee_de IN ($inr) OR id IN ($inr)");
+                }
+                $pdo->exec("DELETE FROM reductions_accordees WHERE reservation_id IN ($in)");
+            }
+            $pdo->exec("DELETE FROM paiements WHERE reservation_id IN ($in)");
+            if ($existe('reservations', 'requisition_id')) {
+                $pdo->exec("UPDATE reservations SET requisition_id = NULL WHERE id IN ($in)");
+            }
+            if ($existe('requisitions_ministerielles')) {
+                $pdo->exec("DELETE FROM requisitions_ministerielles WHERE id IN ($inq) OR reservation_id IN ($in)");
+            }
+            // Observations du dossier (et leurs réponses)
+            if ($existe('observations')) {
+                $cibles = ["(cible_type = 'reservation' AND cible_id IN ($in))", "(cible_type = 'paiement' AND cible_id IN ($inp))",
+                           "(cible_type = 'requisition' AND cible_id IN ($inq))"];
+                if ($rembIds) {
+                    $cibles[] = "(cible_type = 'remboursement' AND cible_id IN (" . implode(',', array_map('intval', $rembIds)) . "))";
+                }
+                $obsIds = $pdo->query("SELECT id FROM observations WHERE " . implode(' OR ', $cibles))->fetchAll(PDO::FETCH_COLUMN);
+                if ($obsIds) {
+                    $ino = implode(',', array_map('intval', $obsIds));
+                    $pdo->exec("DELETE FROM observations WHERE parent_id IN ($ino)");
+                    $pdo->exec("DELETE FROM observations WHERE id IN ($ino)");
+                }
+            }
+            // Notifications qui pointent vers le dossier
+            $motifs = [];
+            foreach ($d['reservations'] as $r) {
+                $motifs[] = "^(admin/)?(reservations|generer_bon)\\.php\\?id=$r($|&)";
+                $motifs[] = "^(admin/)?paiements\\.php\\?resa=$r($|&)";
+            }
+            foreach ($paiementIds as $p) { $motifs[] = '^(admin/)?paiements\\.php\\?id=' . (int)$p . '($|&)'; }
+            foreach ($d['requisitions'] as $q) { $motifs[] = "^(admin/)?requisition-detail\\.php\\?id=$q($|&)"; }
+            // Notifications d'observation (« … a répondu à votre observation sur … »)
+            $obsCibles = ['reservation' => $d['reservations'], 'paiement' => array_map('intval', $paiementIds),
+                          'requisition' => $d['requisitions'], 'remboursement' => array_map('intval', $rembIds)];
+            foreach ($obsCibles as $type => $ids) {
+                foreach ($ids as $c) { $motifs[] = "^(admin/)?observations\\.php\\?cible_type=$type&cible_id=$c($|&)"; }
+            }
+            $stN = $pdo->prepare("DELETE FROM notifications WHERE lien REGEXP ?");
+            foreach (array_chunk($motifs, 40) as $lot) {
+                $stN->execute([implode('|', $lot)]);
+            }
+            $pdo->exec("DELETE FROM reservations WHERE id IN ($in)");
+            $pdo->commit();
+        } catch (Throwable $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
+
+        log_activity('reservation_supprimee', 'reservations',
+            'Dossier supprimé (erreur ou test) : ' . implode(', ', $d['refs'])
+            . ($d['requisitions'] ? ' · ' . implode(', ', array_map('ref_req', $d['requisitions'])) : '')
+            . ' — ' . $d['client'] . ', ' . $d['espace'] . ' du ' . date('d/m/Y', strtotime($d['date']))
+            . ' — ' . $d['paiements'] . ' paiement(s), ' . number_format($d['encaisse'], 0, ',', ' ') . ' FCFA encaissés'
+            . ($d['rembourse'] > 0 ? ', ' . number_format($d['rembourse'], 0, ',', ' ') . ' FCFA remboursés' : ''));
+        return $d;
+    }
+}
+
+if (!function_exists('resume_compte_client')) {
+    /** Ce qui serait supprimé avec un compte client ou partenaire (null si autre rôle). */
+    function resume_compte_client(PDO $pdo, int $uid): ?array
+    {
+        $st = $pdo->prepare("SELECT id, nom_complet, email, role FROM users WHERE id = ?");
+        $st->execute([$uid]);
+        $u = $st->fetch();
+        if (!$u || !in_array($u['role'], ['user', 'partenaire'], true)) {
+            return null;
+        }
+        $r = $pdo->prepare("SELECT COUNT(*) AS n, COALESCE(SUM((SELECT COALESCE(SUM(p.montant), 0) FROM paiements p WHERE p.reservation_id = r.id)), 0) AS encaisse
+                            FROM reservations r WHERE r.user_id = ?");
+        $r->execute([$uid]);
+        $r = $r->fetch();
+        $nbSrv = 0;
+        if (colonne_existe($pdo, 'demandes_services', 'user_id')) {
+            $s = $pdo->prepare("SELECT COUNT(*) FROM demandes_services WHERE user_id = ?");
+            $s->execute([$uid]);
+            $nbSrv = (int)$s->fetchColumn();
+        }
+        return $u + ['reservations' => (int)$r['n'], 'encaisse' => (float)$r['encaisse'], 'services' => $nbSrv];
+    }
+}
+
+if (!function_exists('supprimer_compte_client')) {
+    /**
+     * Supprime un compte client ou partenaire de test et tout ce qui lui appartient :
+     * ses dossiers de réservation (voir supprimer_dossier_reservation()), ses demandes
+     * de services, ses notifications ; un bail relié à ce compte en est détaché.
+     * Les comptes d'administration ne sont jamais supprimés. Réservé à la Direction.
+     */
+    function supprimer_compte_client(PDO $pdo, int $uid): array
+    {
+        $u = resume_compte_client($pdo, $uid);
+        if (!$u) {
+            throw new RuntimeException('Seuls les comptes clients et partenaires peuvent être supprimés.');
+        }
+        $st = $pdo->prepare("SELECT id FROM reservations WHERE user_id = ? ORDER BY id LIMIT 1");
+        while (true) {
+            $st->execute([$uid]);
+            $rid = $st->fetchColumn();
+            if (!$rid) {
+                break;
+            }
+            supprimer_dossier_reservation($pdo, (int)$rid);
+        }
+        $pdo->beginTransaction();
+        try {
+            if (colonne_existe($pdo, 'demandes_services', 'user_id')) {
+                $pdo->prepare("DELETE FROM demandes_services WHERE user_id = ?")->execute([$uid]);
+            }
+            $pdo->prepare("DELETE FROM notifications WHERE destinataire_id = ?")->execute([$uid]);
+            if (colonne_existe($pdo, 'espaces', 'gerant_user_id')) {
+                $pdo->prepare("UPDATE espaces SET gerant_user_id = NULL WHERE gerant_user_id = ?")->execute([$uid]);
+            }
+            $pdo->prepare("DELETE FROM users WHERE id = ? AND role IN ('user', 'partenaire')")->execute([$uid]);
+            $pdo->commit();
+        } catch (Throwable $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
+        log_activity('user_supprime', 'users', "Compte de test «{$u['nom_complet']}» ({$u['email']}) supprimé avec "
+            . $u['reservations'] . ' réservation(s) et ' . $u['services'] . ' demande(s) de services');
+        return $u;
+    }
+}
+
+if (!function_exists('suivi_disponible')) {
+    /** Case « Effectuée » installée (database/migration_suivi_effectuee.sql exécuté). */
+    function suivi_disponible(PDO $pdo): bool
+    {
+        return colonne_existe($pdo, 'reservations', 'effectuee_le');
+    }
+}
+
+if (!function_exists('peut_cocher_effectuee')) {
+    /** Rôles autorisés à cocher « Effectuée » (le Ministre consulte seulement). */
+    function peut_cocher_effectuee(): bool
+    {
+        return in_array($_SESSION['role'] ?? '', ['superadmin', 'admin_espaces', 'admin_activites', 'admin_comptable'], true);
+    }
+}
+
+if (!function_exists('reservations_suivi')) {
+    /**
+     * Réservations validées ayant reçu au moins un paiement (soldées ou avec acompte).
+     *   'a_confirmer' : terminées, pas encore cochées « Effectuée » ;
+     *   'a_venir'     : en cours ou qui commencent dans les $jours prochains jours, non cochées ;
+     *   'effectuees'  : déjà cochées (les plus récentes d'abord).
+     * Début / fin : date + horaire pour une salle ; arrivée 14:00 / départ 12:00 pour un séjour.
+     */
+    function reservations_suivi(PDO $pdo, string $vue, int $limite = 200, int $jours = 7): array
+    {
+        if (!suivi_disponible($pdo)) {
+            return [];
+        }
+        $debut = "CASE WHEN e.mode_reservation = 'sejour' THEN TIMESTAMP(r.date_resa, '14:00:00')
+                       ELSE TIMESTAMP(r.date_resa, COALESCE(r.heure_debut, '00:00:00')) END";
+        $fin   = "CASE WHEN e.mode_reservation = 'sejour' THEN TIMESTAMP(COALESCE(r.date_depart, r.date_resa), '12:00:00')
+                       ELSE TIMESTAMP(r.date_resa, COALESCE(r.heure_fin, '23:59:59')) END";
+        $conditions = [
+            'a_confirmer' => "r.effectuee_le IS NULL AND $fin <= NOW()",
+            'a_venir'     => "r.effectuee_le IS NULL AND $fin > NOW() AND r.date_resa <= CURDATE() + INTERVAL " . max(0, $jours) . " DAY",
+            'effectuees'  => "r.effectuee_le IS NOT NULL",
+        ];
+        if (!isset($conditions[$vue])) {
+            return [];
+        }
+        $ordre = $vue === 'effectuees' ? 'r.effectuee_le DESC' : ($vue === 'a_confirmer' ? "$fin ASC" : "$debut ASC");
+        $avecPartenaire = partenaires_disponibles($pdo);
+        $sql = "SELECT r.id, r.date_resa, r.date_depart, r.heure_debut, r.heure_fin, r.quantite, r.motif, r.statut_paiement,
+                       r.effectuee_le, ($debut) AS debut_dt, ($fin) AS fin_dt,
+                       e.nom AS espace_nom, e.mode_reservation, u.nom_complet, u.telephone,
+                       ue.nom_complet AS effectuee_par_nom"
+             . ($avecPartenaire ? ", p.nom AS partenaire_nom" : ", NULL AS partenaire_nom") . "
+                FROM reservations r
+                JOIN espaces e ON e.id = r.espace_id
+                JOIN users u ON u.id = r.user_id
+                LEFT JOIN users ue ON ue.id = r.effectuee_par"
+             . ($avecPartenaire ? " LEFT JOIN partenaires p ON p.id = r.partenaire_id" : "") . "
+                WHERE r.statut = 'validee' AND r.statut_paiement IN ('paye', 'partiellement_paye')
+                  AND {$conditions[$vue]}
+                ORDER BY $ordre
+                LIMIT " . max(1, $limite);
+        return $pdo->query($sql)->fetchAll();
+    }
+}
+
+if (!function_exists('compter_suivi')) {
+    /** Nombre de réservations par vue de suivi (pastille du menu, tableau de bord). */
+    function compter_suivi(PDO $pdo, string $vue): int
+    {
+        return count(reservations_suivi($pdo, $vue, 1000));
     }
 }

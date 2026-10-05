@@ -23,7 +23,7 @@ if ($photosFormations) {
     ];
     $heroSlides = array_values(array_filter($imagesCibleesFormations, fn($p) => file_exists(__DIR__ . '/' . $p)));
     if (!$heroSlides) {
-        $fallback = ['assets/images/porte.jpeg', 'assets/images/adminis.jpeg', 'assets/images/groupewague.jpeg'];
+        $fallback = ['assets/images/porte.jpeg', 'assets/images/adminis.jpeg', 'assets/images/groupewague.jpg'];
         $heroSlides = array_values(array_filter($fallback, fn($p) => file_exists(__DIR__ . '/' . $p)));
     }
 }

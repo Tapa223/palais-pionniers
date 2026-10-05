@@ -1445,14 +1445,20 @@ if ($partenaireMoi) {
         <h1 class="text-2xl font-black text-primary uppercase italic tracking-tight"><?= e($libellesOngletsPartenaire[$tab] ?? 'Tableau de bord') ?></h1>
         <p class="text-sm text-slate-500 mt-0.5"><?= e($partenaireMoi['nom']) ?> — espace de gestion réservé à votre organisation</p>
       </div>
-      <?php if (in_array($tab, ['tableau-de-bord', 'reservations', 'bons'], true)): ?>
+      <?php if (in_array($tab, ['tableau-de-bord', 'reservations', 'bons', 'services'], true)): ?>
       <div class="flex flex-wrap items-center gap-2">
+        <?php if ($tab === 'services'): ?>
+        <a href="export-partenaire.php?type=services" class="flex items-center gap-2 bg-white border border-slate-200 text-primary text-xs font-black uppercase px-4 py-3 rounded-xl hover:border-primary transition" title="Demandes de services de votre organisation (CSV)">
+          <i class="fas fa-file-csv"></i> Services
+        </a>
+        <?php else: ?>
         <a href="export-partenaire.php?type=reservations" class="flex items-center gap-2 bg-white border border-slate-200 text-primary text-xs font-black uppercase px-4 py-3 rounded-xl hover:border-primary transition" title="Réservations et situation financière de votre organisation (CSV)">
           <i class="fas fa-file-csv"></i> Réservations
         </a>
         <a href="export-partenaire.php?type=paiements" class="flex items-center gap-2 bg-white border border-slate-200 text-primary text-xs font-black uppercase px-4 py-3 rounded-xl hover:border-primary transition" title="Paiements enregistrés pour votre organisation (CSV)">
           <i class="fas fa-file-csv"></i> Paiements
         </a>
+        <?php endif; ?>
         <a href="reserver.php" class="flex items-center gap-2 bg-accent text-white text-xs font-black uppercase px-5 py-3 rounded-xl hover:bg-accent-dark transition shadow-sm">
           <i class="fas fa-plus"></i> Nouvelle réservation
         </a>

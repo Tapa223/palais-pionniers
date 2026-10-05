@@ -93,7 +93,7 @@ $currentUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https:/
 
     <nav class="hidden lg:flex items-center gap-1 text-sm">
       <?php
-      $links = ['index.php'=>'Accueil', 'espaces.php'=>'Espaces', 'activites.php'=>'Activités', 'formations.php'=>'Formations', 'personnalites.php'=>'Icônes', 'a-propos.php'=>'À propos', 'contact.php'=>'Contact'];
+      $links = ['index.php'=>'Accueil', 'espaces.php'=>'Espaces', 'activites.php'=>'Activités', 'formations.php'=>'Formations', 'personnalites.php'=>'Icônes', 'a-propos.php'=>'À propos', 'faq.php'=>'FAQ', 'contact.php'=>'Contact'];
       foreach ($links as $href => $label):
         $active = ($page === $href);
       ?>

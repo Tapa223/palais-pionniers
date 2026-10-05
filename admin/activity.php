@@ -42,6 +42,8 @@ $actionLabels = [
     'user_cree'                => ['Compte créé',              'fa-user'],
     'user_role_change'         => ['Rôle modifié',             'fa-key'],
     'user_bloque'              => ['Compte bloqué',            'fa-ban'],
+    'user_mdp_reinitialise'    => ['Mot de passe réinitialisé', 'fa-key'],
+    'mdp_modifie'              => ['Mot de passe modifié',      'fa-key'],
     'user_debloque'            => ['Compte débloqué',          'fa-check-circle'],
     'user_supprime'            => ['Compte supprimé',          'fa-trash'],
     // Messages
@@ -51,8 +53,18 @@ $actionLabels = [
     'paiement_enregistre'      => ['Paiement enregistré',      'fa-money-bill'],
     // Guichet
     'resa_guichet'             => ['Réservation guichet',       'fa-store'],
+    'reservation_supprimee'    => ['Réservation supprimée (erreur ou test)', 'fa-trash'],
+    'resa_effectuee'           => ['Réservation effectuée',     'fa-clipboard-check'],
+    'resa_effectuee_annulee'   => ['Confirmation « Effectuée » retirée', 'fa-rotate-left'],
+    'demande_service_supprimee'=> ['Demande de service supprimée', 'fa-trash'],
+    'demande_bail_supprimee'   => ['Demande de bail supprimée', 'fa-trash'],
+    'jeune_engage_supprime'    => ['Inscription « S\'engager » supprimée', 'fa-trash'],
     // Observations
     'observation_ajoutee'      => ['Observation ajoutée',      'fa-eye'],
+    // FAQ
+    'faq_creee'                => ['Question FAQ ajoutée',     'fa-circle-question'],
+    'faq_modifiee'             => ['Question FAQ modifiée',    'fa-circle-question'],
+    'faq_supprimee'            => ['Question FAQ supprimée',   'fa-trash'],
 ];
 
 $roleMini = [
@@ -60,6 +72,8 @@ $roleMini = [
     'admin_espaces'   => ['Admin Espaces',   'bg-blue-100 text-blue-700'],
     'admin_activites' => ['Admin Activités', 'bg-purple-100 text-purple-700'],
     'admin_messages'  => ['Admin Messages',  'bg-green-100 text-green-700'],
+    'admin_comptable' => ['Comptable',       'bg-teal-100 text-teal-700'],
+    'ministre'        => ['Ministre / Rep.', 'bg-yellow-100 text-yellow-800'],
     'user'            => ['Utilisateur',     'bg-slate-100 text-slate-500'],
     'partenaire'      => ['Partenaire',      'bg-indigo-50 text-indigo-700'],
 ];
@@ -143,7 +157,7 @@ require __DIR__ . '/_admin_header.php';
     <p class="text-sm text-slate-500 mt-0.5"><?= number_format($total) ?> action(s) enregistrée(s)</p>
   </div>
   <?php if ($total > 0): ?>
-  <a href="?<?= http_build_query(array_merge($_GET, ['export'=>1])) ?>"
+  <a href="export.php?<?= e(http_build_query(array_merge(array_intersect_key($_GET, array_flip(['module', 'user', 'q', 'from', 'to'])), ['type' => 'journal']))) ?>" target="_blank" rel="noopener"
      class="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-black uppercase px-4 py-2.5 rounded-xl transition">
     <i class="fas fa-file-excel text-accent"></i> Exporter en Excel
   </a>
@@ -231,10 +245,10 @@ require __DIR__ . '/_admin_header.php';
 </div>
 
 <!-- ---- Layout : liste + détail ---- -->
-<div class="grid lg:grid-cols-5 gap-5">
+<div class="grid grid-cols-1 lg:grid-cols-5 gap-5">
 
   <!-- Liste logs -->
-  <div class="lg:col-span-3">
+  <div class="lg:col-span-3 min-w-0">
     <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
 
       <?php if (empty($logs)): ?>

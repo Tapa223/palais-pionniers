@@ -29,9 +29,18 @@ $typesAutorises = [
     'remboursements' => $rolesComptables,
     'reductions'     => $rolesComptables,
     'requisitions'   => $rolesComptables,
-    'baux'           => $rolesComptables,
+    // Loyers : déjà consultables par l'administration des espaces sur la page Baux
+    'baux'           => ['ministre', 'admin_comptable', 'admin_espaces', 'superadmin'],
     'reservations'   => ['ministre', 'admin_espaces', 'admin_comptable', 'superadmin'],
     'jeunes_engages' => ['ministre', 'admin_activites', 'superadmin'],
+    // Messages de contact : chaque rôle n'exporte que son périmètre (voir plus bas)
+    'messages'           => ['ministre', 'admin_messages', 'admin_espaces', 'admin_activites', 'superadmin'],
+    'demandes_services'  => ['ministre', 'admin_espaces', 'admin_comptable', 'superadmin'],
+    'demandes_bail'      => ['ministre', 'admin_espaces', 'admin_comptable', 'superadmin'],
+    'partenaires'        => ['ministre', 'admin_espaces', 'admin_comptable', 'superadmin'],
+    'espaces'            => ['ministre', 'admin_espaces', 'superadmin'],
+    'utilisateurs'       => ['ministre', 'superadmin'],
+    'journal'            => ['ministre', 'superadmin'],
     // Boîte à suggestions anonyme : aucune donnée d'identification de l'auteur
     'suggestions'    => ['ministre', 'admin_espaces', 'admin_activites', 'admin_messages', 'admin_comptable', 'superadmin'],
 ];
@@ -59,6 +68,12 @@ $situation = function (?int $reservationId) use ($pdo, &$situations): array {
         $situations[$reservationId] = situation_financiere_reservation($pdo, $reservationId) ?? [];
     }
     return $situations[$reservationId];
+};
+
+// Texte saisi par un tiers : neutralise les formules à l'ouverture dans un tableur
+$texte = function ($v): string {
+    $v = (string)$v;
+    return ($v !== '' && strpbrk($v[0], "=+-@\t\r") !== false) ? "'" . $v : $v;
 };
 
 // Montants : entiers sans séparateur (tri et calculs dans Excel)
@@ -337,11 +352,11 @@ if ($type === 'paiements') {
     };
 
 } elseif ($type === 'jeunes_engages') {
-    $sql = "SELECT nom, prenom, age, telephone, email, commune, domaine_interet, motivation, statut, created_at FROM jeunes_engages ORDER BY created_at DESC";
+    $sql = "SELECT nom, prenom, age, date_naissance, telephone, email, commune, profession, domaine_interet, motivation, statut, created_at FROM jeunes_engages ORDER BY created_at DESC";
     $filename = 'jeunes_engages_' . date('Y-m-d_His') . '.csv';
-    $headers  = ['Nom','Prénom','Âge','Téléphone','Email','Commune','Domaine d\'intérêt','Motivation','Statut','Date d\'inscription'];
-    $mapRow = function($r) {
-        return [$r['nom'], $r['prenom'], $r['age'], $r['telephone'], $r['email'], $r['commune'], $r['domaine_interet'], $r['motivation'], $r['statut'], date('d/m/Y H:i', strtotime($r['created_at']))];
+    $headers  = ['Nom','Prénom','Âge','Date de naissance','Téléphone','Email','Commune','Profession','Domaine d\'intérêt','Motivation','Statut','Date d\'inscription'];
+    $mapRow = function($r) use ($texte, $dateJ) {
+        return [$texte($r['nom']), $texte($r['prenom']), $r['age'], $dateJ($r['date_naissance']), $texte($r['telephone']), $texte($r['email']), $texte($r['commune']), $texte($r['profession']), $texte($r['domaine_interet']), $texte($r['motivation']), $r['statut'] === 'contacte' ? 'Contacté' : 'Nouveau', date('d/m/Y H:i', strtotime($r['created_at']))];
     };
 
 } elseif ($type === 'suggestions') {
@@ -374,6 +389,180 @@ if ($type === 'paiements') {
             $r['statut'] !== 'nouvelle' ? $dateH($r['statut_modifie_le']) : '',
             $r['statut'] !== 'nouvelle' ? ($r['traite_par'] ?? '') : '',
         ];
+    };
+
+} elseif ($type === 'messages') {
+    // Périmètre identique à la boîte de réception : sujet « réservation d'espace »
+    // pour l'administration des espaces, « activité » pour celle des activités.
+    if ($role === 'admin_espaces')   { $where[] = "m.sujet = 'reservation_espace'"; }
+    if ($role === 'admin_activites') { $where[] = "m.sujet = 'activite'"; }
+    if ($debut) { $where[] = "m.created_at >= ?"; $params[] = $debut . ' 00:00:00'; }
+    if ($fin)   { $where[] = "m.created_at <= ?"; $params[] = $fin   . ' 23:59:59'; }
+    $sql = "
+        SELECT m.id, m.created_at, m.nom, m.email, m.telephone, m.sujet, m.message, m.reponse, m.repondu_at, m.lu,
+               e.nom AS espace, a.nom AS activite, u.nom_complet AS repondu_par
+        FROM messages m
+        LEFT JOIN espaces e ON e.id = m.espace_id
+        LEFT JOIN activites a ON a.id = m.activite_id
+        LEFT JOIN users u ON u.id = m.repondu_par
+        " . ($where ? 'WHERE ' . implode(' AND ', $where) : '') . "
+        ORDER BY m.created_at DESC
+    ";
+    $filename = 'messages_' . date('Y-m-d_His') . '.csv';
+    $headers  = ['N°', 'Date', 'Nom', 'Email', 'Téléphone', 'Sujet', 'Espace concerné', 'Activité concernée', 'Message', 'Lu', 'Réponse', 'Date de réponse', 'Répondu par'];
+    $libSujet = ['reservation_espace' => 'Réservation espace', 'activite' => 'Activité', 'information_generale' => 'Information générale', 'reclamation' => 'Réclamation', 'autre' => 'Autre'];
+    $mapRow = function ($r) use ($texte, $dateH, $libSujet) {
+        return [
+            (int)$r['id'], $dateH($r['created_at']), $texte($r['nom']), $texte($r['email']), $texte($r['telephone']),
+            $libSujet[$r['sujet']] ?? $r['sujet'], $r['espace'] ?? '', $r['activite'] ?? '', $texte($r['message']),
+            $r['lu'] ? 'Oui' : 'Non', $texte($r['reponse'] ?? ''), $dateH($r['repondu_at']), $r['repondu_par'] ?? '',
+        ];
+    };
+
+} elseif ($type === 'demandes_services') {
+    if ($debut) { $where[] = "d.created_at >= ?"; $params[] = $debut . ' 00:00:00'; }
+    if ($fin)   { $where[] = "d.created_at <= ?"; $params[] = $fin   . ' 23:59:59'; }
+    $sql = "
+        SELECT d.id, d.created_at, d.message, d.statut, d.date_prise_en_charge, d.date_traitement, d.note_traitement,
+               sa.nom AS service, sa.montant, sa.unite, u.nom_complet AS client, u.email, u.telephone,
+               pc.nom_complet AS pris_en_charge_par, tr.nom_complet AS traite_par
+        FROM demandes_services d
+        JOIN services_annexes sa ON sa.id = d.service_id
+        JOIN users u ON u.id = d.user_id
+        LEFT JOIN users pc ON pc.id = d.pris_en_charge_par
+        LEFT JOIN users tr ON tr.id = d.traite_par
+        " . ($where ? 'WHERE ' . implode(' AND ', $where) : '') . "
+        ORDER BY d.created_at DESC
+    ";
+    $filename = 'demandes_services_' . date('Y-m-d_His') . '.csv';
+    $headers  = ['N°', 'Date de la demande', 'Service', 'Tarif indicatif (FCFA)', 'Unité', 'Client', 'Email', 'Téléphone', 'Message', 'Statut', 'Prise en charge le', 'Prise en charge par', 'Traitée le', 'Traitée par', 'Note / motif'];
+    $mapRow = function ($r) use ($texte, $dateH, $fin2) {
+        return [
+            (int)$r['id'], $dateH($r['created_at']), $r['service'], $fin2($r['montant']), $r['unite'],
+            $texte($r['client']), $texte($r['email']), $texte($r['telephone']), $texte($r['message']),
+            libelle_statut_service((string)$r['statut'])[0] ?? $r['statut'],
+            $dateH($r['date_prise_en_charge']), $r['pris_en_charge_par'] ?? '', $dateH($r['date_traitement']), $r['traite_par'] ?? '', $texte($r['note_traitement'] ?? ''),
+        ];
+    };
+
+} elseif ($type === 'demandes_bail') {
+    if ($debut) { $where[] = "d.created_at >= ?"; $params[] = $debut . ' 00:00:00'; }
+    if ($fin)   { $where[] = "d.created_at <= ?"; $params[] = $fin   . ' 23:59:59'; }
+    $sql = "
+        SELECT d.id, d.created_at, d.nom, d.prenom, d.telephone, d.email, d.usage_prevu, d.duree_souhaitee,
+               d.date_debut_souhaitee, d.message, d.statut, d.canal, d.date_traitement, d.note_traitement,
+               e.nom AS espace, tr.nom_complet AS traite_par
+        FROM demandes_bail d
+        JOIN espaces e ON e.id = d.espace_id
+        LEFT JOIN users tr ON tr.id = d.traite_par
+        " . ($where ? 'WHERE ' . implode(' AND ', $where) : '') . "
+        ORDER BY d.created_at DESC
+    ";
+    $filename = 'demandes_bail_' . date('Y-m-d_His') . '.csv';
+    $headers  = ['N°', 'Date', 'Canal', 'Nom', 'Prénom', 'Téléphone', 'Email', 'Espace demandé', 'Durée souhaitée', 'Début souhaité', 'Usage prévu', 'Message', 'Statut', 'Traitée le', 'Traitée par', 'Note'];
+    $libStatutBail = ['en_attente' => 'En attente', 'acceptee' => 'Acceptée', 'refusee' => 'Refusée'];
+    $mapRow = function ($r) use ($texte, $dateH, $dateJ, $libStatutBail) {
+        return [
+            (int)$r['id'], $dateH($r['created_at']), $r['canal'] === 'guichet' ? 'Guichet' : 'En ligne',
+            $texte($r['nom']), $texte($r['prenom']), $texte($r['telephone']), $texte($r['email']), $r['espace'],
+            ucfirst((string)$r['duree_souhaitee']), $dateJ($r['date_debut_souhaitee']), $texte($r['usage_prevu']), $texte($r['message']),
+            $libStatutBail[$r['statut']] ?? $r['statut'], $dateH($r['date_traitement']), $r['traite_par'] ?? '', $texte($r['note_traitement'] ?? ''),
+        ];
+    };
+
+} elseif ($type === 'partenaires') {
+    if (!partenaires_disponibles($pdo)) {
+        http_response_code(404);
+        exit('Module partenaires non installé.');
+    }
+    // Indicateurs identiques à la page Partenaires (réservations refusées, annulées et expirées exclues)
+    $sql = "
+        SELECT p.id, p.nom, p.type, p.contact_nom, p.telephone, p.email, p.actif, p.created_at,
+               (SELECT COUNT(*) FROM users u WHERE u.partenaire_id = p.id) AS nb_comptes,
+               (SELECT COUNT(*) FROM reservations r WHERE r.partenaire_id = p.id AND r.statut NOT IN ('refusee','annulee','expiree')) AS nb_resa,
+               (SELECT MAX(r.created_at) FROM reservations r WHERE r.partenaire_id = p.id) AS derniere
+        FROM partenaires p
+        ORDER BY p.nom
+    ";
+    $filename = 'partenaires_' . date('Y-m-d_His') . '.csv';
+    $headers  = ['Partenaire', 'Type', 'Contact', 'Téléphone', 'Email', 'Statut', 'Comptes de connexion', 'Réservations', 'Payé (FCFA)', 'Reste à encaisser (FCFA)', 'Dernière demande', 'Créé le'];
+    $mapRow = function ($r) use ($pdo, $texte, $dateJ, $fin2, $situation) {
+        $ids = $pdo->prepare("SELECT id, statut FROM reservations WHERE partenaire_id = ? AND statut NOT IN ('refusee','annulee','expiree')");
+        $ids->execute([(int)$r['id']]);
+        $paye = $reste = 0.0;
+        foreach ($ids->fetchAll() as $res) {
+            $s = $situation((int)$res['id']);
+            $paye += max(0, (float)($s['paye_net'] ?? 0));
+            if ($res['statut'] === 'validee') { $reste += (float)($s['solde'] ?? 0); }
+        }
+        return [
+            $texte($r['nom']), $texte($r['type']), $texte($r['contact_nom']), $texte($r['telephone']), $texte($r['email']),
+            $r['actif'] ? 'Actif' : 'Désactivé', (int)$r['nb_comptes'], (int)$r['nb_resa'], $fin2($paye), $fin2($reste),
+            $dateJ($r['derniere']), $dateJ($r['created_at']),
+        ];
+    };
+
+} elseif ($type === 'espaces') {
+    $sql = "
+        SELECT e.id, e.nom, e.capacite, e.mode_reservation, e.disponible, e.gerant_externe, e.type_bail,
+               e.gerant_nom, e.gerant_prenom, e.option_vip, e.prix_vip, c.nom AS categorie,
+               (SELECT GROUP_CONCAT(CONCAT(t.libelle, ' : ', FLOOR(t.montant), ' FCFA/', t.unite, IF(t.est_bail, ' (bail)', '')) ORDER BY t.montant SEPARATOR ' | ')
+                  FROM tarifs t WHERE t.espace_id = e.id) AS tarifs,
+               (SELECT COUNT(*) FROM espace_images i WHERE i.espace_id = e.id) AS photos
+        FROM espaces e
+        LEFT JOIN categories c ON c.id = e.categorie_id
+        ORDER BY c.nom, e.nom
+    ";
+    $filename = 'espaces_' . date('Y-m-d_His') . '.csv';
+    $headers  = ['Espace', 'Catégorie', 'Capacité', 'Mode', 'Statut', 'En bail', 'Gestionnaire', 'Type de bail', 'Accueil VIP (FCFA)', 'Tarifs', 'Photos'];
+    $mapRow = function ($r) use ($fin2) {
+        $enBail = trim((string)$r['gerant_externe']) !== '';
+        return [
+            $r['nom'], $r['categorie'] ?? '', $r['capacite'] ?? '', $r['mode_reservation'] === 'sejour' ? 'Séjour' : 'Créneau',
+            $r['disponible'] ? 'Disponible' : 'Indisponible', $enBail ? 'Oui' : 'Non',
+            $enBail ? trim(($r['gerant_prenom'] ?? '') . ' ' . ($r['gerant_nom'] ?? '')) : '', $enBail ? ucfirst((string)$r['type_bail']) : '',
+            $r['option_vip'] ? $fin2($r['prix_vip']) : '', $r['tarifs'] ?? '', (int)$r['photos'],
+        ];
+    };
+
+} elseif ($type === 'utilisateurs') {
+    $libRoles = [
+        'superadmin' => 'Super Admin (Direction)', 'ministre' => 'Ministre / Rep.', 'admin_espaces' => 'Admin Espaces',
+        'admin_activites' => 'Admin Activités', 'admin_messages' => 'Admin Messages', 'admin_comptable' => 'Comptable',
+        'user' => 'Client', 'partenaire' => 'Partenaire',
+    ];
+    // Aucune donnée d'authentification exportée (ni mot de passe, ni empreinte)
+    $sql = "SELECT id, nom_complet, email, telephone, role, actif, created_at FROM users ORDER BY role, nom_complet";
+    $filename = 'utilisateurs_' . date('Y-m-d_His') . '.csv';
+    $headers  = ['Nom', 'Email', 'Téléphone', 'Rôle', 'Statut', 'Inscription'];
+    $mapRow = function ($r) use ($texte, $dateJ, $libRoles) {
+        return [$texte($r['nom_complet']), $texte($r['email']), $texte($r['telephone']), $libRoles[$r['role']] ?? $r['role'], $r['actif'] ? 'Actif' : 'Bloqué', $dateJ($r['created_at'])];
+    };
+
+} elseif ($type === 'journal') {
+    // Mêmes filtres que la page Journal (module, administrateur, recherche, période)
+    $jModule = (string)($_GET['module'] ?? '');
+    $jUser   = (int)($_GET['user'] ?? 0);
+    $jQ      = trim((string)($_GET['q'] ?? ''));
+    $jDu     = $dateValide((string)($_GET['from'] ?? '')) ?: $debut;
+    $jAu     = $dateValide((string)($_GET['to'] ?? '')) ?: $fin;
+    if (in_array($jModule, ['espaces', 'activites', 'reservations', 'messages', 'users'], true)) { $where[] = 'l.module = ?'; $params[] = $jModule; }
+    if ($jUser) { $where[] = 'l.user_id = ?'; $params[] = $jUser; }
+    if ($jQ !== '') { $where[] = '(l.user_nom LIKE ? OR l.details LIKE ? OR l.action LIKE ?)'; array_push($params, "%$jQ%", "%$jQ%", "%$jQ%"); }
+    if ($jDu) { $where[] = 'l.created_at >= ?'; $params[] = $jDu . ' 00:00:00'; }
+    if ($jAu) { $where[] = 'l.created_at <= ?'; $params[] = $jAu . ' 23:59:59'; }
+    $debut = $jDu; $fin = $jAu;
+    $sql = "
+        SELECT l.id, l.created_at, l.user_nom, u.role, l.module, l.action, l.details
+        FROM activity_log l
+        LEFT JOIN users u ON u.id = l.user_id
+        " . ($where ? 'WHERE ' . implode(' AND ', $where) : '') . "
+        ORDER BY l.created_at DESC, l.id DESC
+    ";
+    $filename = 'journal_' . date('Y-m-d_His') . '.csv';
+    $headers  = ['N°', 'Date et heure', 'Auteur', 'Rôle', 'Module', 'Action', 'Détails'];
+    $mapRow = function ($r) use ($texte, $dateH) {
+        return [(int)$r['id'], $dateH($r['created_at']), $texte($r['user_nom']), $r['role'] ?? '', $r['module'], $r['action'], $texte($r['details'])];
     };
 
 } else { // reservations
@@ -452,7 +641,12 @@ if ($colonneRefs) {
     $refs = references_dossiers($pdo, $ids) + $refs;
 }
 
-log_activity('export_' . $type, $type === 'suggestions' ? 'messages' : 'reservations', count($rows) . ' ligne(s) exportée(s) (' . $type . ')'
+$moduleJournal = [
+    'suggestions' => 'messages', 'messages' => 'messages', 'jeunes_engages' => 'activites',
+    'demandes_services' => 'espaces', 'demandes_bail' => 'espaces', 'espaces' => 'espaces',
+    'partenaires' => 'users', 'utilisateurs' => 'users', 'journal' => 'users',
+][$type] ?? 'reservations';
+log_activity('export_' . $type, $moduleJournal, count($rows) . ' ligne(s) exportée(s) (' . $type . ')'
     . ($debut || $fin ? ' — période ' . ($debut ?: '…') . ' → ' . ($fin ?: '…') : ''));
 
 header('Content-Type: text/csv; charset=utf-8');

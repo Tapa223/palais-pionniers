@@ -106,6 +106,11 @@ h1,h2,h3 { font-family:'Plus Jakarta Sans',Inter,sans-serif; letter-spacing:-.02
 
     <!-- Bas sidebar -->
     <div class="p-3 border-t border-white/10 space-y-1">
+      <a href="mon-mot-de-passe.php"
+         class="flex items-center gap-3 rounded-xl px-3 py-2.5 transition text-sm <?= basename($_SERVER['PHP_SELF']) === 'mon-mot-de-passe.php' ? 'bg-accent text-white' : 'text-white/75 hover:bg-white/10 hover:text-white' ?>">
+        <i class="fas fa-key w-4 text-center text-sm opacity-70"></i>
+        <span>Mon mot de passe</span>
+      </a>
       <a href="../logout.php" onclick="return confirm('Se déconnecter ?')"
          class="flex items-center gap-3 rounded-xl px-3 py-2.5 text-red-400 hover:bg-red-500/10 hover:text-red-300 transition text-sm">
         <i class="fas fa-sign-out-alt w-4 text-center text-sm"></i>

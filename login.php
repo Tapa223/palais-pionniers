@@ -31,6 +31,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $errors[] = empty($u['partenaire_id'])
                     ? "Ce compte partenaire n'est rattaché à aucun partenaire. Contactez la Direction du Palais."
                     : "Ce compte partenaire est désactivé. Contactez la Direction du Palais.";
+            } elseif (!(int)$u['actif'] && in_array($u['role'], ['superadmin', 'ministre', 'admin_espaces', 'admin_activites', 'admin_messages', 'admin_comptable'], true)) {
+                // Compte d'administration bloqué ou désactivé par la Direction : accès refusé
+                $errors[] = "Ce compte est désactivé. Contactez la Direction du Palais.";
             } else {
                 session_regenerate_id(true);
                 $_SESSION['user_id']     = (int)$u['id'];
