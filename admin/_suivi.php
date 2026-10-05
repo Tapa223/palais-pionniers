@@ -16,7 +16,7 @@ if (suivi_disponible($pdo)):
         'requete'    => ['err', 'Requête invalide : rechargez la page et recommencez.'],
     ][$_GET['suivi'] ?? ''] ?? null;
 ?>
-<section id="suivi" class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden mb-8" aria-labelledby="titreSuivi" style="scroll-margin-top:5rem">
+<section id="suivi" data-repliable="suivi" class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden mb-8" aria-labelledby="titreSuivi" style="scroll-margin-top:5rem">
   <div class="flex items-center justify-between flex-wrap gap-2 px-5 py-4 border-b border-slate-100">
     <div>
       <h2 id="titreSuivi" class="font-black text-primary uppercase italic text-sm tracking-tight flex items-center gap-2">

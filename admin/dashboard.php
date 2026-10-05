@@ -238,7 +238,7 @@ foreach ($cards as [$label, $val, $icon, $color, $bg, $link]):
 
   <!-- ===== RÉSERVATIONS RÉCENTES ===== -->
   <?php if (!empty($recent_reservations)): ?>
-  <div class="xl:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+  <div data-repliable="demandes" class="xl:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
     <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100">
       <h2 class="font-black text-primary uppercase italic text-sm tracking-tight flex items-center gap-2">
         <i class="fas fa-calendar-check text-accent"></i> Demandes récentes
@@ -287,7 +287,7 @@ foreach ($cards as [$label, $val, $icon, $color, $bg, $link]):
 
   <!-- ===== RÉSERVATIONS AVEC RÉDUCTION ===== -->
   <?php if (!empty($paiements_reduction)): ?>
-  <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+  <div data-repliable="reductions" class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
     <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100">
       <h2 class="font-black text-primary uppercase italic text-sm tracking-tight flex items-center gap-2">
         <i class="fas fa-tags text-accent"></i> Réservations avec réduction
@@ -313,7 +313,7 @@ foreach ($cards as [$label, $val, $icon, $color, $bg, $link]):
 
   <!-- ===== APERÇU DES BAUX ===== -->
   <?php if (!empty($baux_apercu)): ?>
-  <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+  <div data-repliable="baux" class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
     <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100">
       <h2 class="font-black text-primary uppercase italic text-sm tracking-tight flex items-center gap-2">
         <i class="fas fa-file-signature text-accent"></i> Baux — période en cours
@@ -338,7 +338,7 @@ foreach ($cards as [$label, $val, $icon, $color, $bg, $link]):
 
   <!-- ===== ACTIVITÉS RÉCENTES ===== -->
   <?php if (!empty($recent_activites)): ?>
-  <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+  <div data-repliable="activites" class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
     <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100">
       <h2 class="font-black text-primary uppercase italic text-sm tracking-tight flex items-center gap-2">
         <i class="fas fa-star text-accent"></i> Activités
@@ -369,8 +369,31 @@ foreach ($cards as [$label, $val, $icon, $color, $bg, $link]):
   </div>
   <?php endif; ?>
 
+<?php if ($role === 'superadmin'): ?>
+<div class="mt-5">
+  <a href="activity.php"
+     class="flex items-center justify-between bg-slate-900 text-white rounded-2xl px-6 py-4 hover:bg-slate-800 transition group shadow-sm">
+    <div class="flex items-center gap-3">
+      <div class="w-9 h-9 bg-accent/20 rounded-xl flex items-center justify-center">
+        <i class="fas fa-history text-accent"></i>
+      </div>
+      <div>
+        <p class="font-black text-sm uppercase italic tracking-tight">Journal d'activité</p>
+        <p class="text-[10px] text-white/50 mt-0.5">Voir toutes les actions des administrateurs</p>
+      </div>
+    </div>
+    <i class="fas fa-arrow-right text-white/30 group-hover:text-accent group-hover:translate-x-1 transition-all"></i>
+  </a>
+</div>
+<?php endif; ?>
+</div><!-- /grid -->
+
+<!-- ===== SUIVI DU JOUR ET DES RÉSERVATIONS PAYÉES (bas de page) ===== -->
+<div class="mt-8">
+<?php require __DIR__ . '/_aujourdhui.php'; ?>
+<?php require __DIR__ . '/_suivi.php'; ?>
   <!-- ===== MESSAGES RÉCENTS ===== -->
-  <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden <?= empty($recent_activites) ? 'xl:col-span-2' : '' ?>">
+  <div data-repliable="messages" class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden mb-8">
     <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100">
       <h2 class="font-black text-primary uppercase italic text-sm tracking-tight flex items-center gap-2">
         <i class="fas fa-envelope text-accent"></i> Messages récents
@@ -420,31 +443,41 @@ foreach ($cards as [$label, $val, $icon, $color, $bg, $link]):
     </div>
     <?php endif; ?>
   </div>
-
-
-<?php if ($role === 'superadmin'): ?>
-<div class="mt-5">
-  <a href="activity.php"
-     class="flex items-center justify-between bg-slate-900 text-white rounded-2xl px-6 py-4 hover:bg-slate-800 transition group shadow-sm">
-    <div class="flex items-center gap-3">
-      <div class="w-9 h-9 bg-accent/20 rounded-xl flex items-center justify-center">
-        <i class="fas fa-history text-accent"></i>
-      </div>
-      <div>
-        <p class="font-black text-sm uppercase italic tracking-tight">Journal d'activité</p>
-        <p class="text-[10px] text-white/50 mt-0.5">Voir toutes les actions des administrateurs</p>
-      </div>
-    </div>
-    <i class="fas fa-arrow-right text-white/30 group-hover:text-accent group-hover:translate-x-1 transition-all"></i>
-  </a>
 </div>
-<?php endif; ?>
-</div><!-- /grid -->
 
-<!-- ===== SUIVI DU JOUR ET DES RÉSERVATIONS PAYÉES (bas de page) ===== -->
-<div class="mt-8">
-<?php require __DIR__ . '/_aujourdhui.php'; ?>
-<?php require __DIR__ . '/_suivi.php'; ?>
-</div>
+<script>
+// Blocs repliables du tableau de bord : un clic sur la flèche réduit ou rouvre le bloc.
+// L'état est mémorisé pour ce navigateur (sans effet si le stockage est indisponible).
+(function () {
+  document.querySelectorAll('[data-repliable]').forEach(function (bloc) {
+    var entete = bloc.firstElementChild;
+    if (!entete) return;
+    var cle = 'pp-dashboard-replie-' + bloc.getAttribute('data-repliable');
+    var bouton = document.createElement('button');
+    bouton.type = 'button';
+    bouton.className = 'ml-2 w-8 h-8 flex-shrink-0 flex items-center justify-center rounded-xl bg-slate-100 text-slate-500 hover:bg-slate-200 transition';
+    bouton.innerHTML = '<i class="fas fa-chevron-up text-xs"></i>';
+    entete.appendChild(bouton);
+    function appliquer(replie) {
+      Array.prototype.forEach.call(bloc.children, function (enfant) {
+        if (enfant !== entete) enfant.classList.toggle('hidden', replie);
+      });
+      entete.classList.toggle('border-b', !replie);
+      bouton.innerHTML = '<i class="fas ' + (replie ? 'fa-chevron-down' : 'fa-chevron-up') + ' text-xs"></i>';
+      bouton.setAttribute('aria-expanded', replie ? 'false' : 'true');
+      bouton.setAttribute('aria-label', replie ? 'Afficher le bloc' : 'Réduire le bloc');
+      bouton.title = replie ? 'Afficher' : 'Réduire';
+    }
+    var replie = false;
+    try { replie = localStorage.getItem(cle) === '1'; } catch (e) {}
+    appliquer(replie);
+    bouton.addEventListener('click', function () {
+      replie = !replie;
+      appliquer(replie);
+      try { localStorage.setItem(cle, replie ? '1' : '0'); } catch (e) {}
+    });
+  });
+})();
+</script>
 
 <?php require __DIR__ . '/_admin_footer.php'; ?>

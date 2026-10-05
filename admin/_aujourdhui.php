@@ -54,7 +54,7 @@ $joursFr = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'same
 $dateLongue = ucfirst($joursFr[(int)date('w')] . ' ' . (int)date('j') . ' ' . $moisFr[(int)date('n') - 1] . ' ' . date('Y'));
 $nbValidees = count(array_filter($jourRes, fn($r) => $r['statut'] === 'validee'));
 ?>
-<section id="aujourdhui" class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden mb-8" aria-labelledby="titreAujourdhui">
+<section id="aujourdhui" data-repliable="aujourdhui" class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden mb-8" aria-labelledby="titreAujourdhui">
   <div class="flex items-center justify-between flex-wrap gap-2 px-5 py-4 border-b border-slate-100">
     <div>
       <h2 id="titreAujourdhui" class="font-black text-primary uppercase italic text-sm tracking-tight flex items-center gap-2">
