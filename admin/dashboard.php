@@ -162,8 +162,6 @@ require __DIR__ . '/_admin_header.php';
   <?php endif; ?>
 </div>
 
-<?php require __DIR__ . '/_aujourdhui.php'; ?>
-<?php require __DIR__ . '/_suivi.php'; ?>
 
 <!-- ===== CARTES STATS ===== -->
 <div class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-4 mb-8">
@@ -442,5 +440,11 @@ foreach ($cards as [$label, $val, $icon, $color, $bg, $link]):
 </div>
 <?php endif; ?>
 </div><!-- /grid -->
+
+<!-- ===== SUIVI DU JOUR ET DES RÉSERVATIONS PAYÉES (bas de page) ===== -->
+<div class="mt-8">
+<?php require __DIR__ . '/_aujourdhui.php'; ?>
+<?php require __DIR__ . '/_suivi.php'; ?>
+</div>
 
 <?php require __DIR__ . '/_admin_footer.php'; ?>
