@@ -298,27 +298,28 @@ $presentationSlides = [
 
                 <div class="space-y-4 sm:space-y-6 text-sm sm:text-lg text-slate-600 leading-relaxed text-justify">
 
-                    <p>
-                        Créé par la Loi n°2022-022 du 28 juin 2022, le Palais des Pionniers est un
-                        <strong>Établissement Public à caractère Scientifique et Technologique (EPST)</strong>,
-                        placé sous la tutelle du Ministère de la Jeunesse et des Sports.
-                    </p>
+    <p>
+        Créé par la Loi n°2022-022 du 28 juin 2022, le Palais des Pionniers est un
+        <strong>Établissement Public à caractère Scientifique et Technologique (EPST)</strong>,
+        placé sous la tutelle du Ministère de la Jeunesse et des Sports, chargé de l’Instruction Civique et de la Construction Citoyenne.
+    </p>
 
-                    <p>
-                        Véritable carrefour du Mali Kura, il offre un cadre unique de brassage,
-                        d'apprentissage et d'excellence. Notre ambition est de forger un citoyen nouveau,
-                        patriote et engagé, capable de porter fièrement les défis de la souveraineté nationale.
-                    </p>
+    <p>
+        Véritable carrefour du Mali Kura, le Palais des Pionniers est un espace dédié à la jeunesse malienne,
+        à son épanouissement, à son apprentissage et à son engagement citoyen. Il contribue à la formation
+        d’une jeunesse responsable, patriote et engagée.
+    </p>
 
-                    <div class="p-6 bg-slate-50 rounded-2xl border-l-4 border-accent">
+    <div class="p-6 bg-slate-50 rounded-2xl border-l-4 border-accent">
 
-                        <p class="text-slate-800 font-bold italic">
-                            La construction nationale exige une jeunesse éduquée, disciplinée et dévouée au service de la patrie.
-                        </p>
+        <p class="text-slate-800 font-bold italic">
+            Le Palais dispose également d’espaces de qualité pouvant être réservés pour des réunions,
+            formations, conférences et divers événements.
+        </p>
 
-                    </div>
+    </div>
 
-                </div>
+</div>
 
             </div>
 
@@ -693,7 +694,7 @@ if ($dDg):
 
             <div class="w-full md:w-3/5 text-center md:text-right">
 
-                <h2 class="text-primary font-black tracking-widest uppercase text-[10px] sm:text-sm mb-2 sm:mb-6">
+                <h2 class="text-accent font-black tracking-widest uppercase text-[10px] sm:text-sm mb-2 sm:mb-6">
                     Expertise Institutionnelle
                 </h2>
 
@@ -710,7 +711,7 @@ if ($dDg):
                 <?php if ($dDg['citation']): ?>
 
                     <h3 class="text-lg sm:text-3xl md:text-4xl font-black text-slate-900 mb-3 sm:mb-8 leading-snug sm:leading-tight">
-                        <?= e($dDg['citation']) ?>
+                        Le Palais des Pionniers, un espace pour la jeunesse et ses initiatives.
                     </h3>
 
                 <?php endif; ?>
@@ -718,7 +719,11 @@ if ($dDg):
                 <?php if ($dDg['texte']): ?>
 
                     <p class="text-sm sm:text-xl text-slate-600 leading-relaxed mb-4 sm:mb-8 italic">
-                        <?= nl2br(e($dDg['texte'])) ?>
+                        Le Palais est avant tout le vôtre. Un cadre pour apprendre,
+                        développer vos compétences, partager vos idées et concrétiser vos projets.
+                        <br><br>
+                        Ses espaces de qualité sont également disponibles à la réservation
+                        pour vos formations, conférences, réunions et événements.
                     </p>
 
                 <?php endif; ?>

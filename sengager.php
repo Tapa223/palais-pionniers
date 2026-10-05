@@ -8,7 +8,7 @@ $msg = null;
 // Images du hero — ajoute simplement d'autres fichiers ici pour transformer
 // automatiquement ce bandeau en carrousel (défilement en fondu).
 $heroSengagerImages = array_values(array_filter(
-    ['assets/images/groupewague.jpeg'],
+    ['assets/images/groupewague.jpg'],
     fn($p) => file_exists(__DIR__ . '/' . $p)
 ));
 
