@@ -141,12 +141,11 @@ require __DIR__ . '/includes/header.php';
       $reseaux = array_filter(require __DIR__ . '/config/reseaux_sociaux.php', 'url_web_valide');
       $boutonsReseaux = [
           'facebook' => ['fa-facebook-f', 'Facebook', 'bg-blue-600 hover:bg-blue-700'],
-          'tiktok'   => ['fa-tiktok', 'TikTok', 'bg-slate-900 hover:bg-black'],
       ];
       ?>
       <div class="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm">
         <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-4">Suivez-nous</p>
-        <div class="grid grid-cols-2 gap-2">
+        <div class="grid grid-cols-1 gap-2">
           <?php foreach ($boutonsReseaux as $cle => [$icone, $nom, $couleur]): ?>
           <?php if (!empty($reseaux[$cle])): ?>
           <a href="<?= e($reseaux[$cle]) ?>" target="_blank" rel="noopener" aria-label="<?= $nom ?> du Palais des Pionniers"
