@@ -60,15 +60,15 @@ $bandeauPhotos = array_merge(photos_officiels($pdo), $bandeauIcones);
         <?php else: ?>
         <div class="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-8">
             <?php foreach ($personnalites as $p): ?>
-            <a href="personnalite.php?id=<?= (int)$p['id'] ?>" class="bg-slate-50 rounded-2xl sm:rounded-[2rem] overflow-hidden border border-slate-100 hover:shadow-2xl transition-all group block">
-                <div class="aspect-[4/3] bg-slate-200 overflow-hidden">
+            <a href="personnalite.php?id=<?= (int)$p['id'] ?>" class="bg-slate-50 rounded-2xl sm:rounded-[2rem] overflow-hidden border border-slate-100 hover:shadow-2xl transition-all group flex flex-col h-full">
+                <div class="aspect-[4/3] bg-slate-200 overflow-hidden flex-shrink-0">
                     <?php if ($p['photo'] && file_exists(__DIR__ . '/assets/images/personnalites/' . $p['photo'])): ?>
                     <img src="assets/images/personnalites/<?= e($p['photo']) ?>" class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105">
                     <?php else: ?>
                     <div class="w-full h-full flex items-center justify-center text-3xl sm:text-6xl text-slate-300"><i class="fas fa-user"></i></div>
                     <?php endif; ?>
                 </div>
-                <div class="p-3 sm:p-6">
+                <div class="p-3 sm:p-6 flex flex-col flex-1">
                     <h3 class="font-black text-primary text-sm sm:text-xl uppercase italic tracking-tighter group-hover:text-accent transition">
                         <?= e($p['prenom'] ? $p['prenom'].' '.$p['nom'] : $p['nom']) ?>
                     </h3>
@@ -82,8 +82,8 @@ $bandeauPhotos = array_merge(photos_officiels($pdo), $bandeauIcones);
                     <?php endif; ?>
                     <?php if ($p['parcours']): ?>
                     <p class="mt-4 text-sm text-slate-600 leading-relaxed line-clamp-3"><?= nl2br(e($p['parcours'])) ?></p>
-                    <p class="mt-3 text-[11px] font-black text-accent uppercase tracking-widest">Lire le parcours complet <i class="fas fa-arrow-right ml-1"></i></p>
                     <?php endif; ?>
+                    <p class="mt-auto pt-3 text-[11px] font-black text-accent uppercase tracking-widest">Lire le parcours complet <i class="fas fa-arrow-right ml-1"></i></p>
                 </div>
             </a>
             <?php endforeach; ?>
