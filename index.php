@@ -194,9 +194,9 @@ $heroSlidesTextes = [
 
             ?>
 
-                <div class="flex flex-col items-center justify-center text-center px-4 py-8 sm:py-10">
+                <div class="flex flex-col items-center justify-center text-center px-4 py-4 sm:py-5">
 
-                    <i class="fas <?= $icon ?> text-accent text-xl mb-3"></i>
+                    <i class="fas <?= $icon ?> text-accent text-xl mb-1"></i>
 
                     <span
                         class="counter text-3xl sm:text-4xl font-black text-primary tracking-tighter"

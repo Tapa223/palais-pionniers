@@ -32,6 +32,14 @@
         <li>Magnambougou / Dianéguéla, Bamako, Mali</li>
         <li>+223 76 45 42 59</li>
         <li>ppb@mjsports.gouv.ml</li>
+        <?php $reseauxPied = array_filter(require __DIR__ . '/../config/reseaux_sociaux.php', 'url_web_valide'); ?>
+        <?php if (!empty($reseauxPied['facebook'])): ?>
+        <li>
+          <a href="<?= e($reseauxPied['facebook']) ?>" target="_blank" rel="noopener" class="inline-flex items-center gap-2 hover:text-white transition">
+            <i class="fab fa-facebook-f w-4 text-center"></i> Facebook
+          </a>
+        </li>
+        <?php endif; ?>
       </ul>
     </div>
   </div>

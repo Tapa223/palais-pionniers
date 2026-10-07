@@ -68,13 +68,12 @@ $currentUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https:/
 </head>
 <body class="min-h-screen flex flex-col">
 
-<div class="flex h-[3px] w-full">
-  <div class="flex-1 bg-[#14B53A]"></div>
-  <div class="flex-1 bg-[#FCD116]"></div>
-  <div class="flex-1 bg-[#CE1126]"></div>
-</div>
-
 <header class="sticky top-0 z-50 border-b border-slate-200 bg-white/85 backdrop-blur">
+  <div class="flex h-[3px] w-full">
+    <div class="flex-1 bg-[#14B53A]"></div>
+    <div class="flex-1 bg-[#FCD116]"></div>
+    <div class="flex-1 bg-[#CE1126]"></div>
+  </div>
   <div class="container mx-auto flex h-16 items-center justify-between px-4">
     
   <a href="<?= $prefix ?>index.php" class="flex items-center gap-2 sm:gap-4">
