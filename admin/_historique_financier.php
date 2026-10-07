@@ -1,11 +1,4 @@
 <?php
-/*
- * Historique financier du dossier (lecture seule).
- * Attend : $histoEntrees = historique_financier_reservation($pdo, $reservationId).
- * Affiche, dans l'ordre chronologique : action → auteur → date/heure →
- * objet (références) → montant → résultat, avec la référence de
- * transaction et le détail (motif, observation) lorsqu'ils existent.
- */
 if (!isset($histoEntrees) || !is_array($histoEntrees)) {
     return;
 }

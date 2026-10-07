@@ -11,13 +11,9 @@ $msg      = null;
 $dureeParType = ['mensuel' => 1, 'trimestriel' => 3, 'semestriel' => 6, 'annuel' => 12];
 $labelType    = ['mensuel' => 'Mensuel', 'trimestriel' => 'Trimestriel', 'semestriel' => 'Semestriel', 'annuel' => 'Annuel'];
 
-// periode_actuelle_debut() est maintenant définie dans includes/auth.php (partagée avec le tableau de bord)
 
 $moisFr = ['01'=>'janvier','02'=>'février','03'=>'mars','04'=>'avril','05'=>'mai','06'=>'juin','07'=>'juillet','08'=>'août','09'=>'septembre','10'=>'octobre','11'=>'novembre','12'=>'décembre'];
 
-/**
- * Libellé lisible d'une période selon sa durée (en mois) et sa date de début.
- */
 function periode_label(string $debut, int $dureeMois): string {
     global $moisFr;
     $d = strtotime($debut);
@@ -87,7 +83,6 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// Espaces actuellement en bail
 $espacesBail = $pdo->query("
     SELECT e.id, e.nom, e.type_bail, e.gerant_nom, e.gerant_prenom, e.gerant_contact, e.gerant_user_id,
     e.resiliation_demandee, e.resiliation_demandee_le, e.resiliation_note,
@@ -99,19 +94,16 @@ $espacesBail = $pdo->query("
 
 $stmtPeriode = $pdo->prepare("SELECT * FROM bail_paiements WHERE espace_id = ? AND periode_debut = ?");
 
-// Notifier le comptable + admin_espaces quand une échéance de bail arrive à
-// terme sans paiement encore enregistré — une seule fois par espace/période
-// (on vérifie qu'aucune notification avec ce lien exact n'existe déjà).
 $stmtNotifExiste = $pdo->prepare("SELECT COUNT(*) FROM notifications WHERE lien = ?");
 foreach ($espacesBail as $espCheck) {
     $typeBailCheck  = $espCheck['type_bail'] ?: 'mensuel';
     $periodeCheck   = periode_actuelle_debut($typeBailCheck);
     $stmtPeriode->execute([$espCheck['id'], $periodeCheck]);
-    if ($stmtPeriode->fetch()) continue; // déjà payé pour cette période
+    if ($stmtPeriode->fetch()) continue;
 
     $lienUnique = "baux.php?echeance={$espCheck['id']}-{$periodeCheck}";
     $stmtNotifExiste->execute([$lienUnique]);
-    if ((int)$stmtNotifExiste->fetchColumn() > 0) continue; // déjà notifié pour cette échéance
+    if ((int)$stmtNotifExiste->fetchColumn() > 0) continue;
 
     $texteEcheance = "Échéance de bail : le loyer de « {$espCheck['nom']} » ({$dureeParType[$typeBailCheck]} mois) est dû depuis le " . date('d/m/Y', strtotime($periodeCheck)) . " — encaissement à effectuer.";
     notify('admin_comptable', 'echeance_bail', $texteEcheance, $lienUnique);

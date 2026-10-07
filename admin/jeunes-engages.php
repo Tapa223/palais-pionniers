@@ -13,7 +13,6 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         $id = (int)($_POST['id'] ?? 0);
         if ($id && ($_POST['action'] ?? '') === 'supprimer') {
-            // Suppression d'une erreur ou d'un test : Direction uniquement
             if (!is_superadmin()) {
                 $msg = ['err', 'Seule la Direction peut supprimer une inscription.'];
             } else {
@@ -71,8 +70,8 @@ require __DIR__ . '/_admin_header.php';
   <div class="space-y-3">
     <?php foreach ($jeunes as $j): ?>
     <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-      <div>
-        <p class="font-black text-primary text-sm"><?= e(trim(($j['prenom'] ?? '').' '.$j['nom'])) ?><?= $j['age'] ? ', '.(int)$j['age'].' ans' : '' ?><?= !empty($j['date_naissance']) ? ' — né(e) le '.date('d/m/Y', strtotime($j['date_naissance'])) : '' ?></p>
+      <div class="min-w-0 flex-1" style="overflow-wrap:anywhere">
+        <p class="font-black text-primary text-sm"><?= e(trim(($j['prenom'] ?? '').' '.$j['nom'])) ?><?= $j['age'] ? ', '.(int)$j['age'].' ans' : '' ?><?= !empty($j['date_naissance']) ? ' · né(e) le '.date('d/m/Y', strtotime($j['date_naissance'])) : '' ?></p>
         <p class="text-xs text-slate-400 mt-0.5"><?= e($j['telephone']) ?><?= $j['email'] ? ' · '.e($j['email']) : '' ?><?= $j['commune'] ? ' · '.e($j['commune']) : '' ?><?= $j['profession'] ? ' · '.e($j['profession']) : '' ?></p>
         <?php if ($j['domaine_interet']): ?><p class="text-xs text-accent font-bold mt-1"><?= e($j['domaine_interet']) ?></p><?php endif; ?>
         <?php if ($j['motivation']): ?><p class="text-xs text-slate-500 mt-1 italic">« <?= e($j['motivation']) ?> »</p><?php endif; ?>

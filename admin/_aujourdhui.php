@@ -1,19 +1,4 @@
 <?php
-/*
- * Bloc « Aujourd'hui au Palais » du tableau de bord d'administration.
- * Inclus par admin/dashboard.php (accès déjà contrôlé par require_admin()).
- *
- * Contenu : les réservations qui occupent un espace aujourd'hui
- *   - salles (mode créneau) : réservations du jour ;
- *   - hébergements (mode séjour) : arrivées, séjours en cours et départs du jour ;
- * au statut validée, ainsi que les demandes encore en attente de validation
- * (signalées « À valider »). Aucune donnée n'est modifiée ici.
- *
- * Informations selon le rôle :
- *   - téléphone du client : Direction, Ministre, Admin Espaces, Comptable ;
- *   - état du paiement    : Direction, Ministre, Comptable ;
- *   - lien vers la réservation : rôles ayant accès à la page Réservations.
- */
 $roleJour     = $_SESSION['role'] ?? '';
 $voitContact  = in_array($roleJour, ['superadmin', 'ministre', 'admin_espaces', 'admin_comptable'], true);
 $voitFinance  = in_array($roleJour, ['superadmin', 'ministre', 'admin_comptable'], true);

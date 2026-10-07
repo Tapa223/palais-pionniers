@@ -3,18 +3,6 @@ require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_role(['ministre', 'admin_comptable', 'admin_espaces']);
 
-/*
- * Partenaires (CICB, ministère, institution…).
- * Un partenaire est une fiche « partenaires » (l'organisation) et un ou
- * plusieurs comptes utilisateurs de rôle « partenaire » qui lui sont
- * rattachés (users.partenaire_id). Ces comptes réservent par le circuit
- * normal (espaces, tarifs, disponibilités, validation, paiements, bons) ;
- * leurs réservations sont attribuées au partenaire (reservations.partenaire_id).
- *
- * Gestion (fiche, comptes, mots de passe initiaux, désactivation) :
- * Direction (superadmin). Consultation et statistiques : ministre,
- * comptabilité, administration des espaces.
- */
 $pdo      = db();
 $role     = $_SESSION['role'] ?? '';
 $peutGerer = is_superadmin();
@@ -26,10 +14,6 @@ unset($_SESSION['partenaires_flash']);
 
 $installe = partenaires_disponibles($pdo);
 
-/*
- * Compte utilisateur du partenaire (rôle « partenaire », users.partenaire_id).
- * Mêmes règles à la création du partenaire et depuis sa fiche.
- */
 $validerNouveauCompte = function () use ($pdo): array {
     if (!role_partenaire_disponible($pdo)) {
         throw new RuntimeException('Exécutez d\'abord la migration « migration_role_partenaire.sql ».');
@@ -69,7 +53,6 @@ $insererCompte = function (array $c, int $pid) use ($pdo): int {
     log_activity('partenaire_compte_cree', 'users', "Compte partenaire #$uid ({$c['email']}) créé pour le partenaire #$pid");
     return $uid;
 };
-// Compte existant à rattacher : client ou partenaire sans autre rattachement
 $validerCompteExistant = function (int $pid) use ($pdo): array {
     if (!role_partenaire_disponible($pdo)) {
         throw new RuntimeException('Exécutez d\'abord la migration « migration_role_partenaire.sql ».');
@@ -139,8 +122,6 @@ if ($installe && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 log_activity('partenaire_modifie', 'users', "Partenaire #$pid modifié : {$champs['nom']}");
                 $_SESSION['partenaires_flash'] = ['ok', 'Partenaire mis à jour.'];
             } else {
-                // Un partenaire est créé avec son compte de connexion : nouveau compte
-                // (rôle « partenaire ») ou compte existant rattaché. Tout ou rien.
                 $modeCompte = ($_POST['compte_mode'] ?? 'nouveau') === 'existant' ? 'existant' : 'nouveau';
                 $compte = $modeCompte === 'nouveau' ? $validerNouveauCompte() : $validerCompteExistant(0);
                 $pdo->beginTransaction();
@@ -169,7 +150,6 @@ if ($installe && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 : 'Partenaire désactivé : ses comptes ne peuvent plus se connecter ni réserver (l\'historique reste attribué).'];
 
         } elseif ($action === 'creer_compte' && $pid) {
-            // Compte supplémentaire (ou recréé) depuis la fiche partenaire
             $compte = $validerNouveauCompte();
             if (!$pdo->query("SELECT actif FROM partenaires WHERE id = " . $pid)->fetchColumn()) {
                 throw new RuntimeException('Réactivez le partenaire avant de lui créer un compte.');
@@ -178,13 +158,11 @@ if ($installe && $_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['partenaires_flash'] = ['ok', "Compte partenaire créé : identifiant « {$compte['email']} ». Communiquez le mot de passe initial au partenaire, qui pourra le modifier dans son espace."];
 
         } elseif ($action === 'associer' && $pid) {
-            // Rattacher un compte existant (client) : il devient un compte « partenaire »
             $u = $validerCompteExistant($pid);
             $rattacherCompte($u, $pid);
             $_SESSION['partenaires_flash'] = ['ok', "Compte « {$u['nom_complet']} » rattaché au partenaire."];
 
         } elseif ($action === 'dissocier' && $pid) {
-            // Le compte redevient un client classique ; l'historique reste attribué
             $uid = (int)($_POST['user_id'] ?? 0);
             $st = $pdo->prepare("UPDATE users SET partenaire_id = NULL, role = IF(role = 'partenaire', 'user', role) WHERE id = ? AND partenaire_id = ?");
             $st->execute([$uid, $pid]);
@@ -209,7 +187,6 @@ if ($installe && $_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['partenaires_flash'] = ['ok', 'Mot de passe réinitialisé. Communiquez-le au partenaire, qui pourra le modifier dans son espace.'];
 
         } elseif ($action === 'supprimer' && $pid) {
-            // Suppression physique uniquement si aucune trace : ni compte, ni réservation
             $nbComptes = (int)$pdo->query("SELECT COUNT(*) FROM users WHERE partenaire_id = " . $pid)->fetchColumn();
             $nbResas   = (int)$pdo->query("SELECT COUNT(*) FROM reservations WHERE partenaire_id = " . $pid)->fetchColumn();
             if ($nbComptes || $nbResas) {
@@ -228,10 +205,9 @@ if ($installe && $_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
         }
-        $_SESSION['partenaires_flash'] = ['err', $e->getMessage()];
+        $_SESSION['partenaires_flash'] = ['err', message_erreur($e)];
         if (($action ?? '') === 'enregistrer' && empty($pid)) {
             $retour = 'partenaires.php?nouveau=1';
-            // Champs de la fiche conservés (jamais les mots de passe)
             $_SESSION['partenaires_saisie'] = array_intersect_key($_POST, array_flip(['nom', 'type', 'contact_nom', 'telephone', 'email', 'notes', 'compte_mode', 'nom_complet', 'email_compte', 'telephone_compte', 'email_existant']));
         }
     } catch (PDOException $e) {
@@ -245,11 +221,6 @@ if ($installe && $_SERVER['REQUEST_METHOD'] === 'POST') {
     exit;
 }
 
-/* ------------------------------------------------------------------
- * Données et statistiques (situation financière centrale)
- * Réservations comptées : toutes sauf refusées, annulées, expirées.
- * Revenus : montants réellement payés (paiements − remboursements).
- * ------------------------------------------------------------------ */
 $partenaires = [];
 $stats = ['revenus' => 0.0, 'reste' => 0.0, 'nb' => 0];
 $parEspace = [];
@@ -271,14 +242,12 @@ if ($installe) {
     unset($p);
     $index = array_flip(array_map(fn($p) => (int)$p['id'], $partenaires));
 
-    // Comptes de connexion rattachés (identifiant et état), pour la liste de suivi
     foreach ($pdo->query("SELECT id, email, actif, role, partenaire_id FROM users WHERE partenaire_id IS NOT NULL ORDER BY nom_complet")->fetchAll() as $cpt) {
         $i = $index[(int)$cpt['partenaire_id']] ?? null;
         if ($i !== null) {
             $partenaires[$i]['comptes'][] = $cpt;
         }
     }
-    // Dernière demande de réservation (toutes, y compris annulées)
     foreach ($pdo->query("SELECT partenaire_id, MAX(created_at) AS derniere FROM reservations WHERE partenaire_id IS NOT NULL GROUP BY partenaire_id")->fetchAll() as $d) {
         $i = $index[(int)$d['partenaire_id']] ?? null;
         if ($i !== null) {
@@ -299,7 +268,6 @@ if ($installe) {
     $detailId = (int)($_GET['id'] ?? 0);
     foreach ($resas as $r) {
         $s = situation_financiere_reservation($pdo, (int)$r['id']);
-        // Historique complet dans la fiche ; statistiques hors refusées / annulées / expirées
         if ((int)$r['partenaire_id'] === $detailId) {
             $r['situation'] = $s;
             $detailResas[] = $r;
@@ -335,7 +303,6 @@ if ($installe) {
 }
 $fcfa = fn($v) => number_format((float)$v, 0, ',', ' ');
 $edition = $detail ?? (isset($_GET['nouveau']) ? [] : null);
-// Saisie conservée après une erreur de création (jamais les mots de passe)
 $saisie = $_SESSION['partenaires_saisie'] ?? [];
 unset($_SESSION['partenaires_saisie']);
 if ($edition === [] && $saisie) {
@@ -377,7 +344,6 @@ require __DIR__ . '/_admin_header.php';
 </div>
 <?php else: ?>
 
-<!-- Statistiques globales -->
 <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
   <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
     <p class="text-[10px] font-black uppercase tracking-widest text-slate-400">Revenus des partenaires</p>
@@ -397,7 +363,6 @@ require __DIR__ . '/_admin_header.php';
 </div>
 
 <?php if ($edition !== null && $peutGerer): ?>
-<!-- Création / modification -->
 <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 mb-6">
   <h2 class="font-black text-primary text-sm uppercase italic mb-4"><?= $detail ? 'Modifier le partenaire' : 'Nouveau partenaire' ?></h2>
   <form method="POST" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -422,7 +387,6 @@ require __DIR__ . '/_admin_header.php';
       <textarea name="notes" rows="2" class="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold text-primary outline-none focus:border-primary"><?= e($edition['notes'] ?? '') ?></textarea>
     </div>
     <?php if (!$detail): ?>
-    <!-- Compte de connexion du partenaire (créé en même temps que la fiche) -->
     <fieldset class="sm:col-span-2 rounded-xl bg-slate-50 p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
       <legend class="text-[10px] font-black uppercase tracking-widest text-slate-500 px-1">Compte de connexion du partenaire *</legend>
       <div class="sm:col-span-2 flex flex-col sm:flex-row gap-2 text-xs font-bold text-primary">
@@ -464,7 +428,6 @@ require __DIR__ . '/_admin_header.php';
 <?php endif; ?>
 
 <?php if ($detail): ?>
-<!-- Détail d'un partenaire -->
 <div class="bg-white rounded-2xl border border-indigo-100 shadow-sm p-5 mb-6">
   <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
     <div>
@@ -540,7 +503,6 @@ require __DIR__ . '/_admin_header.php';
   </div>
 
   <?php if ($peutGerer): ?>
-  <!-- Créer le compte utilisateur du partenaire (rôle « partenaire ») -->
   <form method="POST" class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3 rounded-xl bg-slate-50 p-3" autocomplete="off">
     <p class="sm:col-span-2 text-[10px] font-black uppercase tracking-widest text-slate-500">Créer un compte partenaire</p>
     <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
@@ -558,7 +520,6 @@ require __DIR__ . '/_admin_header.php';
            class="rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-bold text-primary outline-none focus:border-primary">
     <button type="submit" class="bg-primary text-white text-xs font-black uppercase px-5 py-2.5 rounded-xl hover:bg-slate-800 transition">Créer le compte</button>
   </form>
-  <!-- Rattacher un compte existant -->
   <form method="POST" class="flex flex-col sm:flex-row gap-2 mb-5">
     <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
     <input type="hidden" name="action" value="associer">
@@ -588,7 +549,6 @@ require __DIR__ . '/_admin_header.php';
 <?php endif; ?>
 
 <div class="grid lg:grid-cols-3 gap-5">
-  <!-- Par partenaire -->
   <div class="lg:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
     <div class="px-5 py-4 border-b border-slate-100"><h2 class="font-black text-primary text-sm uppercase italic">Par partenaire</h2></div>
     <div class="divide-y divide-slate-50">
@@ -616,7 +576,6 @@ require __DIR__ . '/_admin_header.php';
       <?php if (!$partenaires): ?><p class="px-5 py-8 text-sm text-slate-400 text-center">Aucun partenaire enregistré.</p><?php endif; ?>
     </div>
   </div>
-  <!-- Espaces utilisés -->
   <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
     <div class="px-5 py-4 border-b border-slate-100"><h2 class="font-black text-primary text-sm uppercase italic">Espaces utilisés</h2></div>
     <div class="divide-y divide-slate-50">

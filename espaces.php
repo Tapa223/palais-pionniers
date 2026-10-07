@@ -36,7 +36,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'deman
 
 $cat = $_GET['cat'] ?? 'all';
 
-// 1. Modification SQL : On utilise GROUP_CONCAT pour récupérer toutes les images séparées par une virgule
 $sql = "
   SELECT e.id, e.slug, e.nom, e.capacite, e.description, e.mode_reservation, e.gerant_externe, c.nom AS categorie, c.slug AS cat_slug,
   (SELECT GROUP_CONCAT(chemin ORDER BY id ASC) FROM espace_images WHERE espace_id = e.id) as toutes_photos,
@@ -59,7 +58,7 @@ $espaces = $stmt->fetchAll();
 
 $cats = $pdo->query("SELECT slug, nom FROM categories ORDER BY id")->fetchAll();
 
-$pageTitle = "Nos espaces — Palais des Pionniers";
+$pageTitle = "Nos espaces | Palais des Pionniers";
 $page = 'espaces.php';
 require __DIR__ . '/includes/header.php';
 ?>
@@ -70,7 +69,6 @@ require __DIR__ . '/includes/header.php';
     <p class="mt-2 text-slate-500 font-medium text-sm sm:text-base">Découvrez nos infrastructures et réservez le créneau qui vous convient.</p>
   </header>
 
-  <!-- Filtres -->
   <div class="mt-5 sm:mt-8">
     <span class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">Filtrer par :</span>
     <div class="flex flex-nowrap sm:flex-wrap items-center gap-3 overflow-x-auto sm:overflow-visible -mx-4 px-4 sm:mx-0 sm:px-0 pb-2 sm:pb-0 scrollbar-hide">
@@ -87,13 +85,10 @@ require __DIR__ . '/includes/header.php';
     <div class="mt-12 grid grid-cols-2 gap-3 sm:gap-8 lg:grid-cols-3 xl:grid-cols-4">
       <?php foreach ($espaces as $e): 
           $urlDetails = "espace.php?slug=" . urlencode($e['slug']);
-          // On transforme la chaîne d'images en tableau PHP
           $photos = $e['toutes_photos'] ? explode(',', $e['toutes_photos']) : [];
       ?>
-        <!-- On retire le 'a' global car on va mettre des boutons à l'intérieur -->
         <div onclick="window.location='<?= $urlDetails ?>'" class="cursor-pointer group flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-all hover:-translate-y-2 hover:shadow-2xl relative">
           
-          <!-- ZONE SLIDER -->
           <div class="relative aspect-[16/11] overflow-hidden bg-slate-100 js-slider">
             <?php if (!empty($photos)): ?>
                 <?php foreach ($photos as $index => $img): ?>
@@ -102,7 +97,6 @@ require __DIR__ . '/includes/header.php';
                          data-index="<?= $index ?>">
                 <?php endforeach; ?>
                 
-                <!-- Contrôles du slider (uniquement si plusieurs photos) -->
                 <?php if (count($photos) > 1): ?>
                     <button onclick="event.stopPropagation(); changeSlide(this, -1)" class="absolute left-2 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center bg-white/80 rounded-full text-xs hover:bg-white z-10 opacity-0 group-hover:opacity-100 transition-opacity">
                         <i class="fas fa-chevron-left"></i>
@@ -110,7 +104,6 @@ require __DIR__ . '/includes/header.php';
                     <button onclick="event.stopPropagation(); changeSlide(this, 1)" class="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center bg-white/80 rounded-full text-xs hover:bg-white z-10 opacity-0 group-hover:opacity-100 transition-opacity">
                         <i class="fas fa-chevron-right"></i>
                     </button>
-                    <!-- Indicateur (petit point en bas) -->
                     <div class="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1 z-10">
                         <?php foreach ($photos as $index => $img): ?>
                             <div class="w-1.5 h-1.5 rounded-full <?= $index === 0 ? 'bg-white' : 'bg-white/40' ?> js-dot"></div>
@@ -127,7 +120,7 @@ require __DIR__ . '/includes/header.php';
                     <?= e($e['categorie']) ?>
                 </span>
                 <?php if (!empty($e['gerant_externe'])): ?>
-                <span title="Cet espace est loué sur une longue durée à un tiers — pas de réservation ponctuelle possible" class="rounded-full bg-amber-500/95 px-1.5 sm:px-3 py-0.5 sm:py-1.5 text-[7px] sm:text-[10px] font-black uppercase tracking-widest text-white shadow-sm">
+                <span title="Cet espace est loué sur une longue durée à un tiers : pas de réservation ponctuelle possible" class="rounded-full bg-amber-500/95 px-1.5 sm:px-3 py-0.5 sm:py-1.5 text-[7px] sm:text-[10px] font-black uppercase tracking-widest text-white shadow-sm">
                     <i class="fas fa-user-tie mr-1"></i>En bail
                 </span>
                 <?php elseif ($e['mode_reservation'] === 'sejour'): ?>
@@ -142,7 +135,6 @@ require __DIR__ . '/includes/header.php';
             </div>
           </div>
 
-          <!-- ZONE INFOS -->
           <div class="flex flex-1 flex-col p-3 sm:p-6">
             <h3 class="text-sm sm:text-xl font-black text-slate-900 uppercase italic tracking-tighter">
                 <?= e($e['nom']) ?>
@@ -165,7 +157,6 @@ require __DIR__ . '/includes/header.php';
     </div>
   <?php endif; ?>
 
-  <!-- SERVICES & PRESTATIONS -->
   <?php
   $services = $pdo->query("SELECT * FROM services_annexes WHERE actif = 1 ORDER BY nom ASC")->fetchAll();
   if ($services):
@@ -174,7 +165,7 @@ require __DIR__ . '/includes/header.php';
     <header class="max-w-2xl">
       <span class="inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-accent bg-accent/10 px-3 py-1.5 rounded-full mb-3"><i class="fas fa-concierge-bell"></i> Sur simple demande</span>
       <h2 class="text-2xl sm:text-3xl font-black italic tracking-tighter uppercase text-white">Services & <span class="text-accent">Prestations</span></h2>
-      <p class="mt-2 text-slate-400 font-medium text-sm">Prestations annexes du Palais, disponibles sur simple demande — connectez-vous pour envoyer votre demande, elle sera suivie par l'administration.</p>
+      <p class="mt-2 text-slate-400 font-medium text-sm">Prestations annexes du Palais, disponibles sur simple demande. Connectez-vous pour envoyer votre demande, elle sera suivie par l'administration.</p>
     </header>
     <?php if ($msgService): ?>
     <div class="mt-6 rounded-2xl p-4 flex items-center gap-3 <?= $msgService[0]==='ok' ? 'bg-green-500/10 border border-green-500/30 text-green-400' : 'bg-red-500/10 border border-red-500/30 text-accent' ?>">
@@ -217,7 +208,6 @@ require __DIR__ . '/includes/header.php';
   <?php endif; ?>
 </div>
 
-<!-- SCRIPT SLIDER -->
 <script>
 function changeSlide(btn, direction) {
     const container = btn.closest('.js-slider');
@@ -225,17 +215,14 @@ function changeSlide(btn, direction) {
     const dots = container.querySelectorAll('.js-dot');
     let currentIndex = 0;
 
-    // Trouver l'index actuel
     slides.forEach((s, i) => {
         if(s.classList.contains('opacity-100')) currentIndex = i;
     });
 
-    // Calculer le nouvel index
     let newIndex = currentIndex + direction;
     if(newIndex >= slides.length) newIndex = 0;
     if(newIndex < 0) newIndex = slides.length - 1;
 
-    // Appliquer le changement
     slides.forEach((s, i) => {
         s.classList.replace(i === newIndex ? 'opacity-0' : 'opacity-100', i === newIndex ? 'opacity-100' : 'opacity-0');
     });

@@ -13,7 +13,6 @@ if (!$f) { header('Location: formations.php'); exit; }
 
 $estTerminee = !empty($f['date_fin']) && strtotime($f['date_fin']) < strtotime('today');
 
-// Carrousel : photo principale + galerie complémentaire de cette formation
 $galerie = $pdo->prepare("SELECT * FROM formation_galerie WHERE formation_id = ? ORDER BY ordre ASC, id ASC");
 $galerie->execute([$id]);
 $galerie = $galerie->fetchAll();
@@ -23,7 +22,7 @@ if ($f['photo']) $slidesFormation[] = 'assets/images/formations/' . $f['photo'];
 foreach ($galerie as $g) $slidesFormation[] = 'assets/images/formations/' . $g['image_path'];
 $slidesFormation = array_values(array_unique(array_filter($slidesFormation, fn($p) => file_exists(__DIR__ . '/' . $p))));
 
-$pageTitle = $f['nom'] . " — Palais des Pionniers";
+$pageTitle = $f['nom'] . " | Palais des Pionniers";
 $page = 'formations.php';
 require __DIR__ . '/includes/header.php';
 ?>
@@ -89,7 +88,7 @@ require __DIR__ . '/includes/header.php';
 
                 <?php if ($estTerminee): ?>
                 <div class="mt-8 bg-slate-50 border border-slate-200 rounded-2xl p-5">
-                    <p class="text-sm text-slate-500 font-semibold"><i class="fas fa-info-circle text-slate-400 mr-2"></i>Cette session s'est déroulée au Palais des Pionniers. D'autres sessions de cette formation pourront être organisées — contactez l'administration pour être informé(e).</p>
+                    <p class="text-sm text-slate-500 font-semibold"><i class="fas fa-info-circle text-slate-400 mr-2"></i>Cette session s'est déroulée au Palais des Pionniers. D'autres sessions de cette formation pourront être organisées : contactez l'administration pour être informé(e).</p>
                 </div>
                 <?php elseif ($f['contact']): ?>
                 <div class="mt-8 bg-accent/5 border border-accent/20 rounded-2xl p-5">

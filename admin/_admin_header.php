@@ -14,14 +14,12 @@ $roleLabels = [
 ];
 [$roleLabel, $roleBadge] = $roleLabels[$role] ?? ['Utilisateur','bg-slate-400 text-white'];
 
-// Marquer une notification comme lue quand on arrive dessus via son lien "Voir"
 if (!empty($_GET['read_notif'])) {
     $uidNotif = (int)($_SESSION['user_id'] ?? 0);
     db()->prepare("UPDATE notifications SET lu = 1 WHERE id = ? AND (destinataire_role = ? OR destinataire_id = ?)")
         ->execute([(int)$_GET['read_notif'], $role, $uidNotif]);
 }
 
-// Compter messages non lus (pour badge) — même périmètre par rôle que messages.php
 $unread = 0;
 $notifCount = 0;
 try {
@@ -37,7 +35,7 @@ try {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title><?= e($pageTitle ?? 'Admin — Palais des Pionniers') ?></title>
+<title><?= e($pageTitle ?? 'Admin | Palais des Pionniers') ?></title>
 <link rel="stylesheet" href="../assets/css/tailwind.css">
 <link rel="stylesheet" href="../assets/fontawesome/css/all.min.css">
 <link rel="stylesheet" href="../assets/css/fonts.css">
@@ -55,13 +53,10 @@ h1,h2,h3 { font-family:'Plus Jakarta Sans',Inter,sans-serif; letter-spacing:-.02
 </head>
 <body class="min-h-screen">
 
-<!-- Overlay mobile -->
 <div id="overlay" onclick="closeSidebar()"></div>
 
 <div class="flex min-h-screen">
-  <!-- SIDEBAR -->
   <aside id="sidebar" class="w-64 flex-col bg-primary text-white flex flex-shrink-0">
-    <!-- Logo -->
     <div class="px-5 py-5 border-b border-white/10 flex items-center justify-between">
       <div>
         <div class="text-base font-extrabold uppercase italic tracking-tight">Palais <span class="text-accent">Pionniers</span></div>
@@ -72,10 +67,9 @@ h1,h2,h3 { font-family:'Plus Jakarta Sans',Inter,sans-serif; letter-spacing:-.02
       </button>
     </div>
 
-    <!-- Profil -->
     <div class="px-5 py-4 border-b border-white/10 flex items-center gap-3">
       <div class="w-9 h-9 rounded-full bg-accent flex items-center justify-center font-black text-sm flex-shrink-0">
-        <?= strtoupper(substr($u['nom_complet'],0,1)) ?>
+        <?= e(mb_strtoupper(mb_substr((string)$u['nom_complet'], 0, 1))) ?>
       </div>
       <div class="min-w-0">
         <p class="text-sm font-bold truncate"><?= e($u['nom_complet']) ?></p>
@@ -83,7 +77,6 @@ h1,h2,h3 { font-family:'Plus Jakarta Sans',Inter,sans-serif; letter-spacing:-.02
       </div>
     </div>
 
-    <!-- Navigation -->
     <nav class="flex-1 p-3 space-y-1 text-sm overflow-y-auto">
       <?php
       $current = basename($_SERVER['PHP_SELF']);
@@ -104,7 +97,6 @@ h1,h2,h3 { font-family:'Plus Jakarta Sans',Inter,sans-serif; letter-spacing:-.02
       <?php endforeach; ?>
     </nav>
 
-    <!-- Bas sidebar -->
     <div class="p-3 border-t border-white/10 space-y-1">
       <a href="mon-mot-de-passe.php"
          class="flex items-center gap-3 rounded-xl px-3 py-2.5 transition text-sm <?= basename($_SERVER['PHP_SELF']) === 'mon-mot-de-passe.php' ? 'bg-accent text-white' : 'text-white/75 hover:bg-white/10 hover:text-white' ?>">
@@ -119,12 +111,9 @@ h1,h2,h3 { font-family:'Plus Jakarta Sans',Inter,sans-serif; letter-spacing:-.02
     </div>
   </aside>
 
-  <!-- CONTENU PRINCIPAL -->
   <div id="mainContent" class="flex-1 flex flex-col min-w-0">
-    <!-- Header top -->
     <header class="flex items-center justify-between border-b border-slate-200 bg-white px-4 md:px-6 py-3 sticky top-0 z-30 shadow-sm">
       <div class="flex items-center gap-2">
-        <!-- Bouton Retour au site public (texte explicite pour ne pas confondre les deux) -->
         <a href="../index.php"
            class="flex items-center gap-1.5 h-9 px-3 rounded-xl bg-slate-100 text-primary hover:bg-slate-200 transition flex-shrink-0 text-[11px] font-black uppercase tracking-tight"
            title="Quitter l'administration et revenir sur le site public">
@@ -132,23 +121,19 @@ h1,h2,h3 { font-family:'Plus Jakarta Sans',Inter,sans-serif; letter-spacing:-.02
           <span class="hidden sm:inline">Retour sur le site</span>
         </a>
 
-        <!-- Burger mobile -->
         <button onclick="openSidebar()" class="md:hidden w-9 h-9 flex items-center justify-center rounded-xl bg-slate-100 text-primary hover:bg-slate-200 transition">
           <i class="fas fa-bars"></i>
         </button>
 
       </div>
-        <!-- Titre page (mobile) -->
         <div class="md:hidden font-black text-primary uppercase italic text-sm tracking-tight"><?= e($pageTitle ?? '') ?></div>
 
-        <!-- Breadcrumb desktop -->
         <div class="hidden md:flex items-center gap-2 text-sm text-slate-400">
           <i class="fas fa-home text-xs"></i>
           <span>/</span>
           <span class="font-semibold text-primary"><?= e($pageTitle ?? 'Dashboard') ?></span>
         </div>
 
-      <!-- Droite header : notifications + profil -->
       <div class="flex items-center gap-3">
         <a href="notifications.php" class="relative flex items-center justify-center w-9 h-9 rounded-xl bg-slate-100 text-slate-600 hover:bg-amber-500 hover:text-white transition">
           <i class="fas fa-bell text-sm"></i>
@@ -158,7 +143,7 @@ h1,h2,h3 { font-family:'Plus Jakarta Sans',Inter,sans-serif; letter-spacing:-.02
         </a>
         <div class="flex items-center gap-2 text-sm">
           <div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center font-black text-white text-xs">
-            <?= strtoupper(substr($u['nom_complet'],0,1)) ?>
+            <?= e(mb_strtoupper(mb_substr((string)$u['nom_complet'], 0, 1))) ?>
           </div>
           <span class="hidden md:block font-semibold text-slate-700 max-w-[120px] truncate"><?= e(explode(' ',$u['nom_complet'])[0]) ?></span>
         </div>
@@ -168,14 +153,6 @@ h1,h2,h3 { font-family:'Plus Jakarta Sans',Inter,sans-serif; letter-spacing:-.02
     <main class="flex-1 p-4 md:p-8">
       <div class="w-full max-w-[1600px] mx-auto">
         <?php
-          /*
-           * Flèche « Retour » : l'ancienne flèche de la barre du haut, déplacée ici
-           * pour ne pas être confondue avec « Retour sur le site ».
-           * Affichée sur toutes les pages sauf le tableau de bord.
-           * - $pageRetour = [href, libellé] : retour vers la page parente indiquée ;
-           * - $pageRetour = false : la page a déjà son propre lien retour ;
-           * - sinon : comportement d'origine (page précédente), repli sur le tableau de bord.
-           */
           $pageCourante = basename($_SERVER['PHP_SELF']);
           $estSecondaire = true;
           $retourCls = 'inline-flex items-center gap-1.5 mb-4 px-3 py-1.5 rounded-full bg-white border border-slate-200 text-[11px] font-black uppercase tracking-tight text-primary hover:border-primary transition';

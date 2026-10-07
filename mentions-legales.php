@@ -2,7 +2,7 @@
 require_once __DIR__ . '/config/database.php';
 require_once __DIR__ . '/includes/auth.php';
 $pdo = db();
-$pageTitle = "Mentions légales — Palais des Pionniers";
+$pageTitle = "Mentions légales | Palais des Pionniers";
 $pageDescription = "Mentions légales du site officiel du Palais des Pionniers de Magnambougou/Dianéguéla.";
 $page = 'mentions-legales.php';
 require __DIR__ . '/includes/header.php';

@@ -25,9 +25,6 @@ $modesRemboursement = [
     'cheque' => 'Chèque'
 ];
 
-/*
- * Traitement des actions du comptable.
- */
 if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (!csrf_check($_POST['csrf_token'] ?? '')) {
@@ -123,11 +120,6 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     );
                 }
 
-                /*
-                 * Nouvelle date / autre espace : même règle que
-                 * requisition-detail.php — pas de clôture sans nouvelle
-                 * réservation validée, ni avec un trop-perçu non remboursé.
-                 */
                 if (
                     $action === 'traiter_operation'
                     && in_array($requisition['choix_client'], ['nouvelle_date', 'autre_espace'], true)
@@ -141,9 +133,6 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
 
-                /*
-                 * Prise en charge.
-                 */
                 if ($action === 'prendre_en_charge') {
 
                     $pdo->prepare("
@@ -185,16 +174,11 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     ];
                 }
 
-                /*
-                 * Traitement d'un remboursement.
-                 */
                 elseif (
                     $action === 'traiter_remboursement'
                     && $requisition['choix_client'] === 'remboursement'
                 ) {
 
-                    // Règle commune avec requisition-detail.php : totalité du montant
-                    // réellement payé (paiements − remboursements déjà effectués)
                     $rembAttendu = requisition_remboursement_attendu($pdo, $id);
                     $montantPaye = $rembAttendu['type'] === 'remboursement' ? $rembAttendu['montant'] : 0.0;
                     $montantARembourser = $montantPaye;
@@ -248,16 +232,11 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
 
                     if ($resultat !== 'effectue') {
-                        // Même règle que requisition-detail.php : la réquisition
-                        // n'est clôturée que par un remboursement réellement effectué.
                         throw new RuntimeException(
                             'Le remboursement doit être marqué comme effectué pour clôturer la réquisition.'
                         );
                     }
 
-                    /*
-                     * Vérification d'un remboursement déjà enregistré.
-                     */
                     $stmtRemb = $pdo->prepare("
                         SELECT *
                         FROM remboursements
@@ -354,10 +333,6 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
                         ]);
                     }
 
-                    /*
-                     * L'opération est clôturée uniquement après
-                     * l'enregistrement effectif du remboursement.
-                     */
                     $pdo->prepare("
                         UPDATE operations_requisition
                         SET
@@ -447,12 +422,6 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     ];
                 }
 
-                /*
-                 * Traitement des autres choix.
-                 *
-                 * Le raccordement à la réservation normale
-                 * sera fait dans l'étape suivante.
-                 */
                 elseif (
                     $action === 'traiter_operation'
                     && $requisition['choix_client'] !== 'remboursement'
@@ -559,18 +528,12 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     $pdo->rollBack();
                 }
 
-                $msg = [
-                    'err',
-                    $e->getMessage()
-                ];
+                $msg = ['err', message_erreur($e)];
             }
         }
     }
 }
 
-/*
- * Filtre.
- */
 $filtreStatut =
     $_GET['statut'] ?? 'en_attente_choix';
 
@@ -680,9 +643,6 @@ $stmt = $pdo->query("
 $requisitions =
     $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-/*
- * Compteurs.
- */
 $compteurs = [
 
     'en_attente_choix' =>
@@ -1105,10 +1065,6 @@ require __DIR__ . '/_admin_header.php';
 
 </div>
 
-
-<!-- ============================================================
-     MODAL DE CHOIX DE RÉQUISITION
-     ============================================================ -->
 
 <div
     id="choixRequisitionModal"

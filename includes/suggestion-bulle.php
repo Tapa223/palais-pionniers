@@ -1,21 +1,11 @@
 <?php
-/*
- * Bulle « Une suggestion ? » (page d'accueil) — boîte à suggestions anonyme.
- * Aucune connexion requise ; aucun élément d'identification envoyé.
- * Fonctionne aussi sans JavaScript (envoi classique puis retour à l'accueil).
- */
 if (!isset($pdo) || !suggestions_disponibles($pdo)) {
     return;
 }
-// Heure d'affichage (anti-spam : délai minimal avant envoi), conservée en session uniquement
 $_SESSION['suggestion_affichee'] = time();
 $retourSuggestion = $_GET['suggestion'] ?? '';
 ?>
 <style>
-  /* Bulle « Une suggestion ? » : léger flottement vertical (quelques pixels) et
-     libellé qui apparaît en fondu puis « respire » doucement. Tout est mis en
-     pause au survol ou au focus, et supprimé si l'utilisateur a demandé à
-     réduire les animations. */
   @media (prefers-reduced-motion: no-preference) {
     #suggestionOuvrir { animation: suggestionFlotte 3.6s ease-in-out infinite; }
     #suggestionLibelle { display:inline-block; animation: suggestionApparait .8s ease-out both, suggestionRespire 3.6s ease-in-out .8s infinite; }
@@ -36,7 +26,6 @@ $retourSuggestion = $_GET['suggestion'] ?? '';
   }
 </style>
 <div id="suggestion" class="fixed right-4 z-40" style="bottom:1rem">
-  <!-- Lien réel (fonctionne sans JavaScript : la page se recharge avec la fenêtre ouverte) -->
   <a href="?suggestion=ouvrir#suggestionModal" id="suggestionOuvrir" role="button" aria-haspopup="dialog" aria-controls="suggestionModal"
      aria-label="Une suggestion ? Envoyer une suggestion anonyme"
      class="flex items-center gap-2 bg-primary text-white rounded-full shadow-xl px-4 py-3 text-xs font-black tracking-wide hover:bg-accent transition">
@@ -66,7 +55,6 @@ $retourSuggestion = $_GET['suggestion'] ?? '';
 
     <form id="suggestionForm" method="POST" action="suggestion.php" class="<?= $retourSuggestion === 'merci' ? 'hidden' : '' ?> space-y-3">
       <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
-      <!-- Champ piège : invisible pour les personnes, rempli par les robots -->
       <div aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden">
         <label>Site web <input type="text" name="site_web" tabindex="-1" autocomplete="off"></label>
       </div>

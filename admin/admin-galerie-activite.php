@@ -71,7 +71,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['photos'])) {
 }
 
 $pageTitle = "Galerie des activités";
-$pageRetour = false; // la page a déjà son propre lien retour
+$pageRetour = false;
 require __DIR__ . '/_admin_header.php';
 ?>
 

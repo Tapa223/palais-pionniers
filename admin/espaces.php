@@ -10,23 +10,17 @@ $readonly = is_readonly_admin();
 if (isset($_GET['success'])) $msg = ['ok', 'Opération réalisée avec succès !'];
 if (isset($_GET['error']))   $msg = ['err', 'Une erreur est survenue.'];
 
-// Message détaillé après un envoi de photos (photos refusées, doublons…)
 if (!empty($_SESSION['espaces_flash'])) {
     $msg = $_SESSION['espaces_flash'];
     unset($_SESSION['espaces_flash']);
 }
 
-/*
- * Photos de la galerie : formats, taille et nombre acceptés.
- * Le type est vérifié sur le contenu réel du fichier (finfo + getimagesize),
- * l'extension enregistrée est déduite de ce contenu, jamais du nom envoyé.
- */
 const ESPACE_PHOTO_TYPES = [
     'image/jpeg' => 'jpg',
     'image/png'  => 'png',
     'image/webp' => 'webp',
 ];
-const ESPACE_PHOTO_TAILLE_MAX = 5 * 1024 * 1024; // 5 Mo par photo
+const ESPACE_PHOTO_TAILLE_MAX = 5 * 1024 * 1024;
 
 function taille_ini_octets(string $valeur): int
 {
@@ -41,22 +35,16 @@ function taille_ini_octets(string $valeur): int
     };
 }
 
-// Limites effectives (les plus strictes entre l'application et php.ini)
 $photoTailleMax  = min(ESPACE_PHOTO_TAILLE_MAX, taille_ini_octets((string)ini_get('upload_max_filesize')) ?: ESPACE_PHOTO_TAILLE_MAX);
 $photoNombreMax  = max(1, (int)ini_get('max_file_uploads') ?: 20);
 $envoiTailleMax  = taille_ini_octets((string)ini_get('post_max_size'));
 
-/**
- * Enregistre les photos envoyées pour un espace.
- * Retourne [nombre ajoutées, liste des messages de refus].
- */
 function enregistrer_photos_espace(PDO $pdo, int $espaceId, array $fichiers, int $tailleMax): array
 {
     $ajoutees = 0;
     $refus    = [];
     $dossier  = __DIR__ . '/../uploads/';
 
-    // Empreintes des photos déjà en ligne pour cet espace (anti-doublon, sans colonne supplémentaire)
     $empreintes = [];
     $existantes = $pdo->prepare("SELECT chemin FROM espace_images WHERE espace_id = ?");
     $existantes->execute([$espaceId]);
@@ -115,10 +103,6 @@ function enregistrer_photos_espace(PDO $pdo, int $espaceId, array $fichiers, int
     return [$ajoutees, $refus];
 }
 
-// ============================================================
-// ACTIONS POST (admin_espaces / superadmin uniquement)
-// ============================================================
-// Envoi dépassant post_max_size : PHP vide $_POST et $_FILES sans erreur visible
 if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST' && empty($_POST) && (int)($_SERVER['CONTENT_LENGTH'] ?? 0) > 0) {
     $msg = ['err', 'Envoi trop volumineux (maximum ' . round($envoiTailleMax / 1048576) . ' Mo au total) : rien n\'a été enregistré. Ajoutez les photos en plusieurs fois.'];
 } elseif (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST' && !csrf_check($_POST['csrf_token'] ?? '')) {
@@ -126,7 +110,6 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST' && empty($_POST) && (int
 } elseif (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
 
-    // Suppression image
     if ($action === 'delete_image') {
         $imgId = (int)($_POST['image_id'] ?? 0);
         $img = $pdo->prepare("SELECT chemin, espace_id FROM espace_images WHERE id = ?");
@@ -139,16 +122,8 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST' && empty($_POST) && (int
         }
     }
 
-    // Suppression espace
     if ($action === 'delete_espace') {
         $id = (int)($_POST['id'] ?? 0);
-        /*
-         * Suppression définitive uniquement pour un espace sans historique.
-         * Les réservations, baux et paiements de bail sont conservés : un
-         * espace utilisé se retire du site en le rendant indisponible.
-         * (Les clés étrangères de bail sont en CASCADE : les vérifier évite
-         * d'effacer des paiements de bail avec l'espace.)
-         */
         $dependances = [];
         foreach ([
             'réservation(s)'        => "SELECT COUNT(*) FROM reservations WHERE espace_id = ?",
@@ -160,7 +135,7 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST' && empty($_POST) && (int
                 $stDep->execute([$id]);
                 $nbDep = (int)$stDep->fetchColumn();
             } catch (PDOException $ex) {
-                $nbDep = 0; // table absente sur cette installation
+                $nbDep = 0;
             }
             if ($nbDep > 0) {
                 $dependances[] = "$nbDep $lib";
@@ -178,14 +153,12 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST' && empty($_POST) && (int
         $del = $pdo->prepare("DELETE FROM espaces WHERE id = ?");
         $del->execute([$id]);
         if ($del->rowCount() === 1) {
-            // Photos effacées du disque seulement après la suppression effective en base
             foreach ($fichiers as $f) @unlink(__DIR__ . '/../uploads/' . basename($f));
             log_activity("espace_supprime","espaces","Espace ID $id supprimé");
         }
         header("Location: espaces.php?success=1"); exit;
     }
 
-    // Terminer le bail (efface d'un coup tous les champs gestionnaire, sans avoir à vider chaque champ)
     if ($action === 'terminer_bail') {
         $id = (int)($_POST['id'] ?? 0);
         $esp = $pdo->prepare("SELECT nom FROM espaces WHERE id = ?"); $esp->execute([$id]); $nomEsp = $esp->fetchColumn();
@@ -195,7 +168,6 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST' && empty($_POST) && (int
         header("Location: espaces.php?success=1"); exit;
     }
 
-    // Création / Mise à jour espace
     if ($action === 'create' || $action === 'update') {
         $id      = (int)($_POST['id'] ?? 0);
         $nom     = trim($_POST['nom']         ?? '');
@@ -230,7 +202,6 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST' && empty($_POST) && (int
             $s->execute([$nom, $slug, $cat, $cap, $desc, $equip, $modeResa, $gerantExterne, $gerantNom, $gerantPrenom, $gerantEmail, $gerantContact, $gerantUserId, $typeBail, $optionVip, $prixVip, $dispo, $id]); log_activity("espace_modifie","espaces","Espace modifié : $nom");
         }
 
-        // Upload galerie (contrôlé : type réel, taille, doublons)
         $photosRefusees = [];
         $photosAjoutees = 0;
         if (!empty($_FILES['galerie']['name'][0])) {
@@ -240,7 +211,6 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST' && empty($_POST) && (int
             }
         }
 
-        // Gestion tarifs inline
         if (!empty($_POST['tarif_libelle'])) {
             foreach ($_POST['tarif_libelle'] as $k => $libelle) {
                 $libelle = trim($libelle);
@@ -262,9 +232,7 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST' && empty($_POST) && (int
                 }
             }
         }
-        // Suppression de tarifs
         if (!empty($_POST['tarif_delete'])) {
-            // Un tarif déjà utilisé par une réservation est conservé (sinon la réservation perd son tarif)
             $tarifUtilise = $pdo->prepare("SELECT COUNT(*) FROM reservations WHERE tarif_id = ?");
             foreach ($_POST['tarif_delete'] as $tid) {
                 $tarifUtilise->execute([(int)$tid]);
@@ -292,9 +260,6 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST' && empty($_POST) && (int
     }
 }
 
-// ============================================================
-// CHARGEMENT DONNÉES
-// ============================================================
 $editId      = (!$readonly && isset($_GET['edit'])) ? (int)$_GET['edit'] : 0;
 $showForm    = !$readonly && (isset($_GET['add']) || $editId);
 $espaceEdit  = null;
@@ -330,7 +295,6 @@ $pageTitle = "Gestion des Espaces";
 require __DIR__ . '/_admin_header.php';
 ?>
 
-<!-- En-tête page -->
 <div class="flex items-center justify-between mb-6 flex-wrap gap-3">
   <div>
     <h1 class="text-2xl font-black text-primary uppercase italic tracking-tight">Gestion des Espaces</h1>
@@ -356,13 +320,9 @@ require __DIR__ . '/_admin_header.php';
 </div>
 <?php endif; ?>
 
-<!-- ============================================================ -->
-<!-- FORMULAIRE AJOUT / MODIFICATION                              -->
-<!-- ============================================================ -->
 <?php if ($showForm): ?>
 <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden mb-6">
 
-  <!-- Header formulaire -->
   <div class="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50">
     <div class="flex items-center gap-3">
       <a href="espaces.php"
@@ -380,7 +340,6 @@ require __DIR__ . '/_admin_header.php';
   </div>
 
   <?php if ($editId && !empty($imagesEdit)): ?>
-  <!-- Suppression d'une photo : formulaire séparé (jamais imbriqué dans le formulaire de l'espace) -->
   <form id="formSupprPhoto" method="POST" action="espaces.php" class="hidden">
     <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
     <input type="hidden" name="action" value="delete_image">
@@ -391,7 +350,6 @@ require __DIR__ . '/_admin_header.php';
     <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
     <input type="hidden" name="id" value="<?= $editId ?>">
 
-    <!-- Infos principales -->
     <div>
       <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-4 flex items-center gap-2">
         <i class="fas fa-info-circle text-accent"></i> Informations générales
@@ -511,7 +469,6 @@ require __DIR__ . '/_admin_header.php';
       </div>
     </div>
 
-    <!-- Description -->
     <div>
       <label class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Présentation détaillée</label>
       <textarea name="description" rows="3"
@@ -519,9 +476,6 @@ require __DIR__ . '/_admin_header.php';
                 class="w-full rounded-xl border-2 border-slate-100 bg-slate-50 px-4 py-3 font-semibold text-primary outline-none focus:border-primary transition text-sm resize-none"><?= e($espaceEdit['description'] ?? '') ?></textarea>
     </div>
 
-    <!-- ============================================================ -->
-    <!-- TARIFS INLINE                                                -->
-    <!-- ============================================================ -->
     <div>
       <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-4 flex items-center gap-2">
         <i class="fas fa-tags text-accent"></i> Tarifs de cet espace
@@ -594,20 +548,17 @@ require __DIR__ . '/_admin_header.php';
         <?php endif; ?>
       </div>
 
-      <!-- Bouton ajouter un tarif -->
       <button type="button" onclick="addTarif()"
               class="flex items-center gap-2 text-xs font-black text-primary border-2 border-dashed border-slate-200 hover:border-primary hover:bg-primary/5 px-5 py-3 rounded-xl transition w-full justify-center">
         <i class="fas fa-plus-circle text-accent"></i> Ajouter un tarif
       </button>
     </div>
 
-    <!-- Galerie photos -->
     <div>
       <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-4 flex items-center gap-2">
         <i class="fas fa-images text-accent"></i> Galerie photos
       </p>
 
-      <!-- Upload : les sélections successives s'ajoutent, envoi unique à l'enregistrement -->
       <label id="zonePhotos" class="flex flex-col items-center justify-center w-full border-2 border-dashed border-slate-200 rounded-2xl py-8 px-4 text-center cursor-pointer hover:border-primary hover:bg-primary/5 transition bg-slate-50">
         <i class="fas fa-cloud-upload-alt text-2xl text-slate-300 mb-2"></i>
         <p class="text-sm font-bold text-slate-500">Cliquez pour ajouter des photos</p>
@@ -617,7 +568,6 @@ require __DIR__ . '/_admin_header.php';
       </label>
       <p id="photosMessage" class="hidden mt-2 text-xs font-bold text-accent"></p>
 
-      <!-- Photos sélectionnées, pas encore enregistrées -->
       <div id="photosEnAttente" class="hidden mt-4">
         <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">
           <span id="photosEnAttenteNombre">0</span> photo(s) à ajouter — enregistrées au clic sur « <?= $editId ? 'Enregistrer les modifications' : 'Créer l\'espace' ?> »
@@ -625,7 +575,6 @@ require __DIR__ . '/_admin_header.php';
         <div id="photosEnAttenteGrille" class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-3"></div>
       </div>
 
-      <!-- Photos existantes -->
       <?php if (!empty($imagesEdit)): ?>
       <div class="mt-5">
         <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3"><?= count($imagesEdit) ?> photo(s) en ligne</p>
@@ -647,7 +596,6 @@ require __DIR__ . '/_admin_header.php';
       <?php endif; ?>
     </div>
 
-    <!-- Boutons formulaire -->
     <div class="flex items-center justify-between pt-2 border-t border-slate-100">
       <a href="espaces.php" class="flex items-center gap-2 text-sm font-bold text-slate-400 hover:text-primary transition">
         <i class="fas fa-arrow-left"></i> Annuler
@@ -662,9 +610,6 @@ require __DIR__ . '/_admin_header.php';
 </div>
 <?php endif; ?>
 
-<!-- ============================================================ -->
-<!-- LISTE DES ESPACES                                            -->
-<!-- ============================================================ -->
 <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
   <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-slate-50/50">
     <h2 class="font-black text-[10px] uppercase tracking-widest text-slate-400 flex items-center gap-2">
@@ -758,7 +703,6 @@ require __DIR__ . '/_admin_header.php';
 </div>
 
 <script>
-// ---- Tarifs dynamiques ----
 const unites = <?= json_encode(['heure'=>'Heure','demi-journee'=>'Demi-journée','jour'=>'Jour','mois'=>'Mois','match'=>'Match','nuitée'=>'Nuitée','événement'=>'Événement','seance'=>'Séance','personne_jour'=>'Pers/jour','personne_mois'=>'Pers/mois','personne_an'=>'Pers/an','activite'=>'Activité','support'=>'Support/manif.']) ?>;
 
 function addTarif() {
@@ -830,7 +774,6 @@ function toggleGerantFields(checkbox) {
 function removeTarif(btn) {
     const row = btn.closest('.tarif-row');
     const idInput = row.querySelector('input[name="tarif_id[]"]');
-    // Si tarif existant (id > 0), marquer pour suppression
     if (idInput && parseInt(idInput.value) > 0) {
         const hidden = document.createElement('input');
         hidden.type  = 'hidden';
@@ -841,9 +784,6 @@ function removeTarif(btn) {
     row.remove();
 }
 
-// Sécurité : renumérote les cases "Bail" juste avant l'envoi, pour qu'elles
-// restent toujours alignées avec l'ordre réel des lignes de tarif à ce
-// moment-là (même après des ajouts/suppressions dynamiques).
 document.getElementById('formEspace')?.addEventListener('submit', function() {
     document.querySelectorAll('#tarifsContainer .tarif-row').forEach((row, idx) => {
         const hidden = row.querySelector('.tarif-bail-hidden');
@@ -853,8 +793,6 @@ document.getElementById('formEspace')?.addEventListener('submit', function() {
     });
 });
 
-// Photos : sélection cumulative (les sélections successives s'ajoutent),
-// retrait individuel avant envoi, doublons ignorés. Envoi unique avec le formulaire.
 (function () {
     const input = document.getElementById('inputPhotos');
     if (!input || typeof DataTransfer === 'undefined') return;
@@ -867,7 +805,7 @@ document.getElementById('formEspace')?.addEventListener('submit', function() {
     const nombreMax = parseInt(input.dataset.nombreMax, 10);
     const envoiMax = parseInt(input.dataset.envoiMax, 10) || 0;
     const typesOk = ['image/jpeg', 'image/png', 'image/webp'];
-    let selection = [];                       // fichiers retenus
+    let selection = [];
     const cle = f => f.name + '|' + f.size + '|' + f.lastModified;
 
     function afficherMessage(lignes) {

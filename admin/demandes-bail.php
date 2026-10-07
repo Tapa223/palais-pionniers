@@ -14,7 +14,6 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $action = $_POST['action'] ?? '';
 
         if ($action === 'supprimer') {
-            // Suppression d'une erreur ou d'un test : Direction uniquement
             $id = (int)($_POST['id'] ?? 0);
             if (!is_superadmin()) {
                 $msg = ['err', 'Seule la Direction peut supprimer une demande.'];
@@ -60,7 +59,6 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     $clientUserId = $existant->fetchColumn();
 
                     if (!$clientUserId) {
-                        // Génère un mot de passe temporaire simple, à communiquer au client
                         $motDePasseGenere = strtoupper(substr(bin2hex(random_bytes(4)), 0, 8));
                         $nomComplet = trim(($d['prenom'] ?? '') . ' ' . $d['nom']);
                         $pdo->prepare("INSERT INTO users (nom_complet, email, telephone, password_hash, role, actif) VALUES (?,?,?,?, 'user', 1)")
@@ -83,13 +81,13 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $espacesSuppNoms = $pdo->prepare("SELECT e.nom FROM demande_bail_espaces dbe JOIN espaces e ON e.id = dbe.espace_id WHERE dbe.demande_id = ?");
                 $espacesSuppNoms->execute([$id]);
                 $espacesSuppNoms = $espacesSuppNoms->fetchAll(PDO::FETCH_COLUMN);
-                $rappelEspaces = $espacesSuppNoms ? " N'oublie pas de configurer aussi le bail sur : " . implode(', ', $espacesSuppNoms) . " (même compte client)." : '';
+                $rappelEspaces = $espacesSuppNoms ? " N'oubliez pas de configurer aussi le bail sur : " . implode(', ', $espacesSuppNoms) . " (même compte client)." : '';
 
                 $msgOk = 'Demande mise à jour.';
                 if ($statut === 'acceptee') {
                     $msgOk .= $motDePasseGenere
-                        ? " Compte client créé ({$d['email']}) — mot de passe temporaire : $motDePasseGenere (à communiquer au client). Pense à créer le bail dans Admin > Espaces et à le lier à ce compte." . $rappelEspaces
-                        : ' Compte client existant lié. Pense à créer le bail dans Admin > Espaces si ce n\'est pas déjà fait.' . $rappelEspaces;
+                        ? " Compte client créé ({$d['email']}) — mot de passe temporaire : $motDePasseGenere (à communiquer au client). Pensez à créer le bail dans Admin > Espaces et à le lier à ce compte." . $rappelEspaces
+                        : ' Compte client existant lié. Pensez à créer le bail dans Admin > Espaces si ce n\'est pas déjà fait.' . $rappelEspaces;
                 }
                 $msg = ['ok', $msgOk];
             }
@@ -142,7 +140,6 @@ $demandes = $pdo->prepare("
 $demandes->execute($params);
 $demandes = $demandes->fetchAll();
 
-// Espaces supplémentaires par demande (bail groupé)
 $espacesSuppParDemande = [];
 if ($demandes) {
     $idsDemandes = array_column($demandes, 'id');
@@ -248,7 +245,6 @@ require __DIR__ . '/_admin_header.php';
   </div>
   <?php endif; ?>
 
-  <!-- Filtres -->
   <div class="flex gap-2 mb-5">
     <?php foreach (['en_attente'=>'En attente','acceptee'=>'Acceptées','refusee'=>'Refusées'] as $val=>$lab): ?>
     <a href="?statut=<?= $val ?>" class="text-xs font-black uppercase px-4 py-2 rounded-xl transition <?= $filterStatut===$val ? 'bg-primary text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200' ?>"><?= $lab ?></a>
@@ -272,7 +268,7 @@ require __DIR__ . '/_admin_header.php';
       <div class="grid sm:grid-cols-2 gap-3 text-xs text-slate-600 mb-3">
         <p><i class="fas fa-building w-4 text-slate-300"></i> <?= e($d['espace_nom']) ?>
           <?php if (!empty($espacesSuppParDemande[$d['id']])): ?>
-          <span class="ml-1 text-[9px] font-black uppercase bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">+ <?= implode(', ', $espacesSuppParDemande[$d['id']]) ?></span>
+          <span class="ml-1 text-[9px] font-black uppercase bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">+ <?= e(implode(', ', $espacesSuppParDemande[$d['id']])) ?></span>
           <?php endif; ?>
         </p>
         <p><i class="fas fa-calendar w-4 text-slate-300"></i> <?= ucfirst($d['duree_souhaitee']) ?><?= $d['date_debut_souhaitee'] ? ' — dès le '.date('d/m/Y', strtotime($d['date_debut_souhaitee'])) : '' ?></p>

@@ -5,7 +5,6 @@ require_role(['ministre','superadmin']);
 
 $pdo = db();
 
-// ---- Filtres ----
 $filterModule = $_GET['module'] ?? '';
 $filterUser   = $_GET['user']   ?? '';
 $search       = trim($_GET['q'] ?? '');
@@ -25,20 +24,16 @@ $moduleIcons = [
 ];
 
 $actionLabels = [
-    // Espaces
     'espace_cree'              => ['Espace créé',              'fa-landmark'],
     'espace_modifie'           => ['Espace modifié',           'fa-pen'],
     'espace_supprime'          => ['Espace supprimé',          'fa-trash'],
     'image_supprimee'          => ['Image supprimée',          'fa-image'],
-    // Réservations
     'reservation_validee'      => ['Réservation validée',      'fa-check-circle'],
     'reservation_refusee'      => ['Réservation refusée',      'fa-times-circle'],
     'reservation_en_attente'   => ['Remise en attente',        'fa-rotate'],
-    // Activités
     'activite_creee'           => ['Activité créée',           'fa-star'],
     'activite_modifiee'        => ['Activité modifiée',        'fa-pen'],
     'activite_supprimee'       => ['Activité supprimée',       'fa-trash'],
-    // Utilisateurs
     'user_cree'                => ['Compte créé',              'fa-user'],
     'user_role_change'         => ['Rôle modifié',             'fa-key'],
     'user_bloque'              => ['Compte bloqué',            'fa-ban'],
@@ -46,12 +41,9 @@ $actionLabels = [
     'mdp_modifie'              => ['Mot de passe modifié',      'fa-key'],
     'user_debloque'            => ['Compte débloqué',          'fa-check-circle'],
     'user_supprime'            => ['Compte supprimé',          'fa-trash'],
-    // Messages
     'message_lu'               => ['Message lu',               'fa-envelope-open'],
     'message_supprime'         => ['Message supprimé',         'fa-trash'],
-    // Paiements
     'paiement_enregistre'      => ['Paiement enregistré',      'fa-money-bill'],
-    // Guichet
     'resa_guichet'             => ['Réservation guichet',       'fa-store'],
     'reservation_supprimee'    => ['Réservation supprimée (erreur ou test)', 'fa-trash'],
     'resa_effectuee'           => ['Réservation effectuée',     'fa-clipboard-check'],
@@ -59,9 +51,7 @@ $actionLabels = [
     'demande_service_supprimee'=> ['Demande de service supprimée', 'fa-trash'],
     'demande_bail_supprimee'   => ['Demande de bail supprimée', 'fa-trash'],
     'jeune_engage_supprime'    => ['Inscription « S\'engager » supprimée', 'fa-trash'],
-    // Observations
     'observation_ajoutee'      => ['Observation ajoutée',      'fa-eye'],
-    // FAQ
     'faq_creee'                => ['Question FAQ ajoutée',     'fa-circle-question'],
     'faq_modifiee'             => ['Question FAQ modifiée',    'fa-circle-question'],
     'faq_supprimee'            => ['Question FAQ supprimée',   'fa-trash'],
@@ -78,7 +68,6 @@ $roleMini = [
     'partenaire'      => ['Partenaire',      'bg-indigo-50 text-indigo-700'],
 ];
 
-// ---- Construction requête ----
 $where   = [];
 $params  = [];
 
@@ -105,7 +94,6 @@ if ($dateTo) {
 
 $whereSQL = $where ? 'WHERE ' . implode(' AND ', $where) : '';
 
-// Total
 $totalStmt = $pdo->prepare("SELECT COUNT(*) FROM activity_log l $whereSQL");
 $totalStmt->execute($params);
 $total     = (int)$totalStmt->fetchColumn();
@@ -113,7 +101,6 @@ $totalPages = max(1, ceil($total / $perPage));
 $page       = min($page, $totalPages);
 $offset     = ($page - 1) * $perPage;
 
-// Logs paginés
 $stmt = $pdo->prepare("
     SELECT l.*, u.role AS user_role
     FROM activity_log l
@@ -125,17 +112,14 @@ $stmt = $pdo->prepare("
 $stmt->execute($params);
 $logs = $stmt->fetchAll();
 
-// Stats par module
 $statsModules = [];
 foreach ($modules as $mod) {
     $statsModules[$mod] = (int)$pdo->query("SELECT COUNT(*) FROM activity_log WHERE module='$mod'")->fetchColumn();
 }
 $totalLogs = array_sum($statsModules);
 
-// Admins pour filtre
 $admins = $pdo->query("SELECT id, nom_complet, role FROM users WHERE role NOT IN ('user','partenaire') ORDER BY nom_complet")->fetchAll();
 
-// Détail d'une action
 $detailId  = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 $detailLog = null;
 if ($detailId) {
@@ -148,7 +132,6 @@ $pageTitle = "Journal d'activité";
 require __DIR__ . '/_admin_header.php';
 ?>
 
-<!-- En-tête -->
 <div class="flex items-center justify-between mb-6 flex-wrap gap-3">
   <div>
     <h1 class="text-2xl font-black text-primary uppercase italic tracking-tight flex items-center gap-2">
@@ -164,7 +147,6 @@ require __DIR__ . '/_admin_header.php';
   <?php endif; ?>
 </div>
 
-<!-- ---- Stats par module ---- -->
 <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
   <?php foreach ($modules as $mod):
     [$icon,$cls,$border] = $moduleIcons[$mod];
@@ -182,7 +164,6 @@ require __DIR__ . '/_admin_header.php';
     </div>
     <p class="text-xl font-black text-primary"><?= $statsModules[$mod] ?></p>
     <p class="text-[10px] font-bold text-slate-500 uppercase tracking-wide capitalize mt-0.5"><?= $mod ?></p>
-    <!-- Barre de proportion -->
     <div class="mt-2 h-1 bg-slate-100 rounded-full overflow-hidden">
       <div class="h-full bg-accent rounded-full" style="width:<?= $pct ?>%"></div>
     </div>
@@ -190,7 +171,6 @@ require __DIR__ . '/_admin_header.php';
   <?php endforeach; ?>
 </div>
 
-<!-- ---- Filtres ---- -->
 <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 mb-5">
   <form method="GET" class="flex flex-wrap gap-3 items-end">
     <?php if ($filterModule): ?>
@@ -244,10 +224,8 @@ require __DIR__ . '/_admin_header.php';
   </form>
 </div>
 
-<!-- ---- Layout : liste + détail ---- -->
 <div class="grid grid-cols-1 lg:grid-cols-5 gap-5">
 
-  <!-- Liste logs -->
   <div class="lg:col-span-3 min-w-0">
     <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
 
@@ -266,11 +244,9 @@ require __DIR__ . '/_admin_header.php';
         ?>
         <a href="activity.php?id=<?= $log['id'] ?>&<?= http_build_query(array_diff_key($_GET,['id'=>1,'p'=>1])) ?>"
            class="flex items-start gap-4 px-5 py-3.5 hover:bg-slate-50 transition <?= $isOpen ? 'bg-primary/5 border-l-4 border-primary' : '' ?>">
-          <!-- Icône module -->
           <div class="w-9 h-9 <?= $cls ?> rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5 border <?= $border ?>">
             <i class="fas <?= $icon ?> text-xs"></i>
           </div>
-          <!-- Contenu -->
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 flex-wrap">
               <span class="text-sm font-black text-primary"><i class="fas <?= $emoji ?> text-accent mr-1"></i> <?= $label ?></span>
@@ -281,7 +257,6 @@ require __DIR__ . '/_admin_header.php';
               <p class="text-xs text-slate-400 mt-0.5 truncate"><?= e($log['details']) ?></p>
             <?php endif; ?>
           </div>
-          <!-- Date -->
           <div class="text-right flex-shrink-0">
             <p class="text-[10px] font-black text-slate-500"><?= date('d/m/Y', strtotime($log['created_at'])) ?></p>
             <p class="text-[10px] text-slate-400"><?= date('H:i:s', strtotime($log['created_at'])) ?></p>
@@ -290,7 +265,6 @@ require __DIR__ . '/_admin_header.php';
         <?php endforeach; ?>
       </div>
 
-      <!-- Pagination -->
       <?php if ($totalPages > 1): ?>
       <div class="flex items-center justify-between px-5 py-4 border-t border-slate-100 bg-slate-50">
         <p class="text-xs text-slate-400">
@@ -317,7 +291,6 @@ require __DIR__ . '/_admin_header.php';
     </div>
   </div>
 
-  <!-- Détail action -->
   <div class="lg:col-span-2">
     <?php if ($detailLog):
       [$icon,$cls,$border] = $moduleIcons[$detailLog['module']] ?? ['fa-circle','bg-slate-100 text-slate-400','border-slate-200'];
@@ -326,7 +299,6 @@ require __DIR__ . '/_admin_header.php';
     ?>
     <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden sticky top-24">
 
-      <!-- Header détail -->
       <div class="px-6 py-5 border-b border-slate-100 bg-slate-50 flex items-start justify-between gap-3">
         <div class="flex items-center gap-3">
           <div class="w-11 h-11 <?= $cls ?> rounded-xl flex items-center justify-center border <?= $border ?> flex-shrink-0">
@@ -343,17 +315,15 @@ require __DIR__ . '/_admin_header.php';
         </a>
       </div>
 
-      <!-- Corps détail -->
       <div class="p-6 space-y-5">
 
-        <!-- Qui -->
         <div>
           <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 flex items-center gap-1.5">
             <i class="fas fa-user text-accent text-[9px]"></i> Effectué par
           </p>
           <div class="flex items-center gap-3 bg-slate-50 rounded-xl p-3 border border-slate-100">
             <div class="w-10 h-10 bg-primary rounded-xl flex items-center justify-center font-black text-white text-sm flex-shrink-0">
-              <?= strtoupper(substr($detailLog['user_nom'],0,1)) ?>
+              <?= e(mb_strtoupper(mb_substr((string)$detailLog['user_nom'], 0, 1))) ?>
             </div>
             <div>
               <p class="font-black text-primary text-sm"><?= e($detailLog['user_nom']) ?></p>
@@ -363,7 +333,6 @@ require __DIR__ . '/_admin_header.php';
           </div>
         </div>
 
-        <!-- Quand -->
         <div>
           <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 flex items-center gap-1.5">
             <i class="fas fa-clock text-accent text-[9px]"></i> Date & heure
@@ -376,7 +345,6 @@ require __DIR__ . '/_admin_header.php';
           </div>
         </div>
 
-        <!-- Détails -->
         <?php if ($detailLog['details']): ?>
         <div>
           <p class="text-[10px] font-black uppercase tracking-widests text-slate-400 mb-2 flex items-center gap-1.5">
@@ -388,7 +356,6 @@ require __DIR__ . '/_admin_header.php';
         </div>
         <?php endif; ?>
 
-        <!-- Action technique -->
         <div>
           <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 flex items-center gap-1.5">
             <i class="fas fa-code text-accent text-[9px]"></i> Code action
@@ -398,7 +365,6 @@ require __DIR__ . '/_admin_header.php';
           </code>
         </div>
 
-        <!-- ID -->
         <p class="text-[9px] text-slate-300 text-center">Entrée #<?= $detailLog['id'] ?></p>
       </div>
     </div>

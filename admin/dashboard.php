@@ -1,16 +1,14 @@
 <?php
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/auth.php';
-require_admin(); // accepte tous les rôles admin
+require_admin();
 expirer_reservations_non_payees();
 
 $pdo  = db();
 $role = $_SESSION['role'] ?? '';
 
-// ---- Stats globales (filtrées selon rôle) ----
 $stats = [];
 
-// Stats espaces/réservations → superadmin + admin_espaces
 if (in_array($role, ['superadmin','ministre','admin_espaces'])) {
     $stats['attente']  = (int)$pdo->query("SELECT COUNT(*) FROM reservations WHERE statut = 'en_attente'")->fetchColumn();
     $stats['validees'] = (int)$pdo->query("SELECT COUNT(*) FROM reservations WHERE statut = 'validee'")->fetchColumn();
@@ -19,20 +17,16 @@ if (in_array($role, ['superadmin','ministre','admin_espaces'])) {
     $stats['espaces']  = (int)$pdo->query("SELECT COUNT(*) FROM espaces WHERE disponible = 1")->fetchColumn();
 }
 
-// Stats activités → superadmin + admin_activites
 if (in_array($role, ['superadmin','ministre','admin_activites'])) {
     $stats['activites'] = (int)$pdo->query("SELECT COUNT(*) FROM activites")->fetchColumn();
 }
 
-// Stats utilisateurs → superadmin uniquement
 if (in_array($role, ['superadmin','ministre'])) {
     $stats['users'] = (int)$pdo->query("SELECT COUNT(*) FROM users WHERE role = 'user'")->fetchColumn();
     $stats['admins'] = (int)$pdo->query("SELECT COUNT(*) FROM users WHERE role NOT IN ('user','partenaire')")->fetchColumn();
 }
 
-// Stats comptable + ministre
 if (in_array($role, ['superadmin','admin_comptable','ministre'])) {
-    // Encaissé net = paiements reçus − remboursements effectués
     $stats['paye_brut']  = (float)$pdo->query("SELECT COALESCE(SUM(montant),0) FROM paiements")->fetchColumn();
     $stats['rembourse']  = (float)$pdo->query("SELECT COALESCE(SUM(COALESCE(montant_rembourse, montant_a_rembourser)),0) FROM remboursements WHERE resultat = 'effectue'")->fetchColumn();
     $stats['paye']       = $stats['paye_brut'] - $stats['rembourse'];
@@ -45,14 +39,12 @@ if (in_array($role, ['superadmin','admin_comptable','ministre'])) {
     $stats['nb_baux'] = (int)$stmtLoyersAttente->fetchColumn();
 }
 
-// Messages non lus → adapté au rôle
 $whereMsg = '';
 if ($role === 'admin_espaces')   $whereMsg = "AND sujet = 'reservation_espace'";
 if ($role === 'admin_activites') $whereMsg = "AND sujet = 'activite'";
 $stats['messages_non_lus'] = (int)$pdo->query("SELECT COUNT(*) FROM messages WHERE lu = 0 $whereMsg")->fetchColumn();
 $stats['messages_total']   = (int)$pdo->query("SELECT COUNT(*) FROM messages WHERE 1=1 $whereMsg")->fetchColumn();
 
-// ---- Données récentes selon rôle ----
 $recent_reservations = [];
 if (in_array($role, ['superadmin','ministre','admin_espaces'])) {
     $recent_reservations = $pdo->query("
@@ -81,12 +73,6 @@ $recent_messages = $pdo->query("
 $paiements_reduction = [];
 $nb_reductions = 0;
 if (in_array($role, ['superadmin','ministre','admin_comptable'])) {
-    /*
-     * Réductions réellement appliquées : nouvelles (reductions_accordees,
-     * statut « appliquee ») + anciennes saisies sur un paiement. Une réduction
-     * non utilisée ou annulée n'est pas comptée.
-     */
-    // Les prises en charge suite à réquisition (maintien du tarif) ne sont pas des réductions commerciales
     $filtreCommerciale = reductions_origine_disponible($pdo) ? " AND origine = 'commerciale'" : '';
     $nb_reductions = (int)$pdo->query("SELECT COUNT(*) FROM reductions_accordees WHERE statut = 'appliquee'" . $filtreCommerciale)->fetchColumn()
         + (int)$pdo->query("SELECT COUNT(DISTINCT reservation_id) FROM paiements WHERE motif_reduction IS NOT NULL AND motif_reduction != ''")->fetchColumn();
@@ -146,13 +132,9 @@ $pageTitle = "Tableau de bord";
 require __DIR__ . '/_admin_header.php';
 ?>
 
-<!-- En-tête -->
 <div class="flex items-center justify-between mb-6 flex-wrap gap-3">
   <div>
     <h1 class="text-2xl font-black text-primary uppercase italic tracking-tight">Tableau de bord</h1>
-    <p class="text-sm text-slate-500 mt-0.5">
-      Bienvenue, <strong><?= e(explode(' ', $_SESSION['nom_complet'])[0]) ?></strong>
-    </p>
   </div>
   <?php if ($role === 'superadmin'): ?>
   <a href="users.php"
@@ -163,7 +145,6 @@ require __DIR__ . '/_admin_header.php';
 </div>
 
 
-<!-- ===== CARTES STATS ===== -->
 <div class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-4 mb-8">
 <?php
 if ($role === 'admin_comptable' || is_superadmin()) {
@@ -236,14 +217,13 @@ foreach ($cards as [$label, $val, $icon, $color, $bg, $link]):
 
 <div class="grid xl:grid-cols-2 gap-6">
 
-  <!-- ===== RÉSERVATIONS RÉCENTES ===== -->
   <?php if (!empty($recent_reservations)): ?>
   <div data-repliable="demandes" class="xl:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-    <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+    <div class="flex items-center justify-between gap-3 px-5 py-4 border-b border-slate-100">
       <h2 class="font-black text-primary uppercase italic text-sm tracking-tight flex items-center gap-2">
         <i class="fas fa-calendar-check text-accent"></i> Demandes récentes
       </h2>
-      <a href="reservations.php" class="text-xs font-black text-accent hover:underline">Voir tout →</a>
+      <a href="reservations.php" class="text-xs font-black text-accent hover:underline whitespace-nowrap flex-shrink-0">Voir tout →</a>
     </div>
     <div class="overflow-x-auto">
       <table class="w-full text-sm min-w-[560px]">
@@ -285,14 +265,13 @@ foreach ($cards as [$label, $val, $icon, $color, $bg, $link]):
   </div>
   <?php endif; ?>
 
-  <!-- ===== RÉSERVATIONS AVEC RÉDUCTION ===== -->
   <?php if (!empty($paiements_reduction)): ?>
   <div data-repliable="reductions" class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-    <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+    <div class="flex items-center justify-between gap-3 px-5 py-4 border-b border-slate-100">
       <h2 class="font-black text-primary uppercase italic text-sm tracking-tight flex items-center gap-2">
         <i class="fas fa-tags text-accent"></i> Réservations avec réduction
       </h2>
-      <a href="rapport.php?type=reductions" class="text-xs font-black text-accent hover:underline">Voir tout →</a>
+      <a href="rapport.php?type=reductions" class="text-xs font-black text-accent hover:underline whitespace-nowrap flex-shrink-0">Voir tout →</a>
     </div>
     <div class="divide-y divide-slate-50">
       <?php foreach ($paiements_reduction as $pr): ?>
@@ -311,14 +290,13 @@ foreach ($cards as [$label, $val, $icon, $color, $bg, $link]):
   </div>
   <?php endif; ?>
 
-  <!-- ===== APERÇU DES BAUX ===== -->
   <?php if (!empty($baux_apercu)): ?>
   <div data-repliable="baux" class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-    <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+    <div class="flex items-center justify-between gap-3 px-5 py-4 border-b border-slate-100">
       <h2 class="font-black text-primary uppercase italic text-sm tracking-tight flex items-center gap-2">
-        <i class="fas fa-file-signature text-accent"></i> Baux — période en cours
+        <i class="fas fa-file-signature text-accent"></i> Baux : période en cours
       </h2>
-      <a href="baux.php" class="text-xs font-black text-accent hover:underline">Voir tout →</a>
+      <a href="baux.php" class="text-xs font-black text-accent hover:underline whitespace-nowrap flex-shrink-0">Voir tout →</a>
     </div>
     <div class="divide-y divide-slate-50">
       <?php foreach ($baux_apercu as $b): ?>
@@ -336,10 +314,9 @@ foreach ($cards as [$label, $val, $icon, $color, $bg, $link]):
   </div>
   <?php endif; ?>
 
-  <!-- ===== ACTIVITÉS RÉCENTES ===== -->
   <?php if (!empty($recent_activites)): ?>
   <div data-repliable="activites" class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-    <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+    <div class="flex items-center justify-between gap-3 px-5 py-4 border-b border-slate-100">
       <h2 class="font-black text-primary uppercase italic text-sm tracking-tight flex items-center gap-2">
         <i class="fas fa-star text-accent"></i> Activités
       </h2>
@@ -348,8 +325,8 @@ foreach ($cards as [$label, $val, $icon, $color, $bg, $link]):
     <div class="divide-y divide-slate-50">
       <?php foreach ($recent_activites as $a): ?>
       <div class="flex items-center gap-4 px-5 py-3 hover:bg-slate-50 transition">
-        <?php if ($a['image_principale']): ?>
-          <img src="../uploads/activites/<?= e($a['image_principale']) ?>"
+        <?php if ($a['image_principale'] && $a['image_principale'] !== 'default-hero.jpg'): ?>
+          <img src="../assets/images/activites/<?= e($a['image_principale']) ?>"
                class="w-10 h-10 rounded-xl object-cover flex-shrink-0" alt="">
         <?php else: ?>
           <div class="w-10 h-10 bg-purple-50 rounded-xl flex items-center justify-center flex-shrink-0">
@@ -386,15 +363,13 @@ foreach ($cards as [$label, $val, $icon, $color, $bg, $link]):
   </a>
 </div>
 <?php endif; ?>
-</div><!-- /grid -->
+</div>
 
-<!-- ===== SUIVI DU JOUR ET DES RÉSERVATIONS PAYÉES (bas de page) ===== -->
 <div class="mt-8">
 <?php require __DIR__ . '/_aujourdhui.php'; ?>
 <?php require __DIR__ . '/_suivi.php'; ?>
-  <!-- ===== MESSAGES RÉCENTS ===== -->
   <div data-repliable="messages" class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden mb-8">
-    <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+    <div class="flex items-center justify-between gap-3 px-5 py-4 border-b border-slate-100">
       <h2 class="font-black text-primary uppercase italic text-sm tracking-tight flex items-center gap-2">
         <i class="fas fa-envelope text-accent"></i> Messages récents
         <?php if ($stats['messages_non_lus'] > 0): ?>
@@ -427,7 +402,7 @@ foreach ($cards as [$label, $val, $icon, $color, $bg, $link]):
       <a href="messages.php?id=<?= $msg['id'] ?>"
          class="flex items-start gap-3 px-5 py-3 hover:bg-slate-50 transition <?= !$msg['lu'] ? 'bg-blue-50/30' : '' ?>">
         <div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center font-black text-white text-xs flex-shrink-0 mt-0.5">
-          <?= strtoupper(substr($msg['nom'], 0, 1)) ?>
+          <?= e(mb_strtoupper(mb_substr((string)$msg['nom'], 0, 1))) ?>
         </div>
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-2">
@@ -446,8 +421,6 @@ foreach ($cards as [$label, $val, $icon, $color, $bg, $link]):
 </div>
 
 <script>
-// Blocs repliables du tableau de bord : un clic sur la flèche réduit ou rouvre le bloc.
-// L'état est mémorisé pour ce navigateur (sans effet si le stockage est indisponible).
 (function () {
   document.querySelectorAll('[data-repliable]').forEach(function (bloc) {
     var entete = bloc.firstElementChild;

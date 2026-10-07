@@ -17,29 +17,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $email    = trim((string)($_POST['email'] ?? ''));
         $password = (string)($_POST['password'] ?? '');
 
+        $attente = filter_var($email, FILTER_VALIDATE_EMAIL) ? connexion_attente_minutes(db(), $email) : 0;
         if (!filter_var($email, FILTER_VALIDATE_EMAIL) || $password === '') {
             $errors[] = "Identifiants invalides.";
+        } elseif ($attente > 0) {
+            $errors[] = "Trop de tentatives de connexion. Réessayez dans " . $attente . " minute" . ($attente > 1 ? 's' : '') . ".";
         } else {
             $stmt = db()->prepare("SELECT * FROM users WHERE email = :e LIMIT 1");
             $stmt->execute([':e' => $email]);
             $u = $stmt->fetch();
 
-            if (!$u || !password_verify($password, $u['password_hash'])) {
+            $motDePasseOk = password_verify($password, $u ? $u['password_hash'] : '$2y$12$hzsK6uyVjsoAjIkuvJ9aDeR2lzv88.A5.Ildc13kE9JX.5ksuP8L.');
+            if (!$u || !$motDePasseOk) {
+                connexion_echouee(db(), $email);
                 $errors[] = "Email ou mot de passe incorrect.";
             } elseif ($u['role'] === 'partenaire' && (!(int)$u['actif'] || !partenaire_utilisateur(db(), (int)$u['id']))) {
-                // Compte partenaire bloqué, sans fiche partenaire ou fiche désactivée : accès refusé
                 $errors[] = empty($u['partenaire_id'])
                     ? "Ce compte partenaire n'est rattaché à aucun partenaire. Contactez la Direction du Palais."
                     : "Ce compte partenaire est désactivé. Contactez la Direction du Palais.";
             } elseif (!(int)$u['actif'] && in_array($u['role'], ['superadmin', 'ministre', 'admin_espaces', 'admin_activites', 'admin_messages', 'admin_comptable'], true)) {
-                // Compte d'administration bloqué ou désactivé par la Direction : accès refusé
                 $errors[] = "Ce compte est désactivé. Contactez la Direction du Palais.";
             } else {
+                connexion_reussie(db(), $email);
                 session_regenerate_id(true);
                 $_SESSION['user_id']     = (int)$u['id'];
                 $_SESSION['nom_complet'] = $u['nom_complet'];
                 $_SESSION['email']       = $u['email'];
                 $_SESSION['role']        = $u['role'];
+                if ($u['role'] !== 'user' && $u['role'] !== 'partenaire' && mot_de_passe_par_defaut($password)) {
+                    $_SESSION['mdp_a_changer'] = 1;
+                }
 
                 switch ($u['role']) {
                     case 'superadmin':
@@ -51,11 +58,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $dest = 'admin/dashboard.php';
                         break;
                     case 'partenaire':
-                        // Espace partenaire (Mon compte, en-tête et synthèse partenaire)
                         $dest = 'mon-compte.php';
                         break;
                     default:
-                        $dest = $_GET['redirect'] ?? 'mon-compte.php';
+                        $dest = redirection_interne($_GET['redirect'] ?? null);
                 }
                 header('Location: ' . $dest);
                 exit;
@@ -64,7 +70,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$pageTitle = "Connexion — Palais des Pionniers";
+$pageTitle = "Connexion | Palais des Pionniers";
 ?>
 <!DOCTYPE html>
 <html lang="fr">
@@ -115,7 +121,7 @@ $pageTitle = "Connexion — Palais des Pionniers";
             </div>
             <div>
                 <p class="text-white text-xs font-bold">Palais des Pionniers</p>
-                <p class="text-slate-400 text-xs">Magnambougou / Dianéguéla, Bamako — Mali</p>
+                <p class="text-slate-400 text-xs">Magnambougou / Dianéguéla, Bamako, Mali</p>
             </div>
         </div>
     </div>

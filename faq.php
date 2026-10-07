@@ -1,8 +1,4 @@
 <?php
-/*
- * FAQ publique : questions fréquentes (gérées dans Administration > FAQ)
- * et emplacement du tutoriel vidéo « Comment réserver ? ».
- */
 require_once __DIR__ . '/config/database.php';
 require_once __DIR__ . '/includes/auth.php';
 
@@ -16,7 +12,7 @@ foreach ($questions as $q) {
     $parCategorie[$q['categorie'] ?: 'Autres questions'][] = $q;
 }
 
-$pageTitle = "Questions fréquentes — Palais des Pionniers";
+$pageTitle = "Questions fréquentes | Palais des Pionniers";
 $page = 'faq.php';
 require __DIR__ . '/includes/header.php';
 ?>

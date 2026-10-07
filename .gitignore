@@ -1,0 +1,5 @@
+config/database.local.php
+/palais_pionniers*.sql
+*.log
+.DS_Store
+Thumbs.db

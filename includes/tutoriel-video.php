@@ -1,9 +1,4 @@
 <?php
-/*
- * Emplacement du tutoriel vidéo « Comment réserver ? ».
- * Réglages : config/tutoriel_video.php (fichier MP4 déposé ou lien YouTube).
- * Sans vidéo, un encadré d'attente présente les étapes de la réservation.
- */
 $tv = require __DIR__ . '/../config/tutoriel_video.php';
 $racineSite = dirname(__DIR__);
 $tvFichier  = (!empty($tv['fichier']) && is_file($racineSite . '/' . $tv['fichier'])) ? $tv['fichier'] : null;

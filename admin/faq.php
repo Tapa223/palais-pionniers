@@ -1,9 +1,4 @@
 <?php
-/*
- * Gestion de la FAQ publique (page faq.php du site).
- * Modification : Direction (superadmin), Admin Activités, Admin Espaces.
- * Consultation seule : Ministre.
- */
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_role(['ministre', 'admin_activites', 'admin_espaces']);
@@ -77,7 +72,6 @@ if ($installe) {
         $s->execute([(int)$_GET['edit']]);
         $editData = $s->fetch() ?: null;
     }
-    // Saisie refusée : on réaffiche ce qui a été tapé
     if ($msg && $msg[0] === 'err' && ($_POST['action'] ?? '') === 'save') {
         $editData = [
             'id' => (int)($_POST['id'] ?? 0), 'question' => $_POST['question'] ?? '', 'reponse' => $_POST['reponse'] ?? '',

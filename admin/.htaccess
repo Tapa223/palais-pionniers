@@ -1,0 +1,6 @@
+Options -Indexes
+
+# Fragments inclus par les pages d'administration : jamais appelés directement
+<FilesMatch "^_">
+    Require all denied
+</FilesMatch>

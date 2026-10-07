@@ -1,9 +1,4 @@
 <?php
-/*
- * Bloc « Suivi des réservations payées » du tableau de bord (inclus par admin/dashboard.php).
- * Réservations à confirmer (terminées, non cochées) et à venir (en cours et 7 prochains jours).
- * Le cochage passe par admin/suivi.php, qui contrôle les droits côté serveur.
- */
 if (suivi_disponible($pdo)):
     require_once __DIR__ . '/_suivi_ligne.php';
     $suiviConfirmer = reservations_suivi($pdo, 'a_confirmer', 1000);

@@ -2,7 +2,7 @@
 require_once __DIR__ . '/config/database.php';
 require_once __DIR__ . '/includes/auth.php';
 $pdo = db();
-$pageTitle = "Politique de confidentialité — Palais des Pionniers";
+$pageTitle = "Politique de confidentialité | Palais des Pionniers";
 $pageDescription = "Politique de confidentialité et de protection des données personnelles du Palais des Pionniers.";
 $page = 'politique-confidentialite.php';
 require __DIR__ . '/includes/header.php';

@@ -3,12 +3,11 @@ require_once __DIR__ . '/auth.php';
 $u = current_user();
 $page = $page ?? basename($_SERVER['PHP_SELF']);
 
-// Détection de l'emplacement pour corriger les liens relatifs
 $current_dir = basename(dirname($_SERVER['PHP_SELF']));
 $prefix = ($current_dir === 'admin') ? '../' : '';
 $admin_link = ($current_dir === 'admin') ? 'dashboard.php' : 'admin/dashboard.php';
 
-$pageDescription = $pageDescription ?? "Le Palais des Pionniers de Magnambougou/Dianéguéla — établissement public malien dédié à la construction citoyenne, la formation et l'épanouissement de la jeunesse. Réservez nos espaces, découvrez nos activités.";
+$pageDescription = $pageDescription ?? "Le Palais des Pionniers de Magnambougou/Dianéguéla, établissement public malien dédié à la construction citoyenne, la formation et l'épanouissement de la jeunesse. Réservez nos espaces, découvrez nos activités.";
 $pageImage = $pageImage ?? 'assets/images/porte.jpeg';
 $currentUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https://' : 'http://') . ($_SERVER['HTTP_HOST'] ?? 'palaisdespionniers.ml') . ($_SERVER['REQUEST_URI'] ?? '');
 ?>
@@ -21,7 +20,6 @@ $currentUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https:/
     <meta name="description" content="<?= e($pageDescription) ?>">
     <link rel="canonical" href="<?= e($currentUrl) ?>">
 
-    <!-- Open Graph (Facebook, WhatsApp) -->
     <meta property="og:type" content="website">
     <meta property="og:title" content="<?= e($pageTitle ?? 'Palais des Pionniers') ?>">
     <meta property="og:description" content="<?= e($pageDescription) ?>">
@@ -30,12 +28,10 @@ $currentUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https:/
     <meta property="og:locale" content="fr_FR">
     <meta property="og:site_name" content="Palais des Pionniers">
 
-    <!-- Twitter/X Card -->
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="<?= e($pageTitle ?? 'Palais des Pionniers') ?>">
     <meta name="twitter:description" content="<?= e($pageDescription) ?>">
 
-    <!-- Données structurées : organisation -->
     <script type="application/ld+json">
     {
         "@context": "https://schema.org",
@@ -72,7 +68,6 @@ $currentUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https:/
 </head>
 <body class="min-h-screen flex flex-col">
 
-<!-- Bandeau tricolore national — discret, présent sur tout le site -->
 <div class="flex h-[3px] w-full">
   <div class="flex-1 bg-[#14B53A]"></div>
   <div class="flex-1 bg-[#FCD116]"></div>

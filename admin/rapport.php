@@ -17,8 +17,8 @@ if (!isset($typesAutorises[$type]) || !in_array($role, $typesAutorises[$type], t
     header('Location: dashboard.php'); exit;
 }
 
-$debut = $_GET['debut'] ?? '';
-$fin   = $_GET['fin']   ?? '';
+$debut = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)($_GET['debut'] ?? '')) ? $_GET['debut'] : '';
+$fin   = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)($_GET['fin'] ?? '')) ? $_GET['fin'] : '';
 
 $titres = [
     'reductions' => 'Rapport — Réductions accordées',
@@ -33,12 +33,6 @@ $totalGeneral = 0;
 $libelleTotal = 'Total';
 
 if ($type === 'reductions') {
-    /*
-     * Réductions accordées (table reductions_accordees, tous statuts) et
-     * anciennes réductions saisies sur un paiement (paiements.motif_reduction).
-     * Seules les réductions réellement appliquées entrent dans le total :
-     * une réduction « non appliquée » ou « annulée » n'est pas un manque à gagner.
-     */
     $colonnes = ['Réf.', 'Date', 'Espace', 'Client', 'Montant initial', 'Réduction', 'Statut', 'Motif', 'Saisi par'];
     $libellesStatutRed = ['appliquee' => 'Appliquée', 'non_appliquee' => 'Non utilisée (plein tarif payé)', 'annulee' => 'Annulée'];
     $params = [];
@@ -60,7 +54,6 @@ if ($type === 'reductions') {
     $totalPriseEnCharge = 0;
     foreach ($stmt->fetchAll() as $r) {
         $sRed = situation_financiere_reservation($pdo, (int)$r['reservation_id']);
-        // Maintien du tarif suite à réquisition : listé à part, jamais compté comme réduction commerciale
         $estPriseEnCharge = ($r['origine'] ?? '') === 'requisition';
         $lignesTriees[] = [$r['created_at'], [
             'RESA-' . (int)$r['reservation_id'], date('d/m/Y', strtotime($r['created_at'])), $r['espace_nom'], $r['nom_complet'],
@@ -77,7 +70,6 @@ if ($type === 'reductions') {
         }
     }
 
-    // Anciennes réductions : une ligne par réservation
     $params = [];
     $whereOld = ["p.motif_reduction IS NOT NULL", "p.motif_reduction != ''"];
     if ($debut) { $whereOld[] = 'p.created_at >= ?'; $params[] = $debut . ' 00:00:00'; }
@@ -167,15 +159,13 @@ if ($type === 'reductions') {
     }
 }
 
-// --- Génération PDF réelle (téléchargement direct, pas une impression de page) ---
 if (($_GET['format'] ?? '') === 'pdf') {
     require_once __DIR__ . '/../vendor/fpdf/fpdf.php';
 
-    $pdf = new FPDF('L', 'mm', 'A4'); // Paysage, plus de place pour les colonnes
+    $pdf = new FPDF('L', 'mm', 'A4');
     $pdf->AddPage();
     $pdf->SetAutoPageBreak(true, 15);
 
-    // En-tête
     $pdf->SetFont('Arial', 'B', 16);
     $pdf->Cell(0, 8, iconv('UTF-8', 'windows-1252', 'Palais des Pionniers'), 0, 1);
     $pdf->SetFont('Arial', 'I', 11);
@@ -189,12 +179,10 @@ if (($_GET['format'] ?? '') === 'pdf') {
     $pdf->SetTextColor(0,0,0);
     $pdf->Ln(4);
 
-    // Largeurs de colonnes réparties sur la largeur disponible (A4 paysage ≈ 277mm utiles)
     $nbCol = count($colonnes);
     $largeurPage = 277;
     $largeurCol = $largeurPage / max(1, $nbCol);
 
-    // En-têtes de colonnes
     $pdf->SetFont('Arial', 'B', 9);
     $pdf->SetFillColor(15, 23, 42);
     $pdf->SetTextColor(255,255,255);
@@ -205,7 +193,6 @@ if (($_GET['format'] ?? '') === 'pdf') {
     $pdf->SetTextColor(0,0,0);
     $pdf->SetFont('Arial', '', 8);
 
-    // Lignes
     $fillRow = false;
     foreach ($lignes as $ligne) {
         $pdf->SetFillColor($fillRow ? 248 : 255, $fillRow ? 250 : 255, $fillRow ? 252 : 255);
@@ -216,7 +203,6 @@ if (($_GET['format'] ?? '') === 'pdf') {
         $fillRow = !$fillRow;
     }
 
-    // Total
     if ($totalGeneral > 0) {
         $pdf->SetFont('Arial', 'B', 9);
         $pdf->SetFillColor(241, 245, 249);
@@ -261,7 +247,6 @@ require __DIR__ . '/_admin_header.php';
         <button type="submit" class="text-xs font-black bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-xl transition">Filtrer</button>
       </form>
       <?php
-        // Export correspondant au rapport (droits vérifiés aussi dans export.php)
         $exportRapport = ['reductions' => 'reductions', 'guichet' => 'reservations', 'encaisse' => 'paiements'][$type] ?? null;
         $exportAutorise = $exportRapport === 'reservations'
             || in_array($_SESSION['role'] ?? '', ['superadmin', 'ministre', 'admin_comptable'], true);
@@ -280,8 +265,8 @@ require __DIR__ . '/_admin_header.php';
   </div>
 
   <div class="hidden print:block mb-6">
-    <h1 class="text-xl font-black uppercase"><?= e($titres[$type]) ?> — Palais des Pionniers</h1>
-    <p class="text-xs text-slate-500"><?= $debut || $fin ? "Période : " . ($debut ?: '…') . " → " . ($fin ?: '…') : 'Toutes dates confondues' ?> — édité le <?= date('d/m/Y à H:i') ?></p>
+    <h1 class="text-xl font-black uppercase"><?= e($titres[$type]) ?> | Palais des Pionniers</h1>
+    <p class="text-xs text-slate-500"><?= $debut || $fin ? "Période : " . e($debut ?: '…') . " → " . e($fin ?: '…') : 'Toutes dates confondues' ?> — édité le <?= date('d/m/Y à H:i') ?></p>
   </div>
 
   <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">

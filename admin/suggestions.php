@@ -3,12 +3,6 @@ require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_role(['ministre', 'admin_espaces', 'admin_activites', 'admin_messages', 'admin_comptable']);
 
-/*
- * Boîte à suggestions anonyme : consultation et suivi.
- * Consultation : Direction, ministre (lecture seule) et profils
- * d'administration. Changement de statut : tous sauf le ministre.
- * Les suggestions ne contiennent aucune donnée d'identification.
- */
 $pdo      = db();
 $readonly = is_readonly_admin();
 $msg      = null;
@@ -22,7 +16,6 @@ if ($installe && !$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $id = (int)($_POST['id'] ?? 0);
         $nouveau = $_POST['statut'] ?? '';
         if ($id && ($_POST['action'] ?? '') === 'supprimer') {
-            // Ménage : Direction uniquement, et seulement une suggestion déjà traitée
             if (!is_superadmin()) {
                 $msg = ['err', 'Seule la Direction peut supprimer une suggestion.'];
             } else {

@@ -31,7 +31,6 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
             $existing->execute([$roleKey]);
             $photo = $existing->fetchColumn() ?: null;
 
-            // Supprimer la photo actuelle (retour à l'avatar par initiales)
             if (!empty($_POST['supprimer_photo'])) {
                 if ($photo && file_exists($uploadDir . $photo)) unlink($uploadDir . $photo);
                 $photo = null;

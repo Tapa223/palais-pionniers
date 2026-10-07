@@ -1,9 +1,4 @@
 <?php
-/*
- * « Mon mot de passe » : tout compte d'administration (y compris le Ministre,
- * car il s'agit de son propre compte et non d'une donnée métier) change ici
- * son mot de passe, en confirmant l'actuel. Le mot de passe n'est jamais affiché.
- */
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_admin();
@@ -29,12 +24,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $msg = ['err', 'Le nouveau mot de passe doit contenir au moins 8 caractères.'];
         } elseif ($nouveau !== $confirm) {
             $msg = ['err', 'La confirmation ne correspond pas au nouveau mot de passe.'];
+        } elseif (mot_de_passe_par_defaut($nouveau)) {
+            $msg = ['err', 'Ce mot de passe est trop connu : choisissez-en un autre.'];
         } elseif (password_verify($nouveau, $hash)) {
             $msg = ['err', 'Le nouveau mot de passe doit être différent de l\'actuel.'];
         } else {
             $pdo->prepare("UPDATE users SET password_hash = ? WHERE id = ?")
                 ->execute([password_hash($nouveau, PASSWORD_DEFAULT), $uid]);
             session_regenerate_id(true);
+            unset($_SESSION['mdp_a_changer']);
             log_activity('mdp_modifie', 'users', 'Mot de passe personnel modifié');
             $msg = ['ok', 'Votre mot de passe a été modifié.'];
         }
@@ -49,6 +47,13 @@ require __DIR__ . '/_admin_header.php';
   <h1 class="text-2xl font-black text-primary uppercase italic tracking-tight">Mon mot de passe</h1>
   <p class="text-sm text-slate-500 mt-0.5">Modifiez le mot de passe de votre compte d'administration.</p>
 </div>
+
+<?php if (!empty($_SESSION['mdp_a_changer']) && !$msg): ?>
+<div class="mb-5 rounded-2xl p-4 flex items-center gap-3 bg-amber-50 border border-amber-200 text-amber-800">
+  <i class="fas fa-key"></i>
+  <span class="font-bold text-sm">Votre compte utilise encore le mot de passe initial. Choisissez un nouveau mot de passe personnel pour accéder à l'administration.</span>
+</div>
+<?php endif; ?>
 
 <?php if ($msg): ?>
 <div class="mb-5 rounded-2xl p-4 flex items-center gap-3 <?= $msg[0] === 'ok' ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-red-50 border border-red-200 text-accent' ?>">

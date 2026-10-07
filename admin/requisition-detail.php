@@ -8,9 +8,6 @@ $pdo      = db();
 $readonly = is_readonly_admin();
 $msg      = null;
 
-/* =========================================================
-   LIBELLÉS
-========================================================= */
 
 $libellesChoix = [
     'annulation'         => 'Annulation',
@@ -41,14 +38,9 @@ $modesRemboursement = [
     'orange_money'  => 'Orange Money',
     'moov_money'    => 'Moov Money',
     'virement'      => 'Virement bancaire',
-    // Mêmes valeurs que l'ENUM remboursements.mode (et paiements.mode) :
-    // l'ancienne valeur « autre » n'existe pas en base.
     'cheque'        => 'Chèque',
 ];
 
-/* =========================================================
-   ID
-========================================================= */
 
 $id = (int)($_GET['id'] ?? $_POST['id'] ?? 0);
 
@@ -57,9 +49,6 @@ if ($id <= 0) {
     exit;
 }
 
-/* =========================================================
-   TRAITEMENT DES ACTIONS
-========================================================= */
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$readonly) {
 
@@ -69,9 +58,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$readonly) {
 
         $action = $_POST['action'] ?? '';
 
-        /* -------------------------------------------------
-           RÉCUPÉRER LA RÉQUISITION
-        ------------------------------------------------- */
 
         $stmt = $pdo->prepare("
             SELECT
@@ -101,9 +87,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$readonly) {
             $msg = ['err', 'Réquisition introuvable.'];
         } else {
 
-            /* =============================================
-               COMMENCER LE TRAITEMENT
-            ============================================= */
 
             if ($action === 'prendre_en_charge') {
 
@@ -125,12 +108,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$readonly) {
 
                     try {
 
-                        /*
-                         * On conserve le nom technique de l'action
-                         * pour ne pas casser le fonctionnement existant.
-                         * Le libellé visible côté interface est :
-                         * "Commencer le traitement".
-                         */
 
                         $stmt = $pdo->prepare("
                             UPDATE requisitions_ministerielles
@@ -145,9 +122,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$readonly) {
                             $id
                         ]);
 
-                        /*
-                         * Mettre à jour l'opération active.
-                         */
 
                         $stmtOp = $pdo->prepare("
                             SELECT id
@@ -191,20 +165,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$readonly) {
                                 (?, ?, ?, 'en_cours', ?, NOW())
                             ");
 
-                            /*
-                             * Si type_operation n'est pas disponible
-                             * dans certaines versions du schéma,
-                             * cette branche ne sera normalement jamais
-                             * utilisée car une opération existe déjà
-                             * depuis le choix client.
-                             */
 
-                            /*
-                             * Même correspondance que lors du choix client
-                             * (mon-compte.php) : « autre_espace » est enregistré
-                             * comme « changement_espace » dans l'ENUM
-                             * operations_requisition.type_operation.
-                             */
                             $typeOperationSecours = [
                                 'annulation'    => 'annulation',
                                 'remboursement' => 'remboursement',
@@ -222,7 +183,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$readonly) {
 
                         log_activity(
                             'requisition_traitement_commence',
-                            'reservations', // module existant de activity_log (ENUM)
+                            'reservations',
                             'Traitement commencé pour la réquisition #' . $id
                         );
 
@@ -251,33 +212,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$readonly) {
                         $msg = [
                             'err',
                             'Impossible de commencer le traitement : '
-                            . $e->getMessage()
+                            . message_erreur($e, 'erreur technique.')
                         ];
                     }
                 }
             }
 
-            /* =============================================
-               TRAITER UN REMBOURSEMENT
-            ============================================= */
 
             elseif ($action === 'traiter_remboursement') {
 
-                /*
-                 * Deux cas utilisent ce remboursement existant :
-                 * - le choix « remboursement » du client ;
-                 * - le trop-perçu constaté lorsqu'une nouvelle réservation
-                 *   (nouvelle date / autre espace) moins chère a été validée
-                 *   et que les paiements y ont été rattachés. Dans ce cas les
-                 *   montants sont fixés côté serveur.
-                 */
                 $suiviTrop = in_array($rqAction['choix_client'], ['nouvelle_date', 'autre_espace'], true)
                     ? requisition_suivi_nouvelle_reservation($pdo, $id)
                     : null;
 
                 $estTropPercu = $suiviTrop !== null && $suiviTrop['a_rembourser'];
 
-                // Règle commune (requisitions.php utilise la même) : montant réel dû au client
                 $rembAttendu = requisition_remboursement_attendu($pdo, (int)$id);
 
                 if ($rembAttendu['type'] === null) {
@@ -305,10 +254,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$readonly) {
 
                 } else {
 
-                    /*
-                     * Montant payé : toujours déterminé côté serveur à partir
-                     * de la situation financière (jamais depuis le formulaire).
-                     */
                     if ($estTropPercu) {
                         $montantVerse = (float)$suiviTrop['validee']['total_paye'];
                     } else {
@@ -352,11 +297,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$readonly) {
                         true
                     )) {
 
-                        /*
-                         * Une réquisition de remboursement ne peut être
-                         * clôturée que lorsque le remboursement a réellement
-                         * été effectué.
-                         */
 
                         $msg = [
                             'err',
@@ -369,16 +309,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$readonly) {
 
                         try {
 
-                            // Verrou : empêche un double traitement simultané
                             $verrou = $pdo->prepare("SELECT statut FROM requisitions_ministerielles WHERE id = ? FOR UPDATE");
                             $verrou->execute([$id]);
                             if ($verrou->fetchColumn() === 'cloturee') {
                                 throw new RuntimeException('Cette réquisition est déjà clôturée.');
                             }
 
-                            /*
-                             * Récupérer l'opération active.
-                             */
 
                             $stmtOp = $pdo->prepare("
                                 SELECT *
@@ -394,10 +330,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$readonly) {
                                 ? (int)$operation['id']
                                 : null;
 
-                            /*
-                             * Vérifier s'il existe déjà un remboursement
-                             * pour cette réquisition.
-                             */
 
                             $stmtRb = $pdo->prepare("
                                 SELECT id
@@ -488,9 +420,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$readonly) {
                                 ]);
                             }
 
-                            /*
-                             * Fermer l'opération.
-                             */
 
                             if ($operationId) {
 
@@ -515,10 +444,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$readonly) {
                                 ]);
                             }
 
-                            /*
-                             * Une fois le remboursement réellement effectué,
-                             * la réquisition peut être clôturée.
-                             */
 
                             $stmt = $pdo->prepare("
                                 UPDATE requisitions_ministerielles
@@ -538,7 +463,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$readonly) {
 
                             log_activity(
                                 'remboursement_requisition',
-                                'reservations', // module existant de activity_log (ENUM)
+                                'reservations',
                                 'Remboursement effectué pour la réquisition #' . $id
                             );
 
@@ -567,16 +492,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$readonly) {
                             $msg = [
                                 'err',
                                 'Impossible d’enregistrer le remboursement : '
-                                . $e->getMessage()
+                                . message_erreur($e, 'erreur technique.')
                             ];
                         }
                     }
                 }
             }
 
-            /* =============================================
-               TRAITEMENT D'UNE AUTRE OPÉRATION
-            ============================================= */
 
             elseif ($action === 'traiter_operation') {
 
@@ -596,8 +518,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$readonly) {
 
                 } elseif ($rqAction['choix_client'] === 'remboursement') {
 
-                    // Un choix « remboursement » ne se clôture que par un
-                    // remboursement réellement effectué (action dédiée).
                     $msg = [
                         'err',
                         'Cette réquisition ne peut être clôturée que par l’enregistrement du remboursement effectué.'
@@ -609,12 +529,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$readonly) {
                     $reference = trim($_POST['reference'] ?? '');
                     $note = trim($_POST['note'] ?? '');
 
-                    /*
-                     * Nouvelle date / autre espace : la réquisition n'est
-                     * traitée que si la nouvelle réservation existe réellement
-                     * et a été validée, et qu'aucun trop-perçu n'attend
-                     * d'être remboursé.
-                     */
                     $suiviOperation = in_array($rqAction['choix_client'], ['nouvelle_date', 'autre_espace'], true)
                         ? requisition_suivi_nouvelle_reservation($pdo, $id)
                         : null;
@@ -643,7 +557,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$readonly) {
 
                         try {
 
-                            // Verrou + contrôles refaits sous verrou (double clic, deux onglets)
                             $verrou = $pdo->prepare("SELECT statut FROM requisitions_ministerielles WHERE id = ? FOR UPDATE");
                             $verrou->execute([$id]);
                             if ($verrou->fetchColumn() === 'cloturee') {
@@ -704,7 +617,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$readonly) {
 
                             log_activity(
                                 'requisition_traitee',
-                                'reservations', // module existant de activity_log (ENUM)
+                                'reservations',
                                 'Réquisition #' . $id . ' traitée'
                             );
 
@@ -726,7 +639,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$readonly) {
                             $msg = [
                                 'err',
                                 'Impossible de terminer le traitement : '
-                                . $e->getMessage()
+                                . message_erreur($e, 'erreur technique.')
                             ];
                         }
                     }
@@ -736,9 +649,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$readonly) {
     }
 }
 
-/* =========================================================
-   MESSAGES DE SUCCÈS
-========================================================= */
 
 if (isset($_GET['success'])) {
 
@@ -766,9 +676,6 @@ if (isset($_GET['success'])) {
     }
 }
 
-/* =========================================================
-   CHARGEMENT DE LA RÉQUISITION
-========================================================= */
 
 $stmt = $pdo->prepare("
     SELECT
@@ -799,9 +706,6 @@ if (!$rq) {
     exit;
 }
 
-/* =========================================================
-   MONTANT PAYÉ
-========================================================= */
 
 $stmt = $pdo->prepare("
     SELECT COALESCE(SUM(montant), 0)
@@ -812,9 +716,6 @@ $stmt->execute([$rq['reservation_id']]);
 
 $montantPaye = (float)$stmt->fetchColumn();
 
-/* =========================================================
-   REMBOURSEMENT EXISTANT
-========================================================= */
 
 $stmt = $pdo->prepare("
     SELECT *
@@ -826,9 +727,6 @@ $stmt = $pdo->prepare("
 $stmt->execute([$id]);
 $remboursement = $stmt->fetch();
 
-/* =========================================================
-   DERNIÈRE OPÉRATION
-========================================================= */
 
 $stmt = $pdo->prepare("
     SELECT *
@@ -840,9 +738,6 @@ $stmt = $pdo->prepare("
 $stmt->execute([$id]);
 $operation = $stmt->fetch();
 
-/* =========================================================
-   HISTORIQUE DES OPÉRATIONS
-========================================================= */
 
 $stmt = $pdo->prepare("
     SELECT
@@ -857,9 +752,6 @@ $stmt = $pdo->prepare("
 $stmt->execute([$id]);
 $historique = $stmt->fetchAll();
 
-/* =========================================================
-   AGENT ACTUEL
-========================================================= */
 
 $agent = null;
 
@@ -875,9 +767,6 @@ if (!empty($operation['agent_assigne'])) {
     $agent = $stmt->fetch();
 }
 
-/* =========================================================
-   ÉTAT DE LA PAGE
-========================================================= */
 
 $choixClient = $rq['choix_client'] ?? '';
 $libelleChoix = $libellesChoix[$choixClient] ?? '—';
@@ -895,7 +784,6 @@ $suivi = $estNouvelleReservation
     : null;
 
 $tropPercuARembourser = $suivi !== null && $suivi['a_rembourser'];
-// Ce qui empêche encore la clôture (même règle que le traitement serveur)
 $blocagesCloture = $estNouvelleReservation ? requisition_blocages_cloture($pdo, (int)$id) : [];
 
 $libellesStatutResa = [
@@ -929,9 +817,6 @@ $peutCommencerTraitement =
     && $rq['statut'] === 'choix_recu'
     && !empty($rq['choix_client']);
 
-/* =========================================================
-   STYLE DU STATUT
-========================================================= */
 
 $statutClasses = [
     'en_attente_choix' => 'bg-slate-100 text-slate-600 border-slate-200',
@@ -946,21 +831,15 @@ $statutClass =
     $statutClasses[$rq['statut'] ?? '']
     ?? 'bg-slate-100 text-slate-600 border-slate-200';
 
-/* =========================================================
-   PAGE
-========================================================= */
 
 $pageTitle = 'Détail de la réquisition #' . $id;
 
-$pageRetour = false; // la page a déjà son propre lien retour
+$pageRetour = false;
 require __DIR__ . '/_admin_header.php';
 ?>
 
 <div class="px-4 sm:px-6 py-8 max-w-7xl mx-auto">
 
-    <!-- =====================================================
-         EN-TÊTE
-    ====================================================== -->
 
     <div class="flex items-start justify-between gap-4 flex-wrap mb-7">
 
@@ -1013,9 +892,6 @@ require __DIR__ . '/_admin_header.php';
 
     </div>
 
-    <!-- =====================================================
-         MESSAGE
-    ====================================================== -->
 
     <?php if ($msg): ?>
 
@@ -1041,15 +917,9 @@ require __DIR__ . '/_admin_header.php';
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
-        <!-- =================================================
-             COLONNE PRINCIPALE
-        ================================================== -->
 
         <div class="lg:col-span-2 space-y-6">
 
-            <!-- =============================================
-                 INFORMATIONS GÉNÉRALES
-            ============================================== -->
 
             <section class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
 
@@ -1122,9 +992,6 @@ require __DIR__ . '/_admin_header.php';
 
             </section>
 
-            <!-- =============================================
-                 CLIENT
-            ============================================== -->
 
             <section class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
 
@@ -1184,9 +1051,6 @@ require __DIR__ . '/_admin_header.php';
 
             </section>
 
-            <!-- =============================================
-                 RÉSERVATION INITIALE
-            ============================================== -->
 
             <section class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
 
@@ -1277,9 +1141,6 @@ require __DIR__ . '/_admin_header.php';
 
             </section>
 
-            <!-- =============================================
-                 MOTIF
-            ============================================== -->
 
             <section class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
 
@@ -1311,9 +1172,6 @@ require __DIR__ . '/_admin_header.php';
 
             </section>
 
-            <!-- =============================================
-                 CHOIX DU CLIENT
-            ============================================== -->
 
             <section class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
 
@@ -1397,9 +1255,6 @@ require __DIR__ . '/_admin_header.php';
 
             </section>
 
-            <!-- =============================================
-                 NOUVELLE RÉSERVATION (nouvelle date / autre espace)
-            ============================================== -->
 
             <?php if ($estNouvelleReservation): ?>
 
@@ -1468,7 +1323,6 @@ require __DIR__ . '/_admin_header.php';
                                                 <?= e($libellesStatutResa[$n['statut']] ?? $n['statut']) ?>
                                             </p>
                                             <?php
-                                                // État financier calculé (paiements − remboursements effectués)
                                                 $sfN = situation_financiere_reservation($pdo, (int)$n['id']);
                                                 [$libEtatN] = libelle_etat_financier($sfN['etat'] ?? '');
                                             ?>
@@ -1495,8 +1349,6 @@ require __DIR__ . '/_admin_header.php';
                         <?php endif; ?>
 
                         <?php
-                            // Uniquement sur base financière réelle : trop-perçu calculé
-                            // restant, ou remboursement réellement effectué.
                             $tropAffiche = $suivi['trop_percu'] > 0 && $suivi['situation'] && $suivi['situation']['total_paye'] > 0;
                             $rembourseAffiche = $suivi['rembourse'] && $suivi['montant_rembourse'] > 0;
                         ?>
@@ -1521,7 +1373,6 @@ require __DIR__ . '/_admin_header.php';
                         <?php endif; ?>
 
                         <?php
-                            // Historique financier (lecture seule) du dossier RESA-A → REQ-X → RESA-B
                             $histoResaId = $nouvelleRef ?: (int)$rq['reservation_id'];
                             $histoEntrees = historique_financier_reservation($pdo, $histoResaId);
                         ?>
@@ -1535,9 +1386,6 @@ require __DIR__ . '/_admin_header.php';
 
             <?php endif; ?>
 
-            <!-- =============================================
-                 REMBOURSEMENT
-            ============================================== -->
 
             <?php if ($estRemboursement): ?>
 
@@ -1657,9 +1505,6 @@ require __DIR__ . '/_admin_header.php';
 
             <?php endif; ?>
 
-            <!-- =============================================
-                 HISTORIQUE
-            ============================================== -->
 
             <section class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
 
@@ -1805,9 +1650,6 @@ require __DIR__ . '/_admin_header.php';
 
         </div>
 
-        <!-- =================================================
-             COLONNE TRAITEMENT
-        ================================================== -->
 
         <aside class="lg:col-span-1">
 
@@ -1835,7 +1677,6 @@ require __DIR__ . '/_admin_header.php';
 
                 <div class="p-5 space-y-5">
 
-                    <!-- ÉTAT -->
 
                     <div>
 
@@ -1859,7 +1700,6 @@ require __DIR__ . '/_admin_header.php';
 
                     </div>
 
-                    <!-- AGENT -->
 
                     <?php if ($agent): ?>
 
@@ -1889,9 +1729,6 @@ require __DIR__ . '/_admin_header.php';
 
                     <?php endif; ?>
 
-                    <!-- =====================================
-                         COMMENCER LE TRAITEMENT
-                    ====================================== -->
 
                     <?php if ($peutCommencerTraitement): ?>
 
@@ -1932,9 +1769,6 @@ require __DIR__ . '/_admin_header.php';
 
                     <?php endif; ?>
 
-                    <!-- =====================================
-                         TRAITEMENT REMBOURSEMENT
-                    ====================================== -->
 
                     <?php if (
                         !$readonly
@@ -1942,7 +1776,6 @@ require __DIR__ . '/_admin_header.php';
                         && (($estRemboursement && !$remboursement) || $tropPercuARembourser)
                         && ($rembAttenduVue = requisition_remboursement_attendu($pdo, (int)$id))['type'] !== null
                     ):
-                        // Montants fixés par le serveur (règle commune) : totalité du montant dû
                         $montantPayeFormulaire = $tropPercuARembourser
                             ? (float)$suivi['validee']['total_paye']
                             : $rembAttenduVue['montant'];
@@ -2128,9 +1961,6 @@ require __DIR__ . '/_admin_header.php';
 
                     <?php endif; ?>
 
-                    <!-- =====================================
-                         AUTRE OPÉRATION
-                    ====================================== -->
 
                     <?php if (
                         !$readonly
@@ -2246,9 +2076,6 @@ require __DIR__ . '/_admin_header.php';
 
                     <?php endif; ?>
 
-                    <!-- =====================================
-                         DOSSIER CLÔTURÉ
-                    ====================================== -->
 
                     <?php if ($estCloturee): ?>
 

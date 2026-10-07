@@ -8,14 +8,6 @@ $role = $_SESSION['role'] ?? '';
 $moi  = (int)($_SESSION['user_id'] ?? 0);
 $msg  = null;
 
-/*
- * Règles d'accès (includes/auth.php, observations_regles()) :
- *  - un rôle ne voit que les observations des types d'objets auxquels
- *    il a accès (le superadmin voit tout) ;
- *  - peuvent répondre : le rôle responsable de l'objet et l'auteur de
- *    l'observation d'origine (fil : observation → réponse → réponse) ;
- *  - aucune suppression : une observation fait partie de la trace.
- */
 $regles = observations_regles();
 $typesConnus = ['reservation', 'paiement', 'activite', 'espace', 'requisition', 'remboursement'];
 $typesDispo = array_values(array_intersect($typesConnus, observations_types_disponibles($pdo)));
@@ -23,7 +15,6 @@ $typesVisiblesPourMoi = is_superadmin()
     ? $typesDispo
     : array_values(array_filter($typesDispo, fn($t) => in_array($role, $regles['voir'][$t] ?? [], true)));
 
-// L'objet visé existe-t-il ?
 $cibleExiste = function (string $type, int $id) use ($pdo): bool {
     $tables = [
         'reservation' => 'reservations', 'paiement' => 'paiements', 'activite' => 'activites',
@@ -41,7 +32,6 @@ $labelsCible = [
     'reservation' => 'Réservation', 'paiement' => 'Paiement', 'activite' => 'Activité',
     'espace' => 'Espace', 'requisition' => 'Réquisition', 'remboursement' => 'Remboursement',
 ];
-// Référence lisible d'un objet (RESA-12, REQ-3, reçu, bon…)
 $refCible = function (string $type, int $id): string {
     return match ($type) {
         'reservation'   => ref_resa($id),
@@ -51,7 +41,6 @@ $refCible = function (string $type, int $id): string {
         default         => '#' . $id,
     };
 };
-// Lien vers l'objet, uniquement vers des pages accessibles au rôle
 $lienCible = function (string $type, int $id) use ($role): ?string {
     $compta = in_array($role, ['superadmin', 'ministre', 'admin_comptable'], true);
     return match (true) {
@@ -80,7 +69,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 if ($parentId) {
-                    // Réponse : l'objet est celui du fil d'origine (jamais celui envoyé par le navigateur)
                     $st = $pdo->prepare("SELECT id, auteur_id, cible_type, cible_id FROM observations WHERE id = ? AND parent_id IS NULL");
                     $st->execute([$parentId]);
                     $parent = $st->fetch();
@@ -114,7 +102,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if ((int)$parent['auteur_id'] !== $moi) {
                         notify('', 'reponse_observation', "«{$auteurNom}» a répondu à votre observation sur $objet", $lienObs, (int)$parent['auteur_id']);
                     } else {
-                        // L'auteur relance le fil : les rôles responsables sont prévenus
                         foreach ($regles['repondre'][$cibleType] ?? [] as $r) {
                             notify($r, 'reponse_observation', "«{$auteurNom}» a complété son observation sur $objet", $lienObs);
                         }
@@ -131,25 +118,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 $msg = ['ok', $parentId ? 'Réponse envoyée.' : 'Observation enregistrée.'];
             } catch (RuntimeException $e) {
-                $msg = ['err', $e->getMessage()];
+                $msg = ['err', message_erreur($e)];
             }
         }
-        // Aucune action de suppression : les observations sont conservées (traçabilité).
     }
 }
 
 $filterType = $_GET['type'] ?? '';
 $search     = trim($_GET['q'] ?? '');
 
-// Lien « Observer » depuis une fiche : filtre sur l'objet et pré-remplit le formulaire
 $preCibleType = in_array($_GET['cible_type'] ?? '', $typesVisiblesPourMoi, true) ? $_GET['cible_type'] : '';
 $preCibleId   = $preCibleType ? (int)($_GET['cible_id'] ?? 0) : 0;
 
 $where  = [];
 $params = [];
-// Toujours restreindre aux types que ce rôle a le droit de voir
 if (!$typesVisiblesPourMoi) {
-    $where[] = '1=0'; // aucun type autorisé pour ce rôle
+    $where[] = '1=0';
 } else {
     $in = implode(',', array_fill(0, count($typesVisiblesPourMoi), '?'));
     $where[] = "o.cible_type IN ($in)";
@@ -181,7 +165,6 @@ $observations = $pdo->prepare("
 $observations->execute($params);
 $observations = $observations->fetchAll();
 
-// Réponses, groupées par observation parente
 $reponsesParParent = [];
 if ($observations) {
     $ids = array_column($observations, 'id');
@@ -197,7 +180,6 @@ if ($observations) {
     foreach ($rq->fetchAll() as $rep) { $reponsesParParent[$rep['parent_id']][] = $rep; }
 }
 
-// Listes de choix du formulaire (uniquement pour les types visibles)
 $optionsCible = [];
 if (in_array('espace', $typesVisiblesPourMoi, true)) {
     $optionsCible['espace'] = array_map(fn($x) => ['id' => (int)$x['id'], 'nom' => $x['nom']],
@@ -239,7 +221,6 @@ if (in_array('remboursement', $typesVisiblesPourMoi, true)) {
             ORDER BY rb.id DESC LIMIT 30
         ")->fetchAll());
 }
-// Objet demandé par un lien, absent des listes récentes : ajouté en tête
 if ($preCibleType && $preCibleId && !in_array($preCibleId, array_column($optionsCible[$preCibleType] ?? [], 'id'), true)
     && $cibleExiste($preCibleType, $preCibleId)) {
     array_unshift($optionsCible[$preCibleType], ['id' => $preCibleId, 'nom' => $refCible($preCibleType, $preCibleId)]);
@@ -276,7 +257,6 @@ require __DIR__ . '/_admin_header.php';
 </div>
 <?php endif; ?>
 
-<!-- Formulaire -->
 <div id="obsForm" class="hidden mb-6 bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
   <div class="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50">
     <h2 class="font-black text-primary text-sm uppercase italic flex items-center gap-2">
@@ -336,7 +316,6 @@ require __DIR__ . '/_admin_header.php';
   </form>
 </div>
 
-<!-- Filtres -->
 <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 mb-5">
   <form method="GET" class="flex flex-wrap gap-3 items-end">
     <div class="flex-1 min-w-[160px]">
@@ -370,7 +349,6 @@ require __DIR__ . '/_admin_header.php';
   </form>
 </div>
 
-<!-- Liste -->
 <div class="space-y-4">
   <?php if (empty($observations)): ?>
   <div class="bg-white rounded-2xl border border-slate-100 py-16 text-center shadow-sm">

@@ -16,7 +16,7 @@ $p = $stmt->fetch();
 if (!$p) { header('Location: personnalites.php'); exit; }
 
 $nomComplet = trim(($p['prenom'] ?? '') . ' ' . $p['nom']);
-$pageTitle = $nomComplet . " — Palais des Pionniers";
+$pageTitle = $nomComplet . " | Palais des Pionniers";
 $page = 'personnalites.php';
 require __DIR__ . '/includes/header.php';
 ?>

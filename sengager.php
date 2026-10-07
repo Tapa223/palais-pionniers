@@ -5,8 +5,6 @@ require_once __DIR__ . '/includes/auth.php';
 $pdo = db();
 $msg = null;
 
-// Images du hero — ajoute simplement d'autres fichiers ici pour transformer
-// automatiquement ce bandeau en carrousel (défilement en fondu).
 $heroSengagerImages = array_values(array_filter(
     ['assets/images/groupewague.jpg'],
     fn($p) => file_exists(__DIR__ . '/' . $p)
@@ -19,7 +17,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $nom       = trim($_POST['nom'] ?? '');
         $prenom    = trim($_POST['prenom'] ?? '') ?: null;
         $age       = !empty($_POST['age']) ? (int)$_POST['age'] : null;
-        $dateNaissance = !empty($_POST['date_naissance']) ? $_POST['date_naissance'] : null;
+        $dateNaissance = !empty($_POST['date_naissance']) ? (string)$_POST['date_naissance'] : null;
         $tel       = trim($_POST['telephone'] ?? '');
         $email     = trim($_POST['email'] ?? '') ?: null;
         $commune   = trim($_POST['commune'] ?? '') ?: null;
@@ -29,7 +27,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if (!$nom || !$prenom || $age === null || !$dateNaissance || !$tel || !$email || !$commune || !$profession || !$domaine || !$motivation) {
             $msg = ['err', 'Merci de renseigner tous les champs du formulaire.'];
+        } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL) || !date_saisie_valide($dateNaissance) || $age < 5 || $age > 120) {
+            $msg = ['err', 'Merci de vérifier votre adresse email, votre date de naissance et votre âge.'];
+        } elseif (!envoi_formulaire_autorise('sengager', 3)) {
+            $msg = ['err', 'Votre inscription a déjà été envoyée. Merci de patienter avant d\'en envoyer une nouvelle.'];
         } else {
+            envoi_formulaire_enregistre('sengager');
             $pdo->prepare("
                 INSERT INTO jeunes_engages (nom, prenom, age, date_naissance, telephone, email, commune, profession, domaine_interet, motivation)
                 VALUES (?,?,?,?,?,?,?,?,?,?)
@@ -40,7 +43,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$pageTitle = "S'engager — Palais des Pionniers";
+$pageTitle = "S'engager | Palais des Pionniers";
 $page = 'sengager.php';
 require __DIR__ . '/includes/header.php';
 ?>
@@ -69,7 +72,7 @@ require __DIR__ . '/includes/header.php';
         <span class="inline-flex items-center gap-2 text-[10px] sm:text-xs font-black uppercase tracking-widest bg-accent text-white px-4 py-2 rounded-full mb-3 sm:mb-4"><i class="fas fa-hand-fist"></i> Rejoins le mouvement</span>
         <h1 class="text-2xl sm:text-4xl font-black italic uppercase tracking-tighter text-white mb-2 sm:mb-3 drop-shadow-lg">Ton engagement <span class="text-[#FCD116]">change tout</span></h1>
         <p class="text-xs sm:text-base text-slate-100 font-medium leading-relaxed mb-4 sm:mb-6 drop-shadow-md">
-            Civisme, sport, formation, volontariat — des milliers de jeunes construisent déjà l'avenir du Mali avec le Palais des Pionniers.
+            Civisme, sport, formation, volontariat : des milliers de jeunes construisent déjà l'avenir du Mali avec le Palais des Pionniers.
         </p>
         <div class="flex gap-2 sm:gap-4 flex-wrap">
             <span class="flex items-center gap-2 text-[10px] sm:text-xs font-bold text-white bg-white/15 backdrop-blur-sm rounded-full px-3 py-1.5"><i class="fas fa-users text-[#14B53A]"></i> Une communauté</span>

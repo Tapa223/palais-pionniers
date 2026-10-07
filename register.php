@@ -48,7 +48,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$pageTitle = "Inscription — Palais des Pionniers";
+$pageTitle = "Inscription | Palais des Pionniers";
 ?>
 <!DOCTYPE html>
 <html lang="fr">
@@ -74,13 +74,11 @@ $pageTitle = "Inscription — Palais des Pionniers";
         .input-field::placeholder { color: #94a3b8; font-weight: 500; }
         .input-field-no-icon { padding-left: 1.25rem; }
 
-        /* Indicateur de force du mot de passe */
         .strength-bar { height: 4px; border-radius: 2px; transition: all 0.3s; }
     </style>
 </head>
 <body class="min-h-screen flex">
 
-    <!-- Panneau gauche -->
     <div class="hidden lg:flex lg:w-1/2 bg-pattern flex-col justify-between p-12 relative overflow-hidden">
         <div class="absolute -bottom-32 -left-32 w-96 h-96 rounded-full bg-accent/10"></div>
         <div class="absolute -top-20 -right-20 w-72 h-72 rounded-full bg-white/5"></div>
@@ -100,7 +98,6 @@ $pageTitle = "Inscription — Palais des Pionniers";
                 Créez votre compte gratuitement et accédez à la réservation en ligne de tous nos espaces sportifs, culturels et événementiels.
             </p>
 
-            <!-- Avantages -->
             <div class="mt-8 space-y-3">
                 <?php foreach ([
                     ['fas fa-check-circle text-green-400', 'Réservation 100% en ligne'],
@@ -121,12 +118,11 @@ $pageTitle = "Inscription — Palais des Pionniers";
             </div>
             <div>
                 <p class="text-white text-xs font-bold">Palais des Pionniers</p>
-                <p class="text-slate-400 text-xs">Magnambougou / Dianéguéla, Bamako — Mali</p>
+                <p class="text-slate-400 text-xs">Magnambougou / Dianéguéla, Bamako, Mali</p>
             </div>
         </div>
     </div>
 
-    <!-- Panneau droit — formulaire -->
     <div class="w-full lg:w-1/2 flex items-center justify-center p-6 lg:p-12 bg-slate-50 overflow-y-auto">
         <div class="w-full max-w-md py-8">
 
@@ -152,7 +148,6 @@ $pageTitle = "Inscription — Palais des Pionniers";
             <form method="POST" class="space-y-5">
                 <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
 
-                <!-- Prénom + Nom -->
                 <div class="grid grid-cols-2 gap-4">
                     <div>
                         <label class="block text-xs font-black uppercase tracking-widest text-slate-500 mb-2">Prénom</label>
@@ -174,7 +169,6 @@ $pageTitle = "Inscription — Palais des Pionniers";
                     </div>
                 </div>
 
-                <!-- Email -->
                 <div>
                     <label class="block text-xs font-black uppercase tracking-widest text-slate-500 mb-2">Adresse e-mail</label>
                     <div class="relative">
@@ -185,7 +179,6 @@ $pageTitle = "Inscription — Palais des Pionniers";
                     </div>
                 </div>
 
-                <!-- Téléphone -->
                 <div>
                     <label class="block text-xs font-black uppercase tracking-widest text-slate-500 mb-2">Téléphone <span class="text-slate-300 normal-case font-normal">(optionnel)</span></label>
                     <div class="relative">
@@ -196,7 +189,6 @@ $pageTitle = "Inscription — Palais des Pionniers";
                     </div>
                 </div>
 
-                <!-- Mot de passe -->
                 <div>
                     <label class="block text-xs font-black uppercase tracking-widest text-slate-500 mb-2">Mot de passe</label>
                     <div class="relative">
@@ -209,7 +201,6 @@ $pageTitle = "Inscription — Palais des Pionniers";
                             <i class="fas fa-eye" id="eye1"></i>
                         </button>
                     </div>
-                    <!-- Barre de force -->
                     <div class="mt-2 flex gap-1">
                         <div class="strength-bar flex-1 bg-slate-200" id="s1"></div>
                         <div class="strength-bar flex-1 bg-slate-200" id="s2"></div>
@@ -219,7 +210,6 @@ $pageTitle = "Inscription — Palais des Pionniers";
                     <p class="text-xs text-slate-400 mt-1" id="strengthLabel"></p>
                 </div>
 
-                <!-- Confirmation -->
                 <div>
                     <label class="block text-xs font-black uppercase tracking-widest text-slate-500 mb-2">Confirmer le mot de passe</label>
                     <div class="relative">

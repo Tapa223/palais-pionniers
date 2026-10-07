@@ -7,7 +7,6 @@ $success = false;
 $errors  = [];
 $old     = ['nom'=>'','email'=>'','telephone'=>'','sujet'=>'','message'=>'','espace_id'=>'','activite_id'=>''];
 
-// Pré-remplir depuis les paramètres GET (lien venant d'une fiche espace, ex: "Nous contacter")
 $sujetsValides = ['reservation_espace','activite','information_generale','reclamation','autre'];
 if (isset($_GET['sujet']) && in_array($_GET['sujet'], $sujetsValides, true)) {
     $old['sujet'] = $_GET['sujet'];
@@ -15,11 +14,10 @@ if (isset($_GET['sujet']) && in_array($_GET['sujet'], $sujetsValides, true)) {
 if (!empty($_GET['espace'])) {
     $old['espace_id'] = (int)$_GET['espace'];
 }
-if (!empty($_GET['service'])) {
-    $old['message'] = "Je souhaite bénéficier du service « " . trim($_GET['service']) . " ». Merci de me contacter pour la mise en place.";
+if (!empty($_GET['service']) && is_string($_GET['service'])) {
+    $old['message'] = "Je souhaite bénéficier du service « " . mb_substr(trim($_GET['service']), 0, 120) . " ». Merci de me contacter pour la mise en place.";
 }
 
-// Pré-remplir si connecté
 if (is_logged_in()) {
     $me = $pdo->prepare("SELECT nom_complet, email, telephone FROM users WHERE id = ?");
     $me->execute([$_SESSION['user_id']]);
@@ -29,7 +27,6 @@ if (is_logged_in()) {
     $old['telephone'] = $me['telephone']   ?? '';
 }
 
-// Listes pour les selects conditionnels — colonnes correctes
 $espaces   = $pdo->query("SELECT id, nom FROM espaces WHERE disponible = 1 ORDER BY nom ASC")->fetchAll();
 $activites = $pdo->query("SELECT id, nom FROM activites ORDER BY nom ASC")->fetchAll();
 
@@ -51,35 +48,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!filter_var($old['email'], FILTER_VALIDATE_EMAIL))       $errors[] = "Adresse email invalide.";
         if (!in_array($old['sujet'], $sujetsValides, true))          $errors[] = "Veuillez choisir un sujet.";
         if (mb_strlen($old['message']) < 10)                         $errors[] = "Message trop court (min. 10 caractères).";
+        if (mb_strlen($old['message']) > 5000)                       $errors[] = "Message trop long (5 000 caractères maximum).";
+        if (!$errors && !envoi_formulaire_autorise('contact'))       $errors[] = "Vous avez déjà envoyé plusieurs messages. Merci de patienter avant d'en envoyer un nouveau.";
 
         if (!$errors) {
-            $stmt = $pdo->prepare("
-                INSERT INTO messages
-                    (nom, email, telephone, sujet, espace_id, activite_id, message, lu, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 0, NOW())
-            ");
-            $stmt->execute([
-                $old['nom'], $old['email'], $old['telephone'],
-                $old['sujet'], $old['espace_id'], $old['activite_id'],
-                $old['message']
-            ]);
+            $auteurId = (is_logged_in() && in_array($_SESSION['role'] ?? '', ['user', 'partenaire'], true)) ? (int)$_SESSION['user_id'] : null;
+            if (colonne_existe($pdo, 'messages', 'user_id')) {
+                $stmt = $pdo->prepare("
+                    INSERT INTO messages
+                        (user_id, nom, email, telephone, sujet, espace_id, activite_id, message, lu, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, NOW())
+                ");
+                $stmt->execute([
+                    $auteurId, $old['nom'], $old['email'], $old['telephone'],
+                    $old['sujet'], $old['espace_id'], $old['activite_id'],
+                    $old['message']
+                ]);
+            } else {
+                $stmt = $pdo->prepare("
+                    INSERT INTO messages
+                        (nom, email, telephone, sujet, espace_id, activite_id, message, lu, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 0, NOW())
+                ");
+                $stmt->execute([
+                    $old['nom'], $old['email'], $old['telephone'],
+                    $old['sujet'], $old['espace_id'], $old['activite_id'],
+                    $old['message']
+                ]);
+            }
             $nouveauMsgId = (int)$pdo->lastInsertId();
-            notify('admin_activites', 'nouveau_message', "Nouveau message de « {$old['nom']} » — sujet : {$old['sujet']}.", "messages.php?id=$nouveauMsgId");
+            $roleNotifie = ['reservation_espace' => 'admin_espaces', 'activite' => 'admin_activites'][$old['sujet']] ?? 'admin_messages';
+            notify($roleNotifie, 'nouveau_message', "Nouveau message de « {$old['nom']} » — sujet : {$old['sujet']}.", "messages.php?id=$nouveauMsgId");
+            envoi_formulaire_enregistre('contact');
             $success = true;
-            // Garder nom/email, vider le reste
             $old = array_merge($old, ['telephone'=>'','sujet'=>'','message'=>'','espace_id'=>'','activite_id'=>'']);
         }
     }
 }
 
-$pageTitle = "Contact — Palais des Pionniers";
+$pageTitle = "Contact | Palais des Pionniers";
 require __DIR__ . '/includes/header.php';
 ?>
 
 <div class="bg-slate-50 min-h-screen py-10 md:py-16">
 <div class="container mx-auto max-w-5xl px-4">
 
-  <!-- En-tête -->
   <div class="text-center mb-10 md:mb-14">
     <span class="inline-flex items-center gap-2 bg-accent/10 text-accent text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-full mb-4">
       <i class="fas fa-envelope"></i> Nous contacter
@@ -95,10 +108,9 @@ require __DIR__ . '/includes/header.php';
 
   <div class="flex flex-col md:grid md:grid-cols-3 gap-6 md:gap-10">
 
-    <!-- ---- Infos de contact ---- -->
     <div class="space-y-4 order-2 md:order-1">
       <?php foreach ([
-        ['fa-map-marker-alt', 'Adresse',   'Magnambougou / Dianéguéla, Bamako — Mali'],
+        ['fa-map-marker-alt', 'Adresse',   'Magnambougou / Dianéguéla, Bamako, Mali'],
         ['fa-phone',          'Téléphone', '+223 76 45 42 59'],
         ['fa-envelope',       'Email',     'sd_dicko@yahoo.fr'],
         ['fa-clock',          'Horaires',  'Lun – Sam : 08h00 – 18h00'],
@@ -114,7 +126,6 @@ require __DIR__ . '/includes/header.php';
       </div>
       <?php endforeach; ?>
 
-      <!-- Lien réservation -->
       <a href="reserver.php"
          class="flex items-center gap-3 bg-primary text-white rounded-2xl p-5 hover:bg-slate-800 transition shadow-sm group">
         <div class="w-10 h-10 bg-white/10 rounded-xl flex items-center justify-center flex-shrink-0">
@@ -126,31 +137,32 @@ require __DIR__ . '/includes/header.php';
         </div>
       </a>
 
-      <!-- Réseaux sociaux -->
+      <?php
+      $reseaux = array_filter(require __DIR__ . '/config/reseaux_sociaux.php', 'url_web_valide');
+      if ($reseaux):
+      ?>
       <div class="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm">
         <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-4">Suivez-nous</p>
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
-          <a href="#" target="_blank" rel="noopener"
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <?php if (!empty($reseaux['facebook'])): ?>
+          <a href="<?= e($reseaux['facebook']) ?>" target="_blank" rel="noopener"
              class="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white transition justify-center">
             <i class="fab fa-facebook-f text-sm w-4 text-center"></i>
             <span class="text-xs font-black">Facebook</span>
           </a>
-          <a href="#" target="_blank" rel="noopener"
+          <?php endif; ?>
+          <?php if (!empty($reseaux['tiktok'])): ?>
+          <a href="<?= e($reseaux['tiktok']) ?>" target="_blank" rel="noopener"
              class="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-slate-900 hover:bg-black text-white transition justify-center">
             <i class="fab fa-tiktok text-sm w-4 text-center"></i>
             <span class="text-xs font-black">TikTok</span>
           </a>
-          <a href="#" target="_blank" rel="noopener"
-             class="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white transition justify-center">
-            <i class="fab fa-youtube text-sm w-4 text-center"></i>
-            <span class="text-xs font-black">YouTube</span>
-          </a>
+          <?php endif; ?>
         </div>
-        <p class="text-[9px] text-slate-400 text-center mt-3 italic">Remplacez les # par vos vrais liens</p>
       </div>
+      <?php endif; ?>
     </div>
 
-    <!-- ---- Formulaire ---- -->
     <div class="md:col-span-2 order-1 md:order-2">
       <div class="bg-white rounded-[2rem] shadow-xl p-6 md:p-10">
 
@@ -177,7 +189,6 @@ require __DIR__ . '/includes/header.php';
         <form method="POST" class="space-y-5">
           <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
 
-          <!-- Nom + Email -->
           <div class="grid sm:grid-cols-2 gap-4">
             <div>
               <label class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">
@@ -203,7 +214,6 @@ require __DIR__ . '/includes/header.php';
             </div>
           </div>
 
-          <!-- Téléphone -->
           <div>
             <label class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Téléphone</label>
             <div class="relative">
@@ -214,7 +224,6 @@ require __DIR__ . '/includes/header.php';
             </div>
           </div>
 
-          <!-- Sujet -->
           <div>
             <label class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">
               Sujet <span class="text-accent">*</span>
@@ -234,7 +243,6 @@ require __DIR__ . '/includes/header.php';
             </div>
           </div>
 
-          <!-- Espace lié — apparaît si sujet = reservation_espace -->
           <div id="espaceField" class="hidden transition-all">
             <label class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Espace concerné</label>
             <div class="relative">
@@ -252,7 +260,6 @@ require __DIR__ . '/includes/header.php';
             </div>
           </div>
 
-          <!-- Activité liée — apparaît si sujet = activite -->
           <div id="activiteField" class="hidden transition-all">
             <label class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Activité concernée</label>
             <div class="relative">
@@ -270,7 +277,6 @@ require __DIR__ . '/includes/header.php';
             </div>
           </div>
 
-          <!-- Message -->
           <div>
             <label class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">
               Message <span class="text-accent">*</span>
@@ -312,7 +318,6 @@ function countMsg(el) {
     c.textContent = n + (n < 10 ? ' / 10 min.' : ' caractères');
     c.className = 'text-right text-[10px] mt-1 ' + (n >= 10 ? 'text-green-600' : 'text-slate-400');
 }
-// Init (après erreur de validation, restaurer l'état)
 onSujetChange(document.querySelector('select[name="sujet"]').value);
 </script>
 

@@ -1,7 +1,7 @@
       </div>
     </main>
-  </div><!-- /mainContent -->
-</div><!-- /flex min-h-screen -->
+  </div>
+</div>
 
 <script>
 function openSidebar()  { document.getElementById('sidebar').classList.add('open');    document.getElementById('overlay').style.display='block'; }

@@ -11,12 +11,9 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
-// Réservation faite dans le cadre d'une réquisition (nouvelle date / autre espace).
-// Vide pour une réservation normale : dans ce cas rien ne change dans le circuit.
 $requisition_id = max(0, (int)($_POST['requisition_id'] ?? 0));
 $paramRequisition = $requisition_id ? '&requisition_id=' . $requisition_id : '';
 
-// CSRF
 if (!csrf_check($_POST['csrf_token'] ?? '')) {
     header('Location: reserver.php?error=csrf' . $paramRequisition);
     exit;
@@ -49,7 +46,6 @@ if (!$espace) {
     exit;
 }
 
-// Adresse de retour en cas d'erreur (conserve le contexte de réquisition)
 $retourErreur = "reserver.php?espace_id=$espace_id" . $paramRequisition . "&error=";
 
 if (!empty($espace['gerant_externe'])) {
@@ -63,12 +59,9 @@ if (!empty($espace['gerant_externe'])) {
 
 $estSejour = ($espace['mode_reservation'] === 'sejour');
 
-// Le petit-déjeuner n'est proposé que par les espaces qui l'activent réellement
-// (ex: pas au Necker) — on ne fait jamais confiance à la case cochée côté client.
 if (!$estSejour || !$espace['option_petit_dejeuner']) $petit_dej = 0;
 if (!$espace['option_vip']) $vip = 0;
 
-// --- Contexte de réquisition (lecture seule ici, revérifié sous verrou plus bas) ---
 $requisition = null;
 
 if ($requisition_id) {
@@ -84,7 +77,6 @@ if ($requisition_id) {
 
     if ($requisition['choix_client'] === 'nouvelle_date') {
 
-        // Même espace et même type de réservation que la réservation d'origine
         if ($espace_id !== (int)$requisition['espace_id']) {
             header('Location: reserver.php?requisition_id=' . $requisition_id . '&error=' . urlencode("Pour une nouvelle date, la réservation doit rester sur l'espace « {$requisition['espace_nom']} »."));
             exit;
@@ -95,20 +87,17 @@ if ($requisition_id) {
         }
 
         if ($estSejour) {
-            // Le séjour garde sa durée et son nombre de chambres : seule la date bouge.
             if ($date_resa && ($d = DateTime::createFromFormat('!Y-m-d', $date_resa)) && $d->format('Y-m-d') === $date_resa) {
                 $date_depart = $d->modify('+' . (int)$requisition['nuits'] . ' days')->format('Y-m-d');
             }
             $quantite = max(1, (int)$requisition['quantite']);
         } elseif ($horaire_mode === 'meme') {
-            // Option « conserver le même horaire » : l'horaire est repris côté serveur.
             $heure_debut = substr((string)$requisition['heure_debut'], 0, 5);
             $heure_fin   = substr((string)$requisition['heure_fin'], 0, 5);
         }
 
     } else {
 
-        // Autre espace : un espace réellement différent de celui réquisitionné
         if ($espace_id === (int)$requisition['espace_id']) {
             header('Location: reserver.php?requisition_id=' . $requisition_id . '&error=' . urlencode("Merci de choisir un espace différent de « {$requisition['espace_nom']} », qui a été réquisitionné. Pour garder cet espace, choisissez plutôt une nouvelle date."));
             exit;
@@ -116,7 +105,6 @@ if ($requisition_id) {
     }
 }
 
-// --- Validations basiques ---
 $errors = [];
 
 $stmtActif = $pdo->prepare("SELECT actif FROM users WHERE id = ?");
@@ -125,7 +113,6 @@ if (!$stmtActif->fetchColumn()) {
     $errors[] = "Votre compte ne peut pas effectuer de nouvelle réservation pour le moment. Merci de vous rapprocher de l'administration du Palais.";
 }
 
-// Seuls les espaces proposés sur le site (disponible = 1) peuvent être réservés
 if (!(int)$espace['disponible']) {
     $errors[] = "Cet espace n'est pas disponible à la réservation pour le moment.";
 }
@@ -151,10 +138,9 @@ if ($estSejour) {
         $errors[] = "La date de départ doit être après la date d'arrivée.";
     }
 } else {
-    // Mêmes règles que les listes horaires de reserver.php (format, bornes, pas de 30 min)
     $erreurHoraire = horaire_reservation_erreur($heure_debut, $heure_fin);
     if ($erreurHoraire !== null) $errors[] = $erreurHoraire;
-    $quantite = 1; // la quantité multiple ne concerne que les espaces en séjour (chambres)
+    $quantite = 1;
 }
 
 if ($errors) {
@@ -166,16 +152,9 @@ if ($errors) {
 $heure_debut_fmt = $estSejour ? null : $heure_debut . ':00';
 $heure_fin_fmt   = $estSejour ? null : $heure_fin   . ':00';
 
-/* ============================================================
-   RÉSERVATION NORMALE — circuit inchangé
-   ============================================================ */
 if (!$requisition_id) {
 
     try {
-        // --- Anti-conflit : uniquement pour l'hébergement (inventaire réel de chambres) ---
-        // Pour les créneaux (salles), toute demande est acceptée : c'est le premier
-        // paiement enregistré au guichet qui départage définitivement en cas de
-        // créneau partagé entre plusieurs demandes validées.
         if ($estSejour) {
             $disponible = tarif_disponible(
                 $pdo, $tarif_id, $date_resa, $date_depart, null, null, null, $quantite
@@ -187,7 +166,6 @@ if (!$requisition_id) {
             }
         }
 
-        // --- Insertion ---
         $stmt = $pdo->prepare("
             INSERT INTO reservations
                 (user_id, espace_id, tarif_id, date_resa, date_depart, heure_debut, heure_fin, petit_dejeuner, vip, quantite, statut, motif, created_at, notification_vue)
@@ -195,14 +173,12 @@ if (!$requisition_id) {
         ");
         $stmt->execute([$user_id, $espace_id, $tarif_id, $date_resa, $estSejour ? $date_depart : null, $heure_debut_fmt, $heure_fin_fmt, $petit_dej, $vip, $quantite, $motif]);
         $resaId = (int)$pdo->lastInsertId();
-        attribuer_partenaire_reservation($pdo, $resaId, $user_id); // compte partenaire : réservation attribuée
+        attribuer_partenaire_reservation($pdo, $resaId, $user_id);
 
-        // Notifier admin_espaces : une nouvelle demande attend sa validation
         $nomClient = $_SESSION['nom_complet'] ?? 'Un client';
         $periode = $estSejour
             ? ('du ' . date('d/m/Y', strtotime($date_resa)) . ' au ' . date('d/m/Y', strtotime($date_depart)) . ($quantite > 1 ? " ($quantite chambres)" : ''))
             : ('le ' . date('d/m/Y', strtotime($date_resa)));
-        // Réservation partenaire : signalée comme prioritaire (même circuit de validation)
         $partResa  = partenaire_utilisateur($pdo, (int)$user_id);
         $prefixe   = $partResa ? "[Prioritaire · Partenaire {$partResa['nom']}] " : '';
         notify('admin_espaces', 'nouvelle_reservation',
@@ -214,14 +190,12 @@ if (!$requisition_id) {
             "reservations.php" . ($partResa ? "?id=$resaId" : '')
         );
         if ($partResa) {
-            // Information comptable : le paiement suivra le circuit habituel après validation
             notify('admin_comptable', 'nouvelle_reservation',
                 $prefixe . "Nouvelle demande partenaire " . ref_resa($resaId) . " pour « {$espace['nom']} » $periode (en attente de validation).",
                 "reservations.php?id=$resaId"
             );
         }
 
-        // Mise à jour du téléphone si absent
         if (!empty($telephone)) {
             $pdo->prepare("UPDATE users SET telephone = ? WHERE id = ? AND (telephone IS NULL OR telephone = '')")
                 ->execute([$telephone, $user_id]);
@@ -236,13 +210,6 @@ if (!$requisition_id) {
     }
 }
 
-/* ============================================================
-   RÉSERVATION DANS LE CADRE D'UNE RÉQUISITION
-   Même insertion qu'une réservation normale (statut en_attente,
-   validation par admin_espaces), rattachée via requisition_id.
-   Tout est revérifié sous verrou pour empêcher double clic,
-   deux onglets ou deux requêtes simultanées.
-   ============================================================ */
 try {
 
     $pdo->beginTransaction();
@@ -257,7 +224,6 @@ try {
 
     $requisition = $contexte['req'];
 
-    // Le choix a pu changer entre la lecture et le verrou : on revérifie l'espace
     if (
         ($requisition['choix_client'] === 'nouvelle_date' && $espace_id !== (int)$requisition['espace_id'])
         || ($requisition['choix_client'] === 'autre_espace' && $espace_id === (int)$requisition['espace_id'])
@@ -267,7 +233,6 @@ try {
         exit;
     }
 
-    // Le créneau (ou le séjour) réquisitionné reste occupé par l'institution
     if (chevauche_reservation_origine(
         $requisition,
         $espace_id,
@@ -282,14 +247,12 @@ try {
     }
 
     if ($estSejour) {
-        // Même contrôle d'inventaire qu'une réservation normale
         if (!tarif_disponible($pdo, $tarif_id, $date_resa, $date_depart, null, null, null, $quantite)) {
             $pdo->rollBack();
             header("Location: " . $retourErreur . urlencode("Complet pour ces dates. Merci de choisir d'autres dates ou une autre catégorie de chambre."));
             exit;
         }
     } else {
-        // Un créneau déjà définitivement réglé par un autre client ne peut pas être repris
         $occupant = creneau_occupe_par_reservation_payee($pdo, $espace_id, $date_resa, $heure_debut_fmt, $heure_fin_fmt);
         if ($occupant) {
             $pdo->rollBack();
@@ -298,7 +261,6 @@ try {
         }
     }
 
-    // --- Insertion : réservation normale, en attente de validation ---
     $stmt = $pdo->prepare("
         INSERT INTO reservations
             (user_id, espace_id, tarif_id, date_resa, date_depart, heure_debut, heure_fin, petit_dejeuner, vip, quantite, statut, motif, requisition_id, created_at, notification_vue)
@@ -306,9 +268,8 @@ try {
     ");
     $stmt->execute([$user_id, $espace_id, $tarif_id, $date_resa, $estSejour ? $date_depart : null, $heure_debut_fmt, $heure_fin_fmt, $petit_dej, $vip, $quantite, $motif, $requisition_id]);
     $resaId = (int)$pdo->lastInsertId();
-    attribuer_partenaire_reservation($pdo, $resaId, $user_id); // compte partenaire : réservation attribuée
+    attribuer_partenaire_reservation($pdo, $resaId, $user_id);
 
-    // --- Traçabilité sur l'opération de la réquisition ---
     $periode = $estSejour
         ? ('du ' . date('d/m/Y', strtotime($date_resa)) . ' au ' . date('d/m/Y', strtotime($date_depart)) . ($quantite > 1 ? " ($quantite chambres)" : ''))
         : ('le ' . date('d/m/Y', strtotime($date_resa)) . ' de ' . $heure_debut . ' à ' . $heure_fin);
@@ -345,7 +306,6 @@ try {
         "Client #$user_id — réquisition #$requisition_id : nouvelle réservation #$resaId créée (en attente)"
     );
 
-    // Mise à jour du téléphone si absent
     if (!empty($telephone)) {
         $pdo->prepare("UPDATE users SET telephone = ? WHERE id = ? AND (telephone IS NULL OR telephone = '')")
             ->execute([$telephone, $user_id]);
@@ -353,7 +313,6 @@ try {
 
     $pdo->commit();
 
-    // --- Notifications (après commit), comme une réservation normale ---
     $nomClient = $_SESSION['nom_complet'] ?? 'Un client';
     notify('admin_espaces', 'nouvelle_reservation',
         "Nouvelle demande de $nomClient pour « {$espace['nom']} » $periode — suite à la réquisition #$requisition_id",

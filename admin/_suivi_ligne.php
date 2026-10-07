@@ -1,10 +1,4 @@
 <?php
-/*
- * Affichage d'une réservation dans le suivi « à venir / à confirmer / effectuées ».
- * Partagé par admin/suivi.php et le bloc du tableau de bord (admin/_suivi.php).
- * Les droits (cocher, voir le téléphone, voir le paiement) sont recalculés côté serveur
- * à l'enregistrement : l'affichage ne fait qu'en refléter le résultat.
- */
 if (!function_exists('suivi_ligne')) {
     function suivi_ligne(array $r, string $retour): void
     {

@@ -7,9 +7,6 @@ $pdo  = db();
 $role = $_SESSION['role'] ?? '';
 $readonly = is_readonly_admin();
 
-// Filtre sujet selon rôle
-// $whereRole      = requêtes simples sans alias (COUNT, UPDATE)
-// $whereRoleAlias = requêtes avec JOIN et alias m.
 $whereRole      = '';
 $whereRoleAlias = '';
 if ($role === 'admin_espaces') {
@@ -21,10 +18,16 @@ if ($role === 'admin_activites') {
     $whereRoleAlias = "AND m.sujet = 'activite'";
 }
 
-// Action : marquer comme lu (admin_dg / ministre exclus, lecture seule)
 if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST' && csrf_check($_POST['csrf_token'] ?? '')) {
     $action = $_POST['action'] ?? '';
     $id     = (int)($_POST['id'] ?? 0);
+    if ($id) {
+        $perimetre = $pdo->prepare("SELECT COUNT(*) FROM messages WHERE id = ? " . $whereRole);
+        $perimetre->execute([$id]);
+        if (!(int)$perimetre->fetchColumn()) {
+            header('Location: messages.php'); exit;
+        }
+    }
     if ($action === 'mark_lu' && $id) {
         $pdo->prepare("UPDATE messages SET lu=1, lu_at=NOW() WHERE id=?")->execute([$id]);
         log_activity('message_lu','messages',"Message #$id marqué comme lu");
@@ -56,21 +59,28 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST' && csrf_check($_POST['cs
         $pdo->prepare("UPDATE messages SET reponse=?, repondu_par=?, repondu_at=NOW(), envoye_site=?, envoye_email=? WHERE id=?")
             ->execute([$reponse, $_SESSION['user_id'], $viaSite, $viaEmail, $id]);
 
-        // Réponse visible sur le compte client, si un compte correspond à cet email
         if ($viaSite && $msgOrig) {
-            $userMatch = $pdo->prepare("SELECT id FROM users WHERE email = ? AND role IN ('user','partenaire')");
-            $userMatch->execute([$msgOrig['email']]);
-            $userId = $userMatch->fetchColumn();
+            if (array_key_exists('user_id', $msgOrig)) {
+                $userId = $msgOrig['user_id'] ? (int)$msgOrig['user_id'] : 0;
+            } else {
+                $userMatch = $pdo->prepare("SELECT id FROM users WHERE email = ? AND role IN ('user','partenaire')");
+                $userMatch->execute([$msgOrig['email']]);
+                $userId = $userMatch->fetchColumn();
+            }
             if ($userId) {
                 notify('', 'reponse_message', "Réponse à votre message : " . mb_substr($reponse, 0, 120) . (mb_strlen($reponse) > 120 ? '…' : ''), "mon-compte.php?tab=messages", (int)$userId);
             }
         }
 
-        // Envoi par email — nécessite un serveur SMTP configuré (ex: Brevo) pour fonctionner réellement
         if ($viaEmail && $msgOrig) {
-            $sujetMail = "Réponse à votre message — Palais des Pionniers";
-            $corpsMail = "Bonjour {$msgOrig['nom']},\n\n$reponse\n\n— Le Palais des Pionniers";
-            @mail($msgOrig['email'], $sujetMail, $corpsMail, "From: no-reply@palaisdespionniers.ml");
+            $sujetMail = "Réponse à votre message - Palais des Pionniers";
+            $corpsMail = "Bonjour {$msgOrig['nom']},\n\n$reponse\n\nLe Palais des Pionniers";
+            $envoye = filter_var($msgOrig['email'], FILTER_VALIDATE_EMAIL)
+                && @mail($msgOrig['email'], $sujetMail, $corpsMail, "From: no-reply@palaisdespionniers.ml\r\nContent-Type: text/plain; charset=UTF-8");
+            if (!$envoye) {
+                $viaEmail = 0;
+                $pdo->prepare("UPDATE messages SET envoye_email = 0 WHERE id = ?")->execute([$id]);
+            }
         }
 
         log_activity('message_repondu', 'messages', "Réponse envoyée au message #$id" . ($viaSite ? ' (site)' : '') . ($viaEmail ? ' (email)' : ''));
@@ -79,8 +89,7 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST' && csrf_check($_POST['cs
     header('Location: messages.php'); exit;
 }
 
-// Filtres UI
-$filterLu   = $_GET['lu']    ?? 'all'; // all | 0 | 1
+$filterLu   = $_GET['lu']    ?? 'all';
 $filterSujet= $_GET['sujet'] ?? '';
 $search     = trim($_GET['q'] ?? '');
 $msgId      = isset($_GET['id']) ? (int)$_GET['id'] : 0;
@@ -100,13 +109,11 @@ $messages = $pdo->query("
     ORDER BY m.lu ASC, m.created_at DESC
 ")->fetchAll();
 
-// Message ouvert
 $openMsg = null;
 if ($msgId) {
-    $s = $pdo->prepare("SELECT m.*, e.nom AS espace_nom, a.nom AS activite_titre FROM messages m LEFT JOIN espaces e ON e.id=m.espace_id LEFT JOIN activites a ON a.id=m.activite_id WHERE m.id=?");
+    $s = $pdo->prepare("SELECT m.*, e.nom AS espace_nom, a.nom AS activite_titre FROM messages m LEFT JOIN espaces e ON e.id=m.espace_id LEFT JOIN activites a ON a.id=m.activite_id WHERE m.id=? $whereRoleAlias");
     $s->execute([$msgId]);
     $openMsg = $s->fetch();
-    // Marquer comme lu automatiquement (sauf pour les rôles en lecture seule)
     if ($openMsg && !$openMsg['lu'] && !$readonly) {
         $pdo->prepare("UPDATE messages SET lu=1, lu_at=NOW() WHERE id=?")->execute([$msgId]);
         $openMsg['lu'] = 1;
@@ -115,9 +122,6 @@ if ($msgId) {
 
 $totalNonLus = (int)$pdo->query("SELECT COUNT(*) FROM messages WHERE lu=0 " . $whereRole)->fetchColumn();
 
-// Consulter la boîte de réception = messages vus : on les marque lus
-// automatiquement (sauf rôles en lecture seule), comme pour les
-// notifications — l'enveloppe ne doit pas rester marquée indéfiniment.
 if (!$readonly && $totalNonLus > 0) {
     $pdo->query("UPDATE messages SET lu=1, lu_at=NOW() WHERE lu=0 " . $whereRole);
 }
@@ -156,7 +160,6 @@ require __DIR__ . '/_admin_header.php';
   </div>
 </div>
 
-<!-- Filtres -->
 <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 mb-5">
   <form method="GET" class="flex flex-wrap gap-3 items-end">
     <div class="flex-1 min-w-[180px]">
@@ -199,7 +202,6 @@ require __DIR__ . '/_admin_header.php';
 
 <div class="grid grid-cols-1 lg:grid-cols-5 gap-5">
 
-  <!-- Liste messages -->
   <div class="lg:col-span-2 space-y-2 min-w-0">
     <?php if (empty($messages)): ?>
       <div class="bg-white rounded-2xl border border-slate-100 p-12 text-center">
@@ -215,7 +217,7 @@ require __DIR__ . '/_admin_header.php';
          class="block bg-white rounded-2xl border-2 p-4 hover:shadow-md transition-all <?= $isOpen ? 'border-primary shadow-md' : 'border-transparent border-slate-100' ?> <?= !$msg['lu'] ? 'bg-blue-50/40' : '' ?>">
         <div class="flex items-start gap-3">
           <div class="w-9 h-9 rounded-full bg-primary flex items-center justify-center font-black text-white text-sm flex-shrink-0 mt-0.5">
-            <?= strtoupper(substr($msg['nom'],0,1)) ?>
+            <?= e(mb_strtoupper(mb_substr((string)$msg['nom'], 0, 1))) ?>
           </div>
           <div class="flex-1 min-w-0">
             <div class="flex items-center justify-between gap-2">
@@ -234,15 +236,13 @@ require __DIR__ . '/_admin_header.php';
     <?php endif; ?>
   </div>
 
-  <!-- Détail message -->
   <div class="lg:col-span-3">
     <?php if ($openMsg): ?>
     <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-      <!-- Header message -->
       <div class="px-6 py-5 border-b border-slate-100 flex items-start justify-between gap-4">
         <div class="flex items-center gap-4">
           <div class="w-12 h-12 rounded-full bg-primary flex items-center justify-center font-black text-white text-lg flex-shrink-0">
-            <?= strtoupper(substr($openMsg['nom'],0,1)) ?>
+            <?= e(mb_strtoupper(mb_substr((string)$openMsg['nom'], 0, 1))) ?>
           </div>
           <div>
             <h2 class="font-black text-primary text-base"><?= e($openMsg['nom']) ?></h2>
@@ -257,7 +257,6 @@ require __DIR__ . '/_admin_header.php';
         </div>
       </div>
 
-      <!-- Contexte espace/activité -->
       <?php if ($openMsg['espace_nom'] || $openMsg['activite_titre']): ?>
       <div class="px-6 py-3 bg-slate-50 border-b border-slate-100 flex items-center gap-2 text-xs">
         <?php if ($openMsg['espace_nom']): ?>
@@ -273,7 +272,6 @@ require __DIR__ . '/_admin_header.php';
       </div>
       <?php endif; ?>
 
-      <!-- Corps du message -->
       <div class="px-6 py-6">
         <p class="text-slate-700 leading-relaxed text-sm whitespace-pre-line"><?= e($openMsg['message']) ?></p>
       </div>
@@ -320,14 +318,11 @@ require __DIR__ . '/_admin_header.php';
       </div>
       <?php endif; ?>
 
-      <!-- Actions -->
       <div class="px-6 pb-6 flex flex-wrap gap-3">
-        <!-- Copier email -->
-        <button onclick="copyEmail('<?= e($openMsg['email']) ?>')"
+        <button type="button" data-email="<?= e($openMsg['email']) ?>" onclick="copyEmail(this.dataset.email)"
                 class="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-black uppercase px-4 py-2.5 rounded-xl transition" id="copyEmailBtn">
           <i class="fas fa-copy"></i> <span id="copyEmailLabel">Copier l'email</span>
         </button>
-        <!-- Répondre par email (mailto fallback) -->
         <a href="mailto:<?= e($openMsg['email']) ?>?subject=<?= urlencode('Re: Palais des Pionniers — '.$sujetLbl) ?>&body=<?= urlencode("Bonjour ".$openMsg['nom'].",
 
 ") ?>"
@@ -335,7 +330,6 @@ require __DIR__ . '/_admin_header.php';
           <i class="fas fa-reply"></i> Ouvrir dans ma messagerie
         </a>
 
-        <!-- Toggle lu/non lu -->
         <?php if (!$readonly): ?>
         <form method="POST" class="inline">
           <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
@@ -387,7 +381,6 @@ function copyEmail(email) {
             btn.classList.add('bg-slate-100','text-slate-700');
         }, 2500);
     }).catch(() => {
-        // Fallback si clipboard non disponible
         prompt("Copiez cet email :", email);
     });
 }

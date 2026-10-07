@@ -1,9 +1,4 @@
 <?php
-/*
- * Liens d'un remboursement enregistré : bon de remboursement (s'il est
- * effectué) et fil d'observation. Attend $remboursement (ligne de la
- * table remboursements) et $pdo.
- */
 if (empty($remboursement) || !isset($pdo)) {
     return;
 }

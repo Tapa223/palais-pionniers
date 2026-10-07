@@ -1,25 +1,8 @@
 <?php
-/*
- * Enveloppe « Espace admin » du partenaire (back-office de son organisation).
- * Même structure et mêmes classes que l'administration (admin/_admin_header.php) :
- * barre latérale fixe, barre du haut collante, contenu défilant à droite.
- *
- * Présentation uniquement : la page appelante a déjà vérifié l'accès
- * (require_client) et le statut partenaire. La navigation ne contient que
- * des pages de l'espace client autorisées au partenaire — aucun lien vers admin/.
- *
- * Variables attendues de la page appelante :
- *   $pageTitle           titre du document
- *   $ongletPartenaire    entrée active : tableau-de-bord, nouvelle, reservations, bons,
- *                        services, messages, notifications, profil, baux
- *   $partenaireLayout    fiche partenaire (partenaire_utilisateur())
- *   $navPartenaireBaux   (facultatif) true si le compte a des baux
- */
 $uLayout      = current_user();
 $ongletActif  = $ongletPartenaire ?? 'tableau-de-bord';
 $nomPartenaire = (string)($partenaireLayout['nom'] ?? 'Partenaire');
 
-// Compteurs de la navigation : données de l'organisation du partenaire uniquement
 $nbNotifsLayout = 0;
 $nbAttenteLayout = 0;
 try {
@@ -28,7 +11,6 @@ try {
     $stAtt->execute([(int)($partenaireLayout['id'] ?? 0)]);
     $nbAttenteLayout = (int)$stAtt->fetchColumn();
 } catch (Exception $e) {
-    // compteurs facultatifs
 }
 
 $navPartenaire = [
@@ -52,7 +34,7 @@ $titreCourt = $navPartenaire[$ongletActif][2] ?? 'Tableau de bord';
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title><?= e($pageTitle ?? 'Espace admin — Palais des Pionniers') ?></title>
+<title><?= e($pageTitle ?? 'Espace admin | Palais des Pionniers') ?></title>
 <link rel="stylesheet" href="assets/css/tailwind.css">
 <link rel="stylesheet" href="assets/fontawesome/css/all.min.css">
 <link rel="stylesheet" href="assets/css/fonts.css">
@@ -70,15 +52,12 @@ h1,h2,h3 { font-family:'Plus Jakarta Sans',Inter,sans-serif; letter-spacing:-.02
 </head>
 <body class="min-h-screen espace-partenaire">
 
-<!-- Overlay mobile -->
 <div id="overlay" onclick="closeSidebar()"></div>
 
 <div class="flex min-h-screen">
 
-  <!-- SIDEBAR (même modèle que l'administration) -->
   <aside id="sidebar" class="w-64 flex-col bg-primary text-white flex flex-shrink-0">
 
-    <!-- Logo -->
     <div class="px-5 py-5 border-b border-white/10 flex items-center justify-between">
       <div class="min-w-0">
         <div class="text-base font-extrabold uppercase italic tracking-tight">Palais <span class="text-accent">Pionniers</span></div>
@@ -89,7 +68,6 @@ h1,h2,h3 { font-family:'Plus Jakarta Sans',Inter,sans-serif; letter-spacing:-.02
       </button>
     </div>
 
-    <!-- Organisation et titulaire -->
     <div class="px-5 py-4 border-b border-white/10 flex items-center gap-3">
       <div class="w-9 h-9 rounded-full bg-accent flex items-center justify-center flex-shrink-0">
         <i class="fas fa-handshake text-sm"></i>
@@ -100,7 +78,6 @@ h1,h2,h3 { font-family:'Plus Jakarta Sans',Inter,sans-serif; letter-spacing:-.02
       </div>
     </div>
 
-    <!-- Navigation -->
     <nav class="flex-1 p-3 space-y-1 text-sm overflow-y-auto" aria-label="Navigation de l'espace partenaire">
       <?php foreach ($navPartenaire as $cle => [$href, $icon, $label, $compteur]):
         $active = ($cle === $ongletActif);
@@ -117,7 +94,6 @@ h1,h2,h3 { font-family:'Plus Jakarta Sans',Inter,sans-serif; letter-spacing:-.02
       <?php endforeach; ?>
     </nav>
 
-    <!-- Bas sidebar -->
     <div class="p-3 border-t border-white/10 space-y-1">
       <a href="logout.php" onclick="return confirm('Se déconnecter ?')"
          class="flex items-center gap-3 rounded-xl px-3 py-2.5 text-red-400 hover:bg-red-500/10 hover:text-red-300 transition text-sm">
@@ -127,12 +103,9 @@ h1,h2,h3 { font-family:'Plus Jakarta Sans',Inter,sans-serif; letter-spacing:-.02
     </div>
   </aside>
 
-  <!-- CONTENU PRINCIPAL -->
   <div id="mainContent" class="flex-1 flex flex-col min-w-0">
-    <!-- Header top -->
     <header class="flex items-center justify-between border-b border-slate-200 bg-white px-4 md:px-6 py-3 sticky top-0 z-30 shadow-sm">
       <div class="flex items-center gap-2">
-        <!-- Retour au site public (seul en haut, distinct de la flèche de retour) -->
         <a href="index.php"
            class="flex items-center gap-1.5 h-9 px-3 rounded-xl bg-slate-100 text-primary hover:bg-slate-200 transition flex-shrink-0 text-[11px] font-black uppercase tracking-tight"
            title="Quitter l'espace admin et revenir sur le site public">
@@ -140,16 +113,13 @@ h1,h2,h3 { font-family:'Plus Jakarta Sans',Inter,sans-serif; letter-spacing:-.02
           <span class="hidden sm:inline">Retour sur le site</span>
         </a>
 
-        <!-- Burger mobile -->
         <button onclick="openSidebar()" class="md:hidden w-9 h-9 flex items-center justify-center rounded-xl bg-slate-100 text-primary hover:bg-slate-200 transition" aria-label="Ouvrir le menu">
           <i class="fas fa-bars"></i>
         </button>
       </div>
 
-      <!-- Titre page (mobile) -->
       <div class="md:hidden font-black text-primary uppercase italic text-sm tracking-tight"><?= e($titreCourt) ?></div>
 
-      <!-- Fil d'Ariane desktop -->
       <div class="hidden md:flex items-center gap-2 text-sm text-slate-400">
         <i class="fas fa-handshake text-xs"></i>
         <span><?= e($nomPartenaire) ?></span>
@@ -157,7 +127,6 @@ h1,h2,h3 { font-family:'Plus Jakarta Sans',Inter,sans-serif; letter-spacing:-.02
         <span class="font-semibold text-primary"><?= e($titreCourt) ?></span>
       </div>
 
-      <!-- Droite : notifications + titulaire -->
       <div class="flex items-center gap-3">
         <a href="mon-compte.php?tab=notifications" class="relative flex items-center justify-center w-9 h-9 rounded-xl bg-slate-100 text-slate-600 hover:bg-amber-500 hover:text-white transition" aria-label="Notifications">
           <i class="fas fa-bell text-sm"></i>
@@ -177,7 +146,6 @@ h1,h2,h3 { font-family:'Plus Jakarta Sans',Inter,sans-serif; letter-spacing:-.02
     <main class="flex-1 p-4 md:p-8">
       <div class="w-full max-w-[1600px] mx-auto">
         <?php if ($ongletActif !== 'tableau-de-bord'): ?>
-        <!-- Flèche de retour vers le tableau de bord (zone de contenu, comme l'administration) -->
         <a href="mon-compte.php?tab=tableau-de-bord" id="retourTableauBord"
            class="inline-flex items-center gap-1.5 mb-4 px-3 py-1.5 rounded-full bg-white border border-slate-200 text-[11px] font-black uppercase tracking-tight text-primary hover:border-primary transition">
           <i class="fas fa-arrow-left text-[10px]"></i> Retour au tableau de bord

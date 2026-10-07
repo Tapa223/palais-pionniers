@@ -19,21 +19,15 @@ $modeLabels = [
 
 $fcfa = fn($m) => number_format((float)$m, 0, ',', ' ');
 
-// Message de l'opération précédente (après redirection)
 if (!empty($_SESSION['paiements_flash'])) {
     $msg = $_SESSION['paiements_flash'];
     unset($_SESSION['paiements_flash']);
 }
 
-/*
- * Jeton à usage unique par formulaire : un double clic, un rechargement
- * ou un second onglet ne peuvent pas rejouer la même action.
- */
 function paiement_jeton(): string
 {
     $jeton = bin2hex(random_bytes(16));
     $_SESSION['jetons_compta'][$jeton] = time();
-    // on ne garde que les jetons récents
     $_SESSION['jetons_compta'] = array_filter(
         $_SESSION['jetons_compta'],
         fn($t) => $t > time() - 6 * 3600
@@ -50,9 +44,6 @@ function paiement_consommer_jeton(?string $jeton): bool
     return true;
 }
 
-// ============================================================
-// ACTIONS (comptable uniquement) — tout est recalculé côté serveur
-// ============================================================
 if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $action = $_POST['action'] ?? '';
@@ -71,7 +62,6 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             $pdo->beginTransaction();
 
-            // Verrou : un seul traitement comptable à la fois sur cette réservation
             $s = situation_financiere_reservation($pdo, $resaId, true);
 
             if (!$s) {
@@ -85,16 +75,12 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     . ($libelles[$s['statut_reservation']] ?? $s['statut_reservation']) . '.');
             }
 
-            // Anciennes réservations : le montant initial est figé à la première opération
             figer_montant_initial($pdo, $resaId);
 
             $infos = $pdo->prepare("SELECT r.*, e.nom AS espace_nom, u.nom_complet FROM reservations r JOIN espaces e ON e.id=r.espace_id JOIN users u ON u.id=r.user_id WHERE r.id=?");
             $infos->execute([$resaId]);
             $resa = $infos->fetch();
 
-            // ------------------------------------------------------------
-            // A. RÉDUCTION ACCORDÉE
-            // ------------------------------------------------------------
             if ($action === 'accorder_reduction') {
 
                 $s = situation_financiere_reservation($pdo, $resaId);
@@ -162,9 +148,6 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $msgOk = 'Réduction de ' . $fcfa($montantReduction) . ' FCFA enregistrée. Net à payer : ' . $fcfa($apres['net_du']) . ' FCFA — reste à payer : ' . $fcfa($apres['solde']) . ' FCFA.';
 
-            // ------------------------------------------------------------
-            // A bis. RÉDUCTION ANNULÉE OU NON UTILISÉE
-            // ------------------------------------------------------------
             } elseif ($action === 'statut_reduction') {
 
                 $reductionId = (int)($_POST['reduction_id'] ?? 0);
@@ -177,8 +160,6 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (mb_strlen($motifStatut) < 3) {
                     throw new RuntimeException('Indiquez la raison du changement.');
                 }
-                // Le maintien du tarif suite à réquisition n'est pas une réduction commerciale :
-                // il ne peut être ni annulé ni marqué « non utilisé ».
                 if ($s['prise_en_charge_requisition'] && (int)$s['reduction_appliquee']['id'] === $reductionId) {
                     throw new RuntimeException('Le maintien du tarif suite à réquisition ne peut pas être annulé ni marqué non utilisé.');
                 }
@@ -205,9 +186,6 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $msgOk = $texte;
 
-            // ------------------------------------------------------------
-            // B. PAIEMENT RÉELLEMENT ENCAISSÉ
-            // ------------------------------------------------------------
             } elseif ($action === 'enregistrer_paiement') {
 
                 $mode = $_POST['mode'] ?? '';
@@ -217,9 +195,6 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $s = situation_financiere_reservation($pdo, $resaId);
 
-                // Le client règle finalement le plein tarif : la réduction accordée
-                // reste tracée mais n'est pas utilisée (aucune réduction encaissée).
-                // (sans effet sur une prise en charge suite à réquisition)
                 if (!empty($_POST['plein_tarif']) && $s['reduction_appliquee'] && !$s['prise_en_charge_requisition']) {
                     $pdo->prepare("
                         UPDATE reductions_accordees
@@ -269,7 +244,6 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
                         . ($s['reduction_appliquee'] ? ' Si le client règle le plein tarif malgré la réduction, cochez « Le client paie le plein tarif ».' : ''));
                 }
 
-                // Un créneau déjà réglé (même partiellement) par une autre réservation ne peut pas être encaissé
                 if ($s['total_paye'] <= 0 && !empty($resa['heure_debut'])) {
                     $occupant = creneau_occupe_par_reservation_payee($pdo, (int)$resa['espace_id'], $resa['date_resa'], $resa['heure_debut'], $resa['heure_fin'], $resaId);
                     if ($occupant) {
@@ -277,7 +251,6 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
 
-                // Garde-fou : même montant encaissé il y a moins de 2 minutes sur cette réservation
                 $recent = $pdo->prepare("SELECT id FROM paiements WHERE reservation_id = ? AND montant = ? AND created_at >= NOW() - INTERVAL 2 MINUTE LIMIT 1");
                 $recent->execute([$resaId, $montant]);
                 if ($recent->fetchColumn() && empty($_POST['confirmer_doublon'])) {
@@ -299,7 +272,6 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $apres = synchroniser_statut_paiement($pdo, $resaId);
 
-                // Ce paiement départage les éventuelles demandes concurrentes sur le même créneau
                 $annulees = annuler_reservations_concurrentes($pdo, $resaId);
 
                 $dateResa = date('d/m/Y', strtotime($resa['date_resa']));
@@ -336,12 +308,6 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 notify(...$n);
             }
 
-            /*
-             * Redirection après succès (Post/Redirect/Get) : actualiser la page
-             * affiche l'état à jour du dossier au lieu de renvoyer le formulaire
-             * (qui serait refusé par le jeton à usage unique et laisserait
-             * croire que le paiement n'est pas passé).
-             */
             $_SESSION['paiements_flash'] = ['ok', $msgOk];
             header('Location: paiements.php?resa=' . $resaId);
             exit;
@@ -350,7 +316,7 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();
             }
-            if ($e instanceof RuntimeException) {
+            if ($e instanceof RuntimeException && !($e instanceof PDOException)) {
                 $msg = ['err', $e->getMessage()];
             } else {
                 error_log('paiements.php : ' . $e->getMessage());
@@ -360,9 +326,6 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// ============================================================
-// FILTRES
-// ============================================================
 $filterMode   = $_GET['mode']   ?? '';
 $search       = trim($_GET['q'] ?? '');
 $filterDate   = (string)($_GET['date'] ?? '');
@@ -380,14 +343,12 @@ $params = [];
 
 if ($filterMode && isset($modeLabels[$filterMode])) { $where[]='p.mode=?'; $params[]=$filterMode; }
 if ($search) {
-    // Client, espace, référence, n° de reçu, ou n° de réservation (12, #12, RESA-12)
     $cond = 'u.nom_complet LIKE ? OR e.nom LIKE ? OR p.reference LIKE ? OR CONCAT(RIGHT(YEAR(p.created_at),2), "-", LPAD(p.id,3,"0"), "/DGPP-C") LIKE ?';
     $params = array_merge($params, ["%$search%","%$search%","%$search%","%$search%"]);
     if (preg_match('/^#?(?:RESA-?)?(\d+)$/i', $search, $mResa)) {
         $cond .= ' OR p.reservation_id = ?';
         $params[] = (int)$mResa[1];
     }
-    // Référence de réquisition (REQ-27) : réservation initiale et nouvelle réservation
     if (preg_match('/^#?REQ-?(\d+)$/i', $search, $mReq)) {
         $cond .= ' OR r.requisition_id = ? OR p.reservation_id = (SELECT rmq.reservation_id FROM requisitions_ministerielles rmq WHERE rmq.id = ?)';
         $params[] = (int)$mReq[1];
@@ -401,7 +362,6 @@ $filtreActif = $search || $filterMode || $filterDate || $filterEspace;
 
 $espacesListe = $pdo->query("SELECT id, nom FROM espaces ORDER BY nom")->fetchAll();
 
-// Historique des paiements
 $paiementsQuery = $pdo->prepare("
     SELECT p.*, r.date_resa, r.heure_debut, r.heure_fin, r.statut, r.statut_paiement,
            e.nom AS espace_nom, u.nom_complet, u.email, u.telephone,
@@ -417,7 +377,6 @@ $paiementsQuery = $pdo->prepare("
 $paiementsQuery->execute($params);
 $paiements = $paiementsQuery->fetchAll();
 
-// Réservations validées restant à encaisser (totalement ou en partie)
 $partenairesPaie = partenaires_disponibles($pdo);
 $enAttente = $pdo->query("
     SELECT r.*, e.nom AS espace_nom, u.nom_complet, u.telephone, u.email,
@@ -437,25 +396,21 @@ foreach ($enAttente as &$ea) {
 }
 unset($ea);
 
-// Références de dossier (RESA / REQ / réservation initiale), en une requête par liste
 $refsAttente   = references_dossiers($pdo, array_column($enAttente, 'id'));
 $refsPaiements = references_dossiers($pdo, array_column($paiements, 'reservation_id'));
 
-// Totaux : brut encaissé, remboursements effectués, net
 $totalPaye     = (float)$pdo->query("SELECT COALESCE(SUM(montant),0) FROM paiements")->fetchColumn();
 $totalRembourse = (float)$pdo->query("SELECT COALESCE(SUM(COALESCE(montant_rembourse, montant_a_rembourser)),0) FROM remboursements WHERE resultat = 'effectue'")->fetchColumn();
 $nbPaiements   = (int)$pdo->query("SELECT COUNT(*) FROM paiements")->fetchColumn();
 $nbEnAttente   = count($enAttente);
 $nbRetard      = count(array_filter($enAttente, fn($x) => $x['situation']['en_retard'] && $x['situation']['total_paye'] > 0));
 
-// Lien ?resa=ID vers une réservation déjà réglée : on ouvre son dernier paiement
 if ($openResa && !$openId && !in_array($openResa, array_map(fn($x) => (int)$x['id'], $enAttente), true)) {
     $dernier = $pdo->prepare("SELECT MAX(id) FROM paiements WHERE reservation_id = ?");
     $dernier->execute([$openResa]);
     $openId = (int)$dernier->fetchColumn();
 }
 
-// Détail paiement ouvert
 $openPaiement = null;
 if ($openId) {
     $s = $pdo->prepare("
@@ -491,7 +446,6 @@ require __DIR__ . '/_admin_header.php';
   <option value="Association reconnue d'utilité publique">
 </datalist>
 
-<!-- En-tête -->
 <div class="flex items-center justify-between mb-6 flex-wrap gap-3">
   <div>
     <h1 class="text-2xl font-black text-primary uppercase italic tracking-tight flex items-center gap-2">
@@ -518,11 +472,9 @@ require __DIR__ . '/_admin_header.php';
 <?php endif; ?>
 
 <?php
-  // Paiement refusé car identique à un paiement récent : on propose alors la case « second versement »
   $doublonSignale = $msg && $msg[0] === 'err' && str_contains($msg[1], 'paiement identique');
 ?>
 
-<!-- Stats : chaque carte mène aux données correspondantes -->
 <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
   <?php foreach ([
       ['rapport.php?type=encaisse', 'fa-check-circle text-green-500', 'bg-green-50', $fcfa($totalPaye - $totalRembourse) . ' <span class="text-xs">FCFA</span>', 'text-green-600', 'Total encaissé', 'Brut ' . $fcfa($totalPaye) . ' FCFA — remboursé ' . $fcfa($totalRembourse) . ' FCFA'],
@@ -544,7 +496,6 @@ require __DIR__ . '/_admin_header.php';
   <?php endforeach; ?>
 </div>
 
-<!-- Réservations en attente de paiement -->
 <?php if (!empty($enAttente)): ?>
 <div id="a-encaisser" class="bg-white rounded-2xl border-2 border-amber-200 shadow-sm overflow-hidden mb-6">
   <div class="flex flex-col sm:flex-row sm:items-center gap-3 px-5 py-4 border-b border-amber-100 bg-amber-50">
@@ -571,10 +522,8 @@ require __DIR__ . '/_admin_header.php';
         $acompte50 = round($s['net_du'] * 0.50);
         $proposer25 = $s['total_paye'] <= 0 && $acompte25 > 0 && $acompte25 < $s['solde'];
         $proposer50 = $s['total_paye'] <= 0 && $acompte50 > 0 && $acompte50 < $s['solde'];
-        // Avertissement d'expiration : uniquement tant qu'aucun paiement n'a été reçu (délai de 48 h)
         $heuresRestantes = $s['echeance_premier_paiement'] ? ($s['echeance_premier_paiement'] - time()) / 3600 : null;
         $red = $s['reduction_appliquee'];
-        // Maintien du tarif suite à réquisition : pas une réduction commerciale, non modifiable
         $priseEnCharge = $s['prise_en_charge_requisition'];
         $libelleMaintien = 'Maintien du tarif — réquisition #' . (int)($s['requisition_id'] ?? 0);
         $refsR = $refsAttente[$rid] ?? references_dossier($pdo, $rid);
@@ -633,9 +582,7 @@ require __DIR__ . '/_admin_header.php';
     </div>
 
     <?php if (!$readonly): ?>
-    <!-- Formulaire de paiement (déplié au clic) -->
     <div id="payForm-<?= $rid ?>" class="<?= $ouvert ? '' : 'hidden' ?> px-5 pb-5">
-      <!-- Formulaires : les champs affichés plus bas y sont rattachés par l'attribut form -->
       <form id="fPay-<?= $rid ?>" method="POST" class="hidden" onsubmit="return confirmerPaiement(<?= $rid ?>)" data-solde="<?= (int)round($s['solde']) ?>">
         <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
         <input type="hidden" name="jeton" value="<?= paiement_jeton() ?>">
@@ -687,7 +634,6 @@ require __DIR__ . '/_admin_header.php';
         </div>
 
         <?php if (!$red): ?>
-        <!-- Réduction : visible seulement après clic sur « Appliquer une réduction » -->
         <div id="reduction-<?= $rid ?>" class="hidden bg-orange-50 border-2 border-orange-200 rounded-xl p-4 space-y-3">
         <p class="text-[10px] font-black uppercase tracking-widest text-orange-700"><i class="fas fa-percent mr-1"></i>Réduction</p>
         <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -723,7 +669,6 @@ require __DIR__ . '/_admin_header.php';
         </div>
         </div>
         <?php elseif (!$priseEnCharge): ?>
-        <!-- Modification de la réduction : visible seulement après clic sur « modifier » -->
         <div id="reductionModif-<?= $rid ?>" class="hidden bg-orange-50 border-2 border-orange-200 rounded-xl p-4 space-y-3">
         <p class="text-xs text-orange-800">
           Réduction de <strong><?= $fcfa($red['montant_reduction']) ?> FCFA</strong><?= $red['motif'] ? ' — ' . e($red['motif']) : '' ?><?= $red['autorise_par'] ? ' (accord : ' . e($red['autorise_par']) . ')' : '' ?>
@@ -743,7 +688,6 @@ require __DIR__ . '/_admin_header.php';
         </div>
         <?php endif; ?>
 
-        <!-- Acompte : visible seulement après clic sur « Acompte » -->
         <div id="acompte-<?= $rid ?>" class="hidden bg-sky-50 border-2 border-sky-200 rounded-xl p-4 space-y-3">
           <p class="text-[10px] font-black uppercase tracking-widest text-sky-700"><i class="fas fa-coins mr-1"></i>Acompte</p>
           <div class="flex flex-wrap gap-2">
@@ -840,16 +784,13 @@ require __DIR__ . '/_admin_header.php';
 </div>
 <?php endif; ?>
 
-<!-- Historique paiements -->
 <div id="historique" class="grid lg:grid-cols-5 gap-5">
-  <!-- Liste -->
   <div class="lg:col-span-3 min-w-0">
     <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
       <div class="px-5 py-4 border-b border-slate-100 bg-slate-50 space-y-3">
         <h2 class="font-black text-[10px] uppercase tracking-widest text-slate-400 flex items-center gap-2">
           <i class="fas fa-history text-accent"></i> Historique des paiements
         </h2>
-        <!-- Recherche -->
         <form method="GET" action="paiements.php#historique" class="grid grid-cols-2 md:grid-cols-4 gap-2">
           <div class="relative col-span-2 md:col-span-2">
             <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-[10px]"></i>
@@ -925,7 +866,6 @@ require __DIR__ . '/_admin_header.php';
     </div>
   </div>
 
-  <!-- Détail -->
   <div class="lg:col-span-2 min-w-0">
     <?php if ($openPaiement):
       [$mlab,$mico,$mcls] = $modeLabels[$openPaiement['mode']] ?? ['—','fa-circle','bg-slate-100'];
@@ -1049,13 +989,12 @@ function basculer(idBloc) {
     const b = document.getElementById(idBloc);
     if (b) b.classList.toggle('hidden');
 }
-// Montant qui sera réellement encaissé (même calcul que le serveur)
 function montantChoisi(id) {
     const form = document.getElementById('typePaiement-'+id).form;
     const type = document.getElementById('typePaiement-'+id).value;
     const plein = document.getElementById('pleinTarif-'+id);
     const pleinCoche = plein && plein.checked;
-    if (type === 'personnalise') return parseFloat(document.querySelector(`#montantPerso-${id} input`).value) || 0;  // 0 = à saisir
+    if (type === 'personnalise') return parseFloat(document.querySelector(`#montantPerso-${id} input`).value) || 0;
     if (type === 'acompte_25' || type === 'acompte_50') {
         const taux = type === 'acompte_25' ? 0.25 : 0.50;
         if (pleinCoche) return Math.round(plein.dataset.netPlein * taux);
@@ -1086,7 +1025,7 @@ function basculerAcompte(id) {
     const bloc = document.getElementById('acompte-'+id);
     bloc.classList.toggle('hidden');
     if (bloc.classList.contains('hidden')) {
-        selectionnerType(id, 'complet');           // fermeture : retour au paiement complet
+        selectionnerType(id, 'complet');
     } else {
         const premier = bloc.querySelector('[data-type]');
         if (premier) selectionnerType(id, premier.dataset.type);

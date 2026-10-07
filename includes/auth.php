@@ -1,8 +1,38 @@
 <?php
 
+$httpsActif = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+    || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
+
+if (!headers_sent()) {
+    header('X-Frame-Options: SAMEORIGIN');
+    header('X-Content-Type-Options: nosniff');
+    header('Referrer-Policy: strict-origin-when-cross-origin');
+    header("Content-Security-Policy: frame-ancestors 'self'; base-uri 'self'; object-src 'none'; form-action 'self'");
+    header('Permissions-Policy: camera=(), microphone=(), geolocation=()');
+    if ($httpsActif) {
+        header('Strict-Transport-Security: max-age=31536000');
+    }
+}
+
 if (session_status() === PHP_SESSION_NONE) {
+    ini_set('session.use_strict_mode', '1');
+    ini_set('session.use_only_cookies', '1');
+    session_set_cookie_params([
+        'lifetime' => 0,
+        'path'     => '/',
+        'secure'   => $httpsActif,
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
     session_start();
 }
+
+if (!empty($_SESSION['user_id']) && isset($_SESSION['derniere_activite'])
+    && time() - (int)$_SESSION['derniere_activite'] > 7200) {
+    $_SESSION = [];
+    session_regenerate_id(true);
+}
+$_SESSION['derniere_activite'] = time();
 
 require_once __DIR__ . '/../config/database.php';
 
@@ -64,9 +94,6 @@ if (!function_exists('require_role')) {
             exit;
         }
 
-        // Compte d'administration : rôle et statut relus en base à chaque page,
-        // pour qu'un blocage ou un changement de rôle décidé par la Direction
-        // s'applique immédiatement, sans attendre une nouvelle connexion.
         $etat = db()->prepare("SELECT role, actif FROM users WHERE id = ?");
         $etat->execute([(int)$_SESSION['user_id']]);
         $etat = $etat->fetch();
@@ -90,6 +117,20 @@ if (!function_exists('require_role')) {
             header('Location: ' . $redirect);
             exit;
         }
+
+        if (!empty($_SESSION['mdp_a_changer'])
+            && basename(dirname($_SERVER['PHP_SELF'] ?? '')) === 'admin'
+            && basename($_SERVER['PHP_SELF']) !== 'mon-mot-de-passe.php') {
+            header('Location: mon-mot-de-passe.php');
+            exit;
+        }
+    }
+}
+
+if (!function_exists('mot_de_passe_par_defaut')) {
+    function mot_de_passe_par_defaut(string $motDePasse): bool
+    {
+        return in_array($motDePasse, ['ChangeMoi@2026', 'ChangeMoi2026', 'admin', 'password', '12345678'], true);
     }
 }
 
@@ -111,10 +152,6 @@ if (!function_exists('require_admin')) {
 }
 
 if (!function_exists('is_readonly_admin')) {
-    /**
-     * true si le rôle connecté n'a qu'un accès de supervision
-     * sur les modules métier.
-     */
     function is_readonly_admin(): bool
     {
         return in_array(
@@ -126,10 +163,6 @@ if (!function_exists('is_readonly_admin')) {
 }
 
 if (!function_exists('require_client')) {
-    /**
-     * Bloque l'accès aux pages réservées aux clients
-     * pour tout compte de service.
-     */
     function require_client(
         string $redirect = 'admin/dashboard.php'
     ): void {
@@ -138,14 +171,11 @@ if (!function_exists('require_client')) {
             exit;
         }
 
-        // Espace client : clients classiques et comptes partenaires
-        // (le partenaire réserve par le circuit normal, sans droit d'administration)
         if (!in_array($_SESSION['role'] ?? 'user', ['user', 'partenaire'], true)) {
             header('Location: ' . $redirect);
             exit;
         }
 
-        // Compte partenaire désactivé en cours de session : déconnexion
         if (($_SESSION['role'] ?? '') === 'partenaire') {
             $pdoC = db();
             $actif = $pdoC->prepare("SELECT actif FROM users WHERE id = ?");
@@ -161,15 +191,6 @@ if (!function_exists('require_client')) {
 }
 
 if (!function_exists('tarif_disponible')) {
-    /**
-     * Vérifie la disponibilité d'un tarif sur une période donnée.
-     *
-     * Mode créneau :
-     * seules les réservations validées bloquent le créneau.
-     *
-     * Mode séjour :
-     * les réservations validées et en attente sont prises en compte.
-     */
     function tarif_disponible(
         PDO $pdo,
         int $tarifId,
@@ -262,12 +283,6 @@ if (!function_exists('tarif_disponible')) {
 }
 
 if (!function_exists('creneaux_libres_du_jour')) {
-    /**
-     * Calcule les plages horaires encore libres pour un tarif
-     * à une date donnée.
-     *
-     * Plage d'ouverture : 07h00 - 22h00.
-     */
     function creneaux_libres_du_jour(
         PDO $pdo,
         int $tarifId,
@@ -339,10 +354,6 @@ if (!function_exists('creneaux_libres_du_jour')) {
 }
 
 if (!function_exists('periode_actuelle_debut')) {
-    /**
-     * Premier jour de la période de bail en cours,
-     * selon sa périodicité.
-     */
     function periode_actuelle_debut(
         string $typeBail
     ): string {
@@ -397,12 +408,6 @@ if (!function_exists('periode_actuelle_debut')) {
 }
 
 if (!function_exists('limite_paiement')) {
-    /**
-     * Calcule la date limite de paiement à 48h.
-     *
-     * Si l'échéance tombe un samedi ou un dimanche,
-     * elle est reportée au lundi à la même heure.
-     */
     function limite_paiement(
         string $depart
     ): int {
@@ -436,12 +441,6 @@ if (!function_exists('limite_paiement')) {
 }
 
 if (!function_exists('annuler_reservations_concurrentes')) {
-    /**
-     * Appelée après l'encaissement d'une réservation validée.
-     *
-     * Les autres réservations validées mais non payées,
-     * qui chevauchent la réservation payée, sont annulées.
-     */
     function annuler_reservations_concurrentes(
         PDO $pdo,
         int $reservationPayeeId
@@ -569,7 +568,7 @@ if (!function_exists('annuler_reservations_concurrentes')) {
             notify(
                 '',
                 'reservation_impossible',
-                "La salle « {$c['espace_nom']} » n'est plus disponible pour votre créneau demandé — une autre personne a réglé son paiement en premier."
+                "La salle « {$c['espace_nom']} » n'est plus disponible pour le créneau demandé : une autre personne a réglé son paiement en premier."
                 . (
                     $creneaux
                         ? ' Créneaux encore libres ce jour : '
@@ -897,12 +896,6 @@ if (!function_exists('admin_nav')) {
 }
 
 if (!function_exists('admin_nav_badges')) {
-    /**
-     * Compteurs contextuels affichés dans la sidebar.
-     *
-     * Le badge Réquisitions correspond exactement
-     * à l'onglet "Choix fait, à traiter".
-     */
     function admin_nav_badges(): array
     {
         $badges = [];
@@ -935,20 +928,6 @@ if (!function_exists('admin_nav_badges')) {
                         'partiellement_paye'
                 ")->fetchColumn();
 
-            /*
-             * Une réquisition est considérée comme
-             * "à traiter" dès que le client a effectué
-             * son choix.
-             *
-             * Les deux statuts sont volontairement
-             * pris en compte :
-             *
-             * choix_recu
-             * en_traitement
-             *
-             * Cette condition est identique à celle
-             * utilisée dans admin/requisitions.php.
-             */
             $badges['requisitions.php'] =
                 (int) $pdo->query("
                     SELECT COUNT(*)
@@ -960,8 +939,6 @@ if (!function_exists('admin_nav_badges')) {
                     AND choix_client IS NOT NULL
                 ")->fetchColumn();
 
-            // Baux sans loyer enregistré pour la période en cours
-            // (même règle que la page Baux : début de période selon le type de bail)
             $espacesBail = $pdo->query("
                 SELECT id, type_bail
                 FROM espaces
@@ -996,7 +973,6 @@ if (!function_exists('admin_nav_badges')) {
                     WHERE statut = 'en_attente'
                 ")->fetchColumn();
 
-            // Suivi : réservations payées terminées, pas encore cochées « Effectuée »
             if (suivi_disponible($pdo)) {
                 $badges['suivi.php'] = compter_suivi($pdo, 'a_confirmer');
             }
@@ -1009,13 +985,11 @@ if (!function_exists('admin_nav_badges')) {
             );
         }
 
-        // Compteurs indépendants : une erreur ci-dessus ne les empêche pas
         try {
             $badges['demandes-services.php'] = (int) $pdo->query(
                 "SELECT COUNT(*) FROM demandes_services WHERE statut = 'en_attente'"
             )->fetchColumn();
         } catch (Exception $e) {
-            // table absente
         }
         try {
             if (suggestions_disponibles($pdo)) {
@@ -1024,7 +998,6 @@ if (!function_exists('admin_nav_badges')) {
                 )->fetchColumn();
             }
         } catch (Exception $e) {
-            // table absente
         }
 
         return $badges;
@@ -1043,13 +1016,6 @@ if (!function_exists('e')) {
 }
 
 if (!function_exists('ref_recu')) {
-    /**
-     * Référence lisible et unique d'un reçu de paiement.
-     *
-     * L'année est celle du paiement ($dateCreation) : le numéro d'un reçu
-     * ne change donc plus au passage à une nouvelle année. Sans date
-     * fournie, l'année en cours est utilisée (comportement historique).
-     */
     function ref_recu(
         int $paiementId,
         ?string $dateCreation = null
@@ -1196,13 +1162,6 @@ if (!function_exists('notify')) {
 }
 
 if (!function_exists('notifications_perimetre')) {
-    /**
-     * Périmètre des notifications d'un compte (clause WHERE + paramètres).
-     * - client : ses propres notifications (inchangé) ;
-     * - partenaire : les notifications de tous les comptes de SON organisation
-     *   (un événement n'est envoyé qu'une fois, au compte concerné : aucun doublon),
-     *   sauf les échanges personnels (réponse à un message de contact, rattachement).
-     */
     function notifications_perimetre(PDO $pdo, int $userId): array
     {
         if (($_SESSION['role'] ?? '') === 'partenaire' && ($p = partenaire_utilisateur($pdo, $userId))) {
@@ -1228,7 +1187,6 @@ if (!function_exists('count_notifications')) {
 
         try {
 
-            // Partenaire : notifications de son organisation (voir notifications_perimetre)
             if ($role === 'partenaire') {
                 [$perimetre, $paramsPerimetre] = notifications_perimetre(db(), $uid);
                 $stmt = db()->prepare("SELECT COUNT(*) FROM notifications WHERE lu = 0 AND (destinataire_role = ? OR $perimetre)");
@@ -1268,10 +1226,6 @@ if (!function_exists('count_notifications')) {
 }
 
 if (!function_exists('expirer_reservations_non_payees')) {
-    /**
-     * Annule automatiquement les réservations validées mais
-     * toujours impayées 48h après leur validation.
-     */
     function expirer_reservations_non_payees(): void
     {
         $pdo = db();
@@ -1373,28 +1327,8 @@ if (!function_exists('expirer_reservations_non_payees')) {
     }
 }
 
-/*
-|--------------------------------------------------------------------------
-| RÉQUISITIONS → NOUVELLE RÉSERVATION NORMALE
-|--------------------------------------------------------------------------
-| Fonctions partagées par reserver.php, traitement-reservation.php,
-| mon-compte.php, admin/reservations.php et admin/requisition-detail.php.
-| Elles ne créent aucun circuit parallèle : la nouvelle réservation reste
-| une réservation normale (en_attente → validation admin_espaces → suite
-| normale), simplement rattachée à sa réquisition via
-| reservations.requisition_id.
-*/
 
 if (!function_exists('horaire_reservation_erreur')) {
-    /**
-     * Contrôle serveur des horaires d'une réservation en mode créneau.
-     *
-     * Reprend exactement les règles des listes de reserver.php :
-     * format HH:MM, pas de 30 minutes, début de 07:00 à 21:30,
-     * fin de 08:00 à 22:30, fin strictement après le début.
-     *
-     * Retourne null si les horaires sont valides, sinon un message.
-     */
     function horaire_reservation_erreur(
         string $debut,
         string $fin
@@ -1425,49 +1359,16 @@ if (!function_exists('horaire_reservation_erreur')) {
     }
 }
 
-/*
-|--------------------------------------------------------------------------
-| SITUATION FINANCIÈRE D'UNE RÉSERVATION — SOURCE UNIQUE
-|--------------------------------------------------------------------------
-| Toutes les pages (paiements, acomptes, réservations, mon-compte, bons et
-| factures, statistiques, réquisitions) utilisent ces fonctions au lieu de
-| recalculer chacune leurs montants.
-|
-|   montant initial   = tarif normal AVANT toute réduction
-|                       (reservations.montant_initial, figé à la validation ;
-|                        recalculé depuis le tarif pour les anciennes lignes)
-| − réduction appliquée (reductions_accordees, statut « appliquee »)
-| = montant net dû
-|   total payé        = somme des paiements réellement encaissés
-| − total remboursé   = remboursements effectués imputables à la réservation
-| = payé net
-|   solde             = net dû − payé net (jamais négatif)
-|   trop-perçu        = payé net − net dû (jamais négatif)
-*/
 
 if (!defined('HEURE_DEBUT_SEJOUR')) {
-    /**
-     * Heure conventionnelle de début d'un séjour (arrivée).
-     * Les séjours n'ont pas d'heure de début en base : l'échéance du solde
-     * (24 h avant le début) est calculée à partir de cette heure le jour
-     * d'arrivée. Exemple : arrivée le 12/10 → échéance le 11/10 à 12:00.
-     */
     define('HEURE_DEBUT_SEJOUR', '12:00:00');
 }
 
 if (!defined('DELAI_SOLDE_HEURES')) {
-    /** Le solde d'un acompte doit être réglé 24 h avant le début réel. */
     define('DELAI_SOLDE_HEURES', 24);
 }
 
 if (!function_exists('montant_tarif_reservation')) {
-    /**
-     * Tarif normal calculé à partir du tarif et de l'espace (sans réduction).
-     *
-     * Formule historique de admin/paiements.php et generer_bon.php :
-     * tarif × nuitées × quantité (+ petit-déjeuner 5 000 / nuit / chambre
-     * en séjour, + supplément VIP en créneau). 0 si le tarif n'existe plus.
-     */
     function montant_tarif_reservation(
         PDO $pdo,
         int $reservationId
@@ -1530,10 +1431,6 @@ if (!function_exists('montant_tarif_reservation')) {
 }
 
 if (!function_exists('montant_attendu_reservation')) {
-    /**
-     * Montant initial (tarif normal avant réduction) d'une réservation :
-     * valeur figée si elle existe, sinon calcul depuis le tarif.
-     */
     function montant_attendu_reservation(
         PDO $pdo,
         int $reservationId
@@ -1552,12 +1449,6 @@ if (!function_exists('montant_attendu_reservation')) {
 }
 
 if (!function_exists('figer_montant_initial')) {
-    /**
-     * Fige le montant initial d'une réservation s'il ne l'est pas encore.
-     * Appelée à la validation, à la saisie guichet et, pour les anciennes
-     * réservations, lors de la première opération comptable.
-     * Ne modifie jamais un montant déjà figé.
-     */
     function figer_montant_initial(
         PDO $pdo,
         int $reservationId
@@ -1577,11 +1468,6 @@ if (!function_exists('figer_montant_initial')) {
 }
 
 if (!function_exists('debut_reservation')) {
-    /**
-     * Début réel d'une réservation (timestamp) :
-     * - créneau : date + heure de début ;
-     * - séjour  : date d'arrivée + HEURE_DEBUT_SEJOUR.
-     */
     function debut_reservation(array $r): int
     {
         $heure = !empty($r['heure_debut'])
@@ -1593,14 +1479,6 @@ if (!function_exists('debut_reservation')) {
 }
 
 if (!function_exists('situation_financiere_reservation')) {
-    /**
-     * Situation financière complète d'une réservation.
-     *
-     * Avec $verrouiller = true, la réservation est verrouillée
-     * (SELECT ... FOR UPDATE) : à appeler dans une transaction.
-     *
-     * Retourne null si la réservation n'existe pas.
-     */
     function situation_financiere_reservation(
         PDO $pdo,
         int $reservationId,
@@ -1626,7 +1504,6 @@ if (!function_exists('situation_financiere_reservation')) {
             ? round((float) $r['montant_initial'], 2)
             : montant_tarif_reservation($pdo, $reservationId);
 
-        // --- Réductions ---
         $stmt = $pdo->prepare("
             SELECT ra.*, u.nom_complet AS saisi_par_nom
             FROM reductions_accordees ra
@@ -1642,7 +1519,6 @@ if (!function_exists('situation_financiere_reservation')) {
         $reductionsAnnulees = [];
 
         foreach ($reductions as &$red) {
-            // Origine : « commerciale » (guichet) ou « requisition » (maintien du tarif)
             $red['origine'] = ($red['origine'] ?? '') === 'requisition' ? 'requisition' : 'commerciale';
         }
         unset($red);
@@ -1661,7 +1537,6 @@ if (!function_exists('situation_financiere_reservation')) {
             ? min($montantInitial, (float) $reductionAppliquee['montant_reduction'])
             : 0.0;
 
-        // --- Paiements ---
         $stmt = $pdo->prepare("
             SELECT COALESCE(SUM(montant), 0),
                    COUNT(*),
@@ -1674,10 +1549,6 @@ if (!function_exists('situation_financiere_reservation')) {
         $totalPaye = round((float) $totalPaye, 2);
         $nbPaiements = (int) $nbPaiements;
 
-        // Ancien fonctionnement (avant reductions_accordees) : un paiement
-        // portant un motif_reduction soldait la réservation au montant versé.
-        // Ces réservations restent considérées comme réglées, sans modifier
-        // l'historique.
         $montantReductionHistorique = 0.0;
         if (!$reductionAppliquee && (int) $reductionHistorique === 1) {
             $montantReductionHistorique = round(max(0.0, $montantInitial - $totalPaye), 2);
@@ -1686,12 +1557,6 @@ if (!function_exists('situation_financiere_reservation')) {
 
         $netDu = round(max(0.0, $montantInitial - $montantReduction), 2);
 
-        // --- Remboursements imputables ---
-        // - réquisition avec choix « remboursement » (ou autre choix sans
-        //   nouvelle réservation) : l'argent est sur la réservation d'origine ;
-        // - nouvelle date / autre espace : les paiements ont été transférés
-        //   vers la nouvelle réservation, le remboursement (trop-perçu) lui
-        //   est donc imputé, même s'il est rattaché à la réservation d'origine.
         $stmt = $pdo->prepare("
             SELECT COALESCE(SUM(COALESCE(rb.montant_rembourse, rb.montant_a_rembourser)), 0)
             FROM remboursements rb
@@ -1713,7 +1578,6 @@ if (!function_exists('situation_financiere_reservation')) {
         $solde = round(max(0.0, $netDu - $payeNet), 2);
         $tropPercu = round(max(0.0, $payeNet - $netDu), 2);
 
-        // --- Statut de paiement correspondant à la situation réelle ---
         if ($payeNet <= 0) {
             $statutCalcule = $r['statut_paiement'] === 'attente_paiement'
                 ? 'attente_paiement'
@@ -1724,25 +1588,21 @@ if (!function_exists('situation_financiere_reservation')) {
             $statutCalcule = 'paye';
         }
 
-        // --- Échéances ---
         $maintenant = time();
         $echeancePremierPaiement = null;
         $echeanceSolde = null;
 
         if ($r['statut'] === 'validee' && $totalPaye <= 0 && !empty($r['date_validation'])) {
-            // Délai de 48 h existant (report au lundi si week-end)
             $echeancePremierPaiement = limite_paiement($r['date_validation']);
         }
 
         if ($r['statut'] === 'validee' && $statutCalcule === 'partiellement_paye') {
-            // Solde : 24 h avant le début réel de la réservation
             $echeanceSolde = debut_reservation($r) - DELAI_SOLDE_HEURES * 3600;
         }
 
         $enRetard = ($echeancePremierPaiement !== null && $echeancePremierPaiement < $maintenant)
             || ($echeanceSolde !== null && $echeanceSolde < $maintenant);
 
-        // --- État lisible ---
         if (in_array($r['statut'], ['requisitionnee', 'annulee', 'refusee', 'expiree'], true)) {
             $etat = 'clos';
         } elseif ($r['statut'] === 'en_attente') {
@@ -1789,13 +1649,6 @@ if (!function_exists('situation_financiere_reservation')) {
 }
 
 if (!function_exists('synchroniser_statut_paiement')) {
-    /**
-     * Enregistre dans reservations.statut_paiement (et date_limite_solde)
-     * le statut correspondant à la situation financière calculée.
-     * Uniquement pour les réservations en cours (en_attente / validee) :
-     * les réservations closes (réquisitionnées, expirées...) gardent leur
-     * historique tel quel.
-     */
     function synchroniser_statut_paiement(
         PDO $pdo,
         int $reservationId
@@ -1824,7 +1677,6 @@ if (!function_exists('synchroniser_statut_paiement')) {
 }
 
 if (!function_exists('libelle_etat_financier')) {
-    /** Libellé et couleur d'un état financier (affichage). */
     function libelle_etat_financier(string $etat): array
     {
         return [
@@ -1840,13 +1692,6 @@ if (!function_exists('libelle_etat_financier')) {
 }
 
 if (!function_exists('reservation_requisition_active')) {
-    /**
-     * Nouvelle réservation encore active rattachée à une réquisition.
-     *
-     * Une réservation refusée, annulée ou expirée ne compte plus :
-     * le client peut alors refaire une demande dans le cadre de la
-     * même réquisition.
-     */
     function reservation_requisition_active(
         PDO $pdo,
         int $requisitionId,
@@ -1879,24 +1724,6 @@ if (!function_exists('reservation_requisition_active')) {
 }
 
 if (!function_exists('requisition_contexte_nouvelle_reservation')) {
-    /**
-     * Vérifie qu'un client peut créer une nouvelle réservation dans le
-     * cadre d'une réquisition, et retourne le contexte de la réservation
-     * d'origine.
-     *
-     * Contrôles :
-     * - la réquisition existe et la réservation d'origine appartient
-     *   au client connecté ;
-     * - le choix du client est « nouvelle_date » ou « autre_espace » ;
-     * - la réquisition est encore ouverte (choix_recu / en_traitement) ;
-     * - la réservation d'origine est bien « requisitionnee » ;
-     * - aucune nouvelle réservation active n'existe déjà.
-     *
-     * Avec $verrouiller = true, les lignes sont verrouillées (FOR UPDATE) :
-     * à appeler dans une transaction.
-     *
-     * @return array{ok: bool, erreur: ?string, code: ?string, req: ?array}
-     */
     function requisition_contexte_nouvelle_reservation(
         PDO $pdo,
         int $requisitionId,
@@ -2004,19 +1831,6 @@ if (!function_exists('requisition_contexte_nouvelle_reservation')) {
 }
 
 if (!function_exists('creneau_occupe_par_reservation_payee')) {
-    /**
-     * Retourne l'identifiant d'une réservation validée ET déjà (totalement
-     * ou partiellement) payée qui occupe le créneau demandé sur le même
-     * espace, sinon null.
-     *
-     * Même règle de chevauchement que tarif_disponible() (marge de 2h
-     * après la fin de la réservation existante), appliquée à l'espace
-     * comme annuler_reservations_concurrentes().
-     *
-     * Utilisée uniquement pour les réservations issues d'une réquisition :
-     * un paiement déjà encaissé ne doit jamais être rattaché à un créneau
-     * qu'un autre client a déjà définitivement réglé.
-     */
     function creneau_occupe_par_reservation_payee(
         PDO $pdo,
         int $espaceId,
@@ -2062,14 +1876,6 @@ if (!function_exists('creneau_occupe_par_reservation_payee')) {
 }
 
 if (!function_exists('chevauche_reservation_origine')) {
-    /**
-     * Vrai si la période demandée recouvre le créneau (ou le séjour)
-     * réquisitionné de la réservation d'origine, sur le même espace.
-     *
-     * Une réservation « requisitionnee » n'est plus comptée comme une
-     * occupation normale : sans ce contrôle, le client pourrait
-     * reprendre exactement le créneau que l'institution occupe.
-     */
     function chevauche_reservation_origine(
         array $origine,
         int $espaceId,
@@ -2112,28 +1918,6 @@ if (!function_exists('chevauche_reservation_origine')) {
 }
 
 if (!function_exists('transferer_paiements_requisition')) {
-    /**
-     * Rattache à la nouvelle réservation les paiements déjà encaissés sur
-     * la réservation d'origine d'une réquisition.
-     *
-     * - aucun paiement n'est créé : les lignes existantes de `paiements`
-     *   changent seulement de reservation_id (montant, date, mode,
-     *   référence, agent et numéro de reçu restent identiques) ;
-     * - chaque ligne transférée reçoit une trace dans `paiements.note` ;
-     * - le statut de paiement de la nouvelle réservation est recalculé à
-     *   partir du montant attendu de SON tarif ;
-     * - l'ancienne réservation garde son statut « requisitionnee », son
-     *   statut de paiement repasse à « non_paye » (elle ne porte plus
-     *   aucun encaissement) et reçoit une trace dans note_admin ;
-     * - un éventuel trop-perçu est conservé dans
-     *   operations_requisition.montant_concerne pour être traité par le
-     *   comptable via le remboursement existant.
-     *
-     * Idempotent : un second appel ne trouve plus de paiement sur la
-     * réservation d'origine et ne modifie rien.
-     *
-     * DOIT être appelée à l'intérieur d'une transaction.
-     */
     function transferer_paiements_requisition(
         PDO $pdo,
         int $nouvelleReservationId
@@ -2182,11 +1966,6 @@ if (!function_exists('transferer_paiements_requisition')) {
             return $resultat;
         }
 
-        /*
-         * Une réduction appliquée sur la réservation d'origine est reportée
-         * sur la nouvelle réservation (plafonnée à son montant initial) :
-         * le client conserve les conditions accordées au guichet.
-         */
         $resultat['reduction_reportee'] = reporter_reduction_requisition(
             $pdo,
             $origineId,
@@ -2233,11 +2012,6 @@ if (!function_exists('transferer_paiements_requisition')) {
             $origineId,
         ]);
 
-        /*
-         * Statut, solde et trop-perçu de la nouvelle réservation : calculés
-         * par la situation financière centrale (montant initial figé,
-         * réduction appliquée, paiements, remboursements).
-         */
         $situation = synchroniser_statut_paiement($pdo, $nouvelleReservationId);
 
         $total = $situation['total_paye'];
@@ -2321,11 +2095,6 @@ if (!function_exists('transferer_paiements_requisition')) {
 }
 
 if (!function_exists('requisition_suivi_nouvelle_reservation')) {
-    /**
-     * État de la nouvelle réservation rattachée à une réquisition
-     * (reservations.requisition_id) et du trop-perçu éventuel issu du
-     * transfert des paiements lors de sa validation.
-     */
     function requisition_suivi_nouvelle_reservation(PDO $pdo, int $requisitionId): array
     {
         $stmt = $pdo->prepare("
@@ -2359,16 +2128,7 @@ if (!function_exists('requisition_suivi_nouvelle_reservation')) {
             }
         }
 
-        /*
-         * Un trop-perçu n'existe que sur une base financière réelle :
-         * paiements effectivement rattachés à la nouvelle réservation et
-         * remboursements effectivement effectués. La valeur historique
-         * operations_requisition.montant_concerne n'est jamais utilisée
-         * seule pour afficher ou autoriser un remboursement.
-         */
 
-        // Trop-perçu restant : calculé par la situation financière centrale
-        // (paiements − remboursements effectués − montant net dû)
         $situationValidee = $validee
             ? situation_financiere_reservation($pdo, (int)$validee['id'])
             : null;
@@ -2385,8 +2145,6 @@ if (!function_exists('requisition_suivi_nouvelle_reservation')) {
         $rembourse = (int)$nbRembourses > 0;
         $montantRembourse = round((float)$montantRembourse, 2);
 
-        // Trop-perçu constaté = restant + déjà remboursé, uniquement si la
-        // nouvelle réservation a réellement reçu des paiements.
         $aDesPaiements = $situationValidee && $situationValidee['total_paye'] > 0;
         $tropPercuConstate = $aDesPaiements ? round($tropPercu + $montantRembourse, 2) : 0.0;
 
@@ -2404,7 +2162,6 @@ if (!function_exists('requisition_suivi_nouvelle_reservation')) {
 }
 
 if (!function_exists('colonne_existe')) {
-    /** Vrai si la colonne existe (cache par requête) — code compatible avant/après migration. */
     function colonne_existe(PDO $pdo, string $table, string $colonne): bool
     {
         static $cache = [];
@@ -2423,7 +2180,6 @@ if (!function_exists('colonne_existe')) {
 }
 
 if (!function_exists('partenaires_disponibles')) {
-    /** Module partenaires installé (migration exécutée). */
     function partenaires_disponibles(PDO $pdo): bool
     {
         return colonne_existe($pdo, 'partenaires', 'id')
@@ -2433,7 +2189,6 @@ if (!function_exists('partenaires_disponibles')) {
 }
 
 if (!function_exists('faq_disponible')) {
-    /** Module FAQ installé (database/migration_faq.sql exécuté). */
     function faq_disponible(PDO $pdo): bool
     {
         return colonne_existe($pdo, 'faq', 'question');
@@ -2441,7 +2196,6 @@ if (!function_exists('faq_disponible')) {
 }
 
 if (!function_exists('role_partenaire_disponible')) {
-    /** Le rôle « partenaire » existe dans users.role (migration exécutée). */
     function role_partenaire_disponible(PDO $pdo): bool
     {
         static $ok = null;
@@ -2458,7 +2212,6 @@ if (!function_exists('role_partenaire_disponible')) {
 }
 
 if (!function_exists('is_partenaire')) {
-    /** Utilisateur connecté avec le rôle « partenaire ». */
     function is_partenaire(): bool
     {
         return ($_SESSION['role'] ?? '') === 'partenaire';
@@ -2466,17 +2219,11 @@ if (!function_exists('is_partenaire')) {
 }
 
 if (!function_exists('partenaire_utilisateur')) {
-    /**
-     * Partenaire ACTIF associé à un compte client (null = client classique).
-     * Un partenaire désactivé ne donne plus le statut partenaire.
-     */
     function partenaire_utilisateur(PDO $pdo, int $userId): ?array
     {
         if (!$userId || !partenaires_disponibles($pdo) || !role_partenaire_disponible($pdo)) {
             return null;
         }
-        // Compte partenaire = rôle « partenaire » + fiche partenaire active.
-        // Un compte « user » portant un partenaire_id n'est PAS un partenaire.
         $st = $pdo->prepare("
             SELECT p.*
             FROM users u
@@ -2489,11 +2236,6 @@ if (!function_exists('partenaire_utilisateur')) {
 }
 
 if (!function_exists('attribuer_partenaire_reservation')) {
-    /**
-     * Rattache une réservation au partenaire actif du client (s'il en a un).
-     * Appelée juste après la création d'une réservation : le circuit de
-     * réservation reste le même pour tous, seule l'attribution change.
-     */
     function attribuer_partenaire_reservation(PDO $pdo, int $reservationId, int $userId): void
     {
         $partenaire = partenaire_utilisateur($pdo, $userId);
@@ -2505,7 +2247,6 @@ if (!function_exists('attribuer_partenaire_reservation')) {
 }
 
 if (!function_exists('suggestions_disponibles')) {
-    /** Boîte à suggestions installée (migration exécutée). */
     function suggestions_disponibles(PDO $pdo): bool
     {
         return colonne_existe($pdo, 'suggestions', 'contenu');
@@ -2513,7 +2254,6 @@ if (!function_exists('suggestions_disponibles')) {
 }
 
 if (!function_exists('services_cycle_disponible')) {
-    /** Cycle complet des demandes de services disponible (migration exécutée). */
     function services_cycle_disponible(PDO $pdo): bool
     {
         return colonne_existe($pdo, 'demandes_services', 'date_prise_en_charge');
@@ -2521,7 +2261,6 @@ if (!function_exists('services_cycle_disponible')) {
 }
 
 if (!function_exists('libelle_statut_service')) {
-    /** Libellé et couleur d'un statut de demande de service (« traitee » = ancien « réalisée »). */
     function libelle_statut_service(string $statut): array
     {
         return [
@@ -2536,7 +2275,6 @@ if (!function_exists('libelle_statut_service')) {
 }
 
 if (!function_exists('ref_resa')) {
-    /** Référence de dossier d'une réservation : RESA-152. */
     function ref_resa(?int $reservationId): string
     {
         return $reservationId ? 'RESA-' . $reservationId : '';
@@ -2544,7 +2282,6 @@ if (!function_exists('ref_resa')) {
 }
 
 if (!function_exists('ref_req')) {
-    /** Référence d'une réquisition : REQ-27. */
     function ref_req(?int $requisitionId): string
     {
         return $requisitionId ? 'REQ-' . $requisitionId : '';
@@ -2552,11 +2289,6 @@ if (!function_exists('ref_req')) {
 }
 
 if (!function_exists('observations_types_disponibles')) {
-    /**
-     * Types d'objets pouvant recevoir une observation, d'après la
-     * colonne observations.cible_type (les types « requisition » et
-     * « remboursement » n'existent qu'après la migration).
-     */
     function observations_types_disponibles(PDO $pdo): array
     {
         static $types = null;
@@ -2568,7 +2300,6 @@ if (!function_exists('observations_types_disponibles')) {
                     $types = $m[1];
                 }
             } catch (PDOException $e) {
-                // Table absente : types par défaut
             }
         }
         return $types;
@@ -2576,14 +2307,6 @@ if (!function_exists('observations_types_disponibles')) {
 }
 
 if (!function_exists('observations_regles')) {
-    /**
-     * Règles d'accès aux observations, par type d'objet :
-     *  - voir    : rôles qui voient (et peuvent créer) les observations ;
-     *  - repondre: rôles responsables qui peuvent répondre.
-     * Le superadmin voit tout ; l'auteur d'une observation peut toujours
-     * répondre dans son propre fil. Ministre : lecture et observation,
-     * sans autre droit de modification.
-     */
     function observations_regles(): array
     {
         return [
@@ -2608,7 +2331,6 @@ if (!function_exists('observations_regles')) {
 }
 
 if (!function_exists('nb_observations')) {
-    /** Nombre de fils d'observation ouverts sur un objet (0 si type indisponible). */
     function nb_observations(PDO $pdo, string $type, int $id): int
     {
         if (!in_array($type, observations_types_disponibles($pdo), true)) {
@@ -2621,21 +2343,6 @@ if (!function_exists('nb_observations')) {
 }
 
 if (!function_exists('references_dossiers')) {
-    /**
-     * Chaîne de références RESA-A → REQ-X → RESA-B pour une liste de
-     * réservations (une seule requête, utilisable dans les listes).
-     *
-     * Pour chaque réservation :
-     *  - requisition_id / origine_id : si elle est issue d'une réquisition
-     *    (réservation B), la réquisition et la réservation initiale A ;
-     *  - requisition_id / nouvelle_id : si elle a elle-même été
-     *    réquisitionnée (réservation A), la réquisition et la nouvelle
-     *    réservation B active (validée, sinon en attente) ;
-     *  - resa, req, origine, nouvelle : les mêmes au format RESA-/REQ-.
-     *
-     * Référence de dossier et référence de réquisition ne sont jamais
-     * confondues avec la référence de transaction (paiements.reference).
-     */
     function references_dossiers(PDO $pdo, array $reservationIds): array
     {
         $ids = array_values(array_unique(array_filter(array_map('intval', $reservationIds))));
@@ -2660,7 +2367,6 @@ if (!function_exists('references_dossiers')) {
 
         $in = implode(',', array_fill(0, count($ids), '?'));
 
-        // Réservations B : issues d'une réquisition
         $stmt = $pdo->prepare("
             SELECT r.id, r.requisition_id, rm.reservation_id AS origine_id
             FROM reservations r
@@ -2676,7 +2382,6 @@ if (!function_exists('references_dossiers')) {
             $refs[$rid]['origine'] = ref_resa((int)$row['origine_id']);
         }
 
-        // Réservations A : réquisitionnées (nouvelle réservation active éventuelle)
         $stmt = $pdo->prepare("
             SELECT rm.reservation_id, rm.id AS requisition_id,
                    (
@@ -2709,7 +2414,6 @@ if (!function_exists('references_dossiers')) {
 }
 
 if (!function_exists('references_dossier')) {
-    /** Chaîne de références d'une seule réservation (voir references_dossiers). */
     function references_dossier(PDO $pdo, int $reservationId): array
     {
         return references_dossiers($pdo, [$reservationId])[$reservationId] ?? [
@@ -2721,10 +2425,6 @@ if (!function_exists('references_dossier')) {
 }
 
 if (!function_exists('libelle_references_dossier')) {
-    /**
-     * Libellé court et lisible : « RESA-152 · REQ-27 · issue de RESA-98 »
-     * (ou « RESA-98 · REQ-27 · remplacée par RESA-152 »).
-     */
     function libelle_references_dossier(array $refs): string
     {
         $parts = [$refs['resa']];
@@ -2741,18 +2441,6 @@ if (!function_exists('libelle_references_dossier')) {
 }
 
 if (!function_exists('historique_financier_reservation')) {
-    /**
-     * Historique financier chronologique d'un dossier (lecture seule),
-     * reconstruit à partir des tables existantes, sans rien modifier :
-     * paiements, réductions (saisie et changements de statut),
-     * remboursements, opérations de réquisition et observations.
-     *
-     * Pour une réservation B issue d'une réquisition, les éléments de la
-     * réservation initiale A et de la réquisition sont inclus.
-     *
-     * Chaque entrée : date, action, auteur, objet (références), montant,
-     * resultat, transaction (référence réelle), detail.
-     */
     function historique_financier_reservation(PDO $pdo, int $reservationId): array
     {
         $refs = references_dossier($pdo, $reservationId);
@@ -2776,7 +2464,6 @@ if (!function_exists('historique_financier_reservation')) {
             ];
         };
 
-        // Paiements (un paiement transféré apparaît sur la réservation qui le porte aujourd'hui)
         $stmt = $pdo->prepare("
             SELECT p.id, p.reservation_id, p.montant, p.mode, p.reference, p.note, p.created_at, u.nom_complet
             FROM paiements p
@@ -2798,7 +2485,6 @@ if (!function_exists('historique_financier_reservation')) {
             );
         }
 
-        // Réductions et maintien du tarif
         $stmt = $pdo->prepare("
             SELECT ra.*, us.nom_complet AS saisi_nom, um.nom_complet AS modifie_nom
             FROM reductions_accordees ra
@@ -2836,7 +2522,6 @@ if (!function_exists('historique_financier_reservation')) {
             }
         }
 
-        // Réquisition, opérations et remboursements
         if ($refs['requisition_id']) {
             $stmt = $pdo->prepare("
                 SELECT rm.*, u.nom_complet AS declenche_nom, t.nom_complet AS traite_nom
@@ -2879,7 +2564,6 @@ if (!function_exists('historique_financier_reservation')) {
             }
         }
 
-        // Observations associées (fils principaux)
         $cibles = [['reservation', $reservationId]];
         if ($refs['origine_id']) {
             $cibles[] = ['reservation', $refs['origine_id']];
@@ -2910,7 +2594,6 @@ if (!function_exists('historique_financier_reservation')) {
                     );
                 }
             } catch (PDOException $e) {
-                // Type d'observation non encore disponible (migration non exécutée)
             }
         }
 
@@ -2921,19 +2604,6 @@ if (!function_exists('historique_financier_reservation')) {
 }
 
 if (!function_exists('requisition_remboursement_attendu')) {
-    /**
-     * Remboursement réellement dû au client pour une réquisition, calculé
-     * uniquement sur une base financière réelle (paiements encaissés −
-     * remboursements effectués). Règle unique pour requisition-detail.php
-     * et requisitions.php :
-     *  - choix « remboursement » : tout ce que le client a réellement payé
-     *    sur la réservation d'origine (payé net) ;
-     *  - « nouvelle date » / « autre espace » : le trop-perçu réel de la
-     *    nouvelle réservation validée ;
-     *  - sinon (ou si rien n'a été payé) : aucun remboursement.
-     *
-     * @return array{type: ?string, montant: float, reservation_id: ?int}
-     */
     function requisition_remboursement_attendu(PDO $pdo, int $requisitionId): array
     {
         $aucun = ['type' => null, 'montant' => 0.0, 'reservation_id' => null];
@@ -2966,15 +2636,6 @@ if (!function_exists('requisition_remboursement_attendu')) {
 }
 
 if (!function_exists('reservation_requisition_blocage')) {
-    /**
-     * Raison empêchant de refuser ou de remettre en attente une nouvelle
-     * réservation B issue d'une réquisition (null = action possible).
-     * Ne concerne que les réservations B (requisition_id renseigné) :
-     *  - réquisition déjà clôturée : B n'est plus modifiable ;
-     *  - B porte des paiements (transférés depuis A ou encaissés) ;
-     *  - remise en attente d'une B refusée, annulée ou expirée : le client
-     *    dépose une nouvelle demande (une seule B active à la fois).
-     */
     function reservation_requisition_blocage(PDO $pdo, int $reservationId, string $action): ?string
     {
         $stmt = $pdo->prepare("
@@ -3008,18 +2669,6 @@ if (!function_exists('reservation_requisition_blocage')) {
 }
 
 if (!function_exists('requisition_blocages_cloture')) {
-    /**
-     * Raisons empêchant de clôturer une réquisition « nouvelle date » /
-     * « autre espace » (liste vide = clôture possible).
-     *
-     * Une réquisition clôturée doit correspondre à un dossier réellement
-     * terminé :
-     *  - nouvelle réservation validée ;
-     *  - solde de la nouvelle réservation à 0 (avec le maintien du tarif,
-     *    il ne reste que ce que le client devait déjà) ;
-     *  - aucun trop-perçu restant à rembourser ;
-     *  - aucun remboursement enregistré mais non effectué.
-     */
     function requisition_blocages_cloture(PDO $pdo, int $requisitionId): array
     {
         $suivi = requisition_suivi_nouvelle_reservation($pdo, $requisitionId);
@@ -3055,11 +2704,6 @@ if (!function_exists('requisition_blocages_cloture')) {
 }
 
 if (!function_exists('reductions_origine_disponible')) {
-    /**
-     * La colonne reductions_accordees.origine existe-t-elle ?
-     * (migration « origine des réductions »). Sans elle, toutes les
-     * réductions sont considérées comme commerciales.
-     */
     function reductions_origine_disponible(PDO $pdo): bool
     {
         static $disponible = null;
@@ -3071,22 +2715,6 @@ if (!function_exists('reductions_origine_disponible')) {
 }
 
 if (!function_exists('estimation_maintien_tarif')) {
-    /**
-     * Garantie de l'ancien tarif pour une réservation issue d'une réquisition.
-     *
-     * Le client ne doit jamais devoir plus pour la nouvelle réservation (B)
-     * que ce qu'il devait réellement pour la réservation réquisitionnée (A) :
-     * montant initial de A − réduction appliquée sur A.
-     *
-     * Retourne null si la réservation n'est pas issue d'une réquisition, sinon :
-     *  - origine_id, requisition_id ;
-     *  - net_du_origine        : montant réellement dû pour A ;
-     *  - reduction_origine     : réduction appliquée sur A (ligne) ou null ;
-     *  - montant_initial       : tarif normal de B (figé ou calculé) ;
-     *  - report_commercial     : réduction de A qui serait reportée (plafonnée) ;
-     *  - prise_en_charge       : montant pris en charge suite à la réquisition
-     *                            (0 si B ne coûte pas plus que A).
-     */
     function estimation_maintien_tarif(PDO $pdo, int $nouvelleReservationId): ?array
     {
         $stmt = $pdo->prepare("
@@ -3132,26 +2760,6 @@ if (!function_exists('estimation_maintien_tarif')) {
 }
 
 if (!function_exists('reporter_reduction_requisition')) {
-    /**
-     * Réductions de la nouvelle réservation (B) issue d'une réquisition.
-     *
-     * 1. B coûte plus que ce qui était réellement dû pour A :
-     *    une seule réduction « appliquée » d'origine « requisition » est créée
-     *    sur B, égale à (montant initial de B − montant dû pour A).
-     *    Le client doit ainsi exactement ce qu'il devait pour A.
-     *    La réduction commerciale éventuelle de A n'est ni reportée ni modifiée :
-     *    elle reste sur A (historique) et la prise en charge y est liée
-     *    (reportee_de) pour la traçabilité.
-     *
-     * 2. Sinon (B coûte autant ou moins) : comportement existant — la
-     *    réduction appliquée de A est reportée sur B, plafonnée au montant
-     *    initial de B ; le trop-perçu éventuel suit le circuit habituel.
-     *
-     * Rien n'est fait si B a déjà une réduction appliquée.
-     * Retourne le montant de la réduction créée sur B.
-     *
-     * DOIT être appelée à l'intérieur d'une transaction.
-     */
     function reporter_reduction_requisition(
         PDO $pdo,
         int $origineId,
@@ -3182,7 +2790,6 @@ if (!function_exists('reporter_reduction_requisition')) {
             $saisiPar = (int) $stmt->fetchColumn() ?: (int) ($origine['saisi_par'] ?? 0);
         }
 
-        // --- 1. Maintien de l'ancien tarif : prise en charge suite à réquisition ---
         if ($estimation && $estimation['prise_en_charge'] > 0) {
 
             $montant = $estimation['prise_en_charge'];
@@ -3219,7 +2826,6 @@ if (!function_exists('reporter_reduction_requisition')) {
             return $montant;
         }
 
-        // --- 2. Comportement existant : report de la réduction de A ---
         if (!$origine) {
             return 0.0;
         }
@@ -3263,14 +2869,6 @@ if (!function_exists('reporter_reduction_requisition')) {
 }
 
 if (!function_exists('dossier_reservation')) {
-    /**
-     * Périmètre d'un dossier de réservation, pour la suppression d'une erreur ou d'un test.
-     * Une réservation liée à une réquisition (réservation initiale ou nouvelle réservation)
-     * entraîne tout le dossier : les paiements y ont pu être transférés de l'une à l'autre.
-     *
-     * Renvoie : reservations (ids), requisitions (ids), paiements (nombre), encaisse (montant),
-     *           rembourse (montant), refs (libellés RESA-…), client, espace, date.
-     */
     function dossier_reservation(PDO $pdo, int $id): ?array
     {
         $st = $pdo->prepare("SELECT r.id, r.requisition_id, r.date_resa, e.nom AS espace, u.nom_complet AS client
@@ -3284,7 +2882,6 @@ if (!function_exists('dossier_reservation')) {
         $resas = [$id];
         $reqs  = [];
         if (colonne_existe($pdo, 'requisitions_ministerielles', 'id')) {
-            // Élargit jusqu'à stabilité : réquisitions de ces réservations et réservations issues de ces réquisitions
             do {
                 $avant = count($resas) + count($reqs);
                 $in = implode(',', array_map('intval', $resas));
@@ -3336,13 +2933,6 @@ if (!function_exists('dossier_reservation')) {
 }
 
 if (!function_exists('supprimer_dossier_reservation')) {
-    /**
-     * Supprime définitivement un dossier de réservation (erreur de saisie, test, formation)
-     * et tout ce qui s'y rattache : paiements, réductions, réquisitions, opérations,
-     * remboursements, observations et notifications pointant vers le dossier.
-     * Réservé à la Direction (contrôle fait par l'appelant). Transaction : tout ou rien.
-     * Renvoie le résumé du dossier supprimé (voir dossier_reservation()).
-     */
     function supprimer_dossier_reservation(PDO $pdo, int $id): array
     {
         $d = dossier_reservation($pdo, $id);
@@ -3380,7 +2970,6 @@ if (!function_exists('supprimer_dossier_reservation')) {
             if ($existe('requisitions_ministerielles')) {
                 $pdo->exec("DELETE FROM requisitions_ministerielles WHERE id IN ($inq) OR reservation_id IN ($in)");
             }
-            // Observations du dossier (et leurs réponses)
             if ($existe('observations')) {
                 $cibles = ["(cible_type = 'reservation' AND cible_id IN ($in))", "(cible_type = 'paiement' AND cible_id IN ($inp))",
                            "(cible_type = 'requisition' AND cible_id IN ($inq))"];
@@ -3394,7 +2983,6 @@ if (!function_exists('supprimer_dossier_reservation')) {
                     $pdo->exec("DELETE FROM observations WHERE id IN ($ino)");
                 }
             }
-            // Notifications qui pointent vers le dossier
             $motifs = [];
             foreach ($d['reservations'] as $r) {
                 $motifs[] = "^(admin/)?(reservations|generer_bon)\\.php\\?id=$r($|&)";
@@ -3402,7 +2990,6 @@ if (!function_exists('supprimer_dossier_reservation')) {
             }
             foreach ($paiementIds as $p) { $motifs[] = '^(admin/)?paiements\\.php\\?id=' . (int)$p . '($|&)'; }
             foreach ($d['requisitions'] as $q) { $motifs[] = "^(admin/)?requisition-detail\\.php\\?id=$q($|&)"; }
-            // Notifications d'observation (« … a répondu à votre observation sur … »)
             $obsCibles = ['reservation' => $d['reservations'], 'paiement' => array_map('intval', $paiementIds),
                           'requisition' => $d['requisitions'], 'remboursement' => array_map('intval', $rembIds)];
             foreach ($obsCibles as $type => $ids) {
@@ -3430,7 +3017,6 @@ if (!function_exists('supprimer_dossier_reservation')) {
 }
 
 if (!function_exists('resume_compte_client')) {
-    /** Ce qui serait supprimé avec un compte client ou partenaire (null si autre rôle). */
     function resume_compte_client(PDO $pdo, int $uid): ?array
     {
         $st = $pdo->prepare("SELECT id, nom_complet, email, role FROM users WHERE id = ?");
@@ -3454,12 +3040,6 @@ if (!function_exists('resume_compte_client')) {
 }
 
 if (!function_exists('supprimer_compte_client')) {
-    /**
-     * Supprime un compte client ou partenaire de test et tout ce qui lui appartient :
-     * ses dossiers de réservation (voir supprimer_dossier_reservation()), ses demandes
-     * de services, ses notifications ; un bail relié à ce compte en est détaché.
-     * Les comptes d'administration ne sont jamais supprimés. Réservé à la Direction.
-     */
     function supprimer_compte_client(PDO $pdo, int $uid): array
     {
         $u = resume_compte_client($pdo, $uid);
@@ -3497,7 +3077,6 @@ if (!function_exists('supprimer_compte_client')) {
 }
 
 if (!function_exists('suivi_disponible')) {
-    /** Case « Effectuée » installée (database/migration_suivi_effectuee.sql exécuté). */
     function suivi_disponible(PDO $pdo): bool
     {
         return colonne_existe($pdo, 'reservations', 'effectuee_le');
@@ -3505,7 +3084,6 @@ if (!function_exists('suivi_disponible')) {
 }
 
 if (!function_exists('peut_cocher_effectuee')) {
-    /** Rôles autorisés à cocher « Effectuée » (le Ministre consulte seulement). */
     function peut_cocher_effectuee(): bool
     {
         return in_array($_SESSION['role'] ?? '', ['superadmin', 'admin_espaces', 'admin_activites', 'admin_comptable'], true);
@@ -3513,13 +3091,6 @@ if (!function_exists('peut_cocher_effectuee')) {
 }
 
 if (!function_exists('reservations_suivi')) {
-    /**
-     * Réservations validées ayant reçu au moins un paiement (soldées ou avec acompte).
-     *   'a_confirmer' : terminées, pas encore cochées « Effectuée » ;
-     *   'a_venir'     : en cours ou qui commencent dans les $jours prochains jours, non cochées ;
-     *   'effectuees'  : déjà cochées (les plus récentes d'abord).
-     * Début / fin : date + horaire pour une salle ; arrivée 14:00 / départ 12:00 pour un séjour.
-     */
     function reservations_suivi(PDO $pdo, string $vue, int $limite = 200, int $jours = 7): array
     {
         if (!suivi_disponible($pdo)) {
@@ -3558,9 +3129,142 @@ if (!function_exists('reservations_suivi')) {
 }
 
 if (!function_exists('compter_suivi')) {
-    /** Nombre de réservations par vue de suivi (pastille du menu, tableau de bord). */
     function compter_suivi(PDO $pdo, string $vue): int
     {
         return count(reservations_suivi($pdo, $vue, 1000));
+    }
+}
+
+if (!function_exists('redirection_interne')) {
+    function redirection_interne(?string $cible, string $defaut = 'mon-compte.php'): string
+    {
+        $cible = (string)$cible;
+        if (preg_match('~^[a-z0-9_\-]+\.php(\?[^\s\\\\#]*)?(#[A-Za-z0-9_\-]*)?$~i', $cible)) {
+            return $cible;
+        }
+        return $defaut;
+    }
+}
+
+if (!function_exists('url_web_valide')) {
+    function url_web_valide(string $url): bool
+    {
+        $url = trim($url);
+        if (!filter_var($url, FILTER_VALIDATE_URL)) {
+            return false;
+        }
+        return in_array(strtolower((string)parse_url($url, PHP_URL_SCHEME)), ['http', 'https'], true);
+    }
+}
+
+if (!function_exists('extension_image_televersee')) {
+    function extension_image_televersee(string $tmp, int $tailleMax = 5242880): ?string
+    {
+        if (!is_uploaded_file($tmp) || filesize($tmp) > $tailleMax) {
+            return null;
+        }
+        $types = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'];
+        $mime  = (new finfo(FILEINFO_MIME_TYPE))->file($tmp);
+        if (!isset($types[$mime]) || @getimagesize($tmp) === false) {
+            return null;
+        }
+        return $types[$mime];
+    }
+}
+
+if (!function_exists('limitation_connexion_disponible')) {
+    function limitation_connexion_disponible(PDO $pdo): bool
+    {
+        return colonne_existe($pdo, 'tentatives_connexion', 'email');
+    }
+
+    function adresse_ip_client(): string
+    {
+        return substr((string)($_SERVER['REMOTE_ADDR'] ?? ''), 0, 45);
+    }
+
+    function connexion_attente_minutes(PDO $pdo, string $email): int
+    {
+        if (!limitation_connexion_disponible($pdo)) {
+            return 0;
+        }
+        $st = $pdo->prepare("
+            SELECT
+              SUM(email = ?) AS par_compte,
+              SUM(ip = ?)    AS par_ip,
+              MIN(CASE WHEN email = ? THEN tente_le END) AS premier_compte,
+              MIN(CASE WHEN ip = ? THEN tente_le END)    AS premier_ip
+            FROM tentatives_connexion
+            WHERE tente_le > NOW() - INTERVAL 15 MINUTE AND (email = ? OR ip = ?)
+        ");
+        $ip = adresse_ip_client();
+        $email = mb_strtolower($email);
+        $st->execute([$email, $ip, $email, $ip, $email, $ip]);
+        $r = $st->fetch();
+        $premier = null;
+        if ((int)$r['par_compte'] >= 5) {
+            $premier = $r['premier_compte'];
+        } elseif ((int)$r['par_ip'] >= 20) {
+            $premier = $r['premier_ip'];
+        }
+        if ($premier === null) {
+            return 0;
+        }
+        $reste = strtotime($premier) + 900 - time();
+        return max(1, (int)ceil($reste / 60));
+    }
+
+    function connexion_echouee(PDO $pdo, string $email): void
+    {
+        if (!limitation_connexion_disponible($pdo)) {
+            return;
+        }
+        $pdo->prepare("INSERT INTO tentatives_connexion (email, ip, tente_le) VALUES (?, ?, NOW())")
+            ->execute([mb_substr(mb_strtolower($email), 0, 190), adresse_ip_client()]);
+        $pdo->exec("DELETE FROM tentatives_connexion WHERE tente_le < NOW() - INTERVAL 1 DAY");
+    }
+
+    function connexion_reussie(PDO $pdo, string $email): void
+    {
+        if (!limitation_connexion_disponible($pdo)) {
+            return;
+        }
+        $pdo->prepare("DELETE FROM tentatives_connexion WHERE email = ?")->execute([mb_strtolower($email)]);
+    }
+}
+
+if (!function_exists('message_erreur')) {
+    function message_erreur(Throwable $e, string $defaut = 'Opération impossible : erreur technique.'): string
+    {
+        if ($e instanceof RuntimeException && !($e instanceof PDOException)) {
+            return $e->getMessage();
+        }
+        error_log(basename($e->getFile()) . ':' . $e->getLine() . ' ' . $e->getMessage());
+        return $defaut;
+    }
+}
+
+if (!function_exists('envoi_formulaire_autorise')) {
+    function envoi_formulaire_autorise(string $cle, int $max = 5, int $fenetre = 3600): bool
+    {
+        $envois = array_filter($_SESSION['envois_' . $cle] ?? [], fn($t) => $t > time() - $fenetre);
+        $_SESSION['envois_' . $cle] = array_values($envois);
+        return count($envois) < $max;
+    }
+
+    function envoi_formulaire_enregistre(string $cle): void
+    {
+        $_SESSION['envois_' . $cle][] = time();
+    }
+}
+
+if (!function_exists('date_saisie_valide')) {
+    function date_saisie_valide(?string $date): bool
+    {
+        if ($date === null || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+            return false;
+        }
+        $d = DateTime::createFromFormat('Y-m-d', $date);
+        return $d && $d->format('Y-m-d') === $date;
     }
 }

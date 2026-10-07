@@ -6,12 +6,6 @@ expirer_reservations_non_payees();
 
 $pdo = db();
 
-/*
- * Suivi des acomptes : toutes les réservations validées ayant reçu au moins
- * un paiement. Les montants (initial, réduction, net, payé, remboursé,
- * solde, échéance, retard) proviennent exclusivement de
- * situation_financiere_reservation() : aucun pourcentage n'est supposé.
- */
 $filtres = [
     'en_cours' => 'En cours',
     'retard'   => 'Solde en retard',
@@ -22,7 +16,6 @@ if (!isset($filtres[$filtreStatut])) {
     $filtreStatut = 'en_cours';
 }
 
-// Recherche simple : client / téléphone / n° de réservation, et date de réservation
 $recherche = trim((string)($_GET['q'] ?? ''));
 $rechercheDate = (string)($_GET['date'] ?? '');
 $dObj = DateTime::createFromFormat('!Y-m-d', $rechercheDate);
@@ -58,11 +51,10 @@ foreach ($stmt->fetchAll() as $a) {
             $compteurs['retard']++;
         }
     } elseif ($s['nb_paiements'] > 1) {
-        // Réglé en plusieurs versements : traçabilité des acomptes soldés
         $categorie = 'soldes';
         $compteurs['soldes']++;
     } else {
-        continue; // payé en une fois : pas un acompte
+        continue;
     }
 
     $retenu = $filtreStatut === 'retard'
@@ -86,7 +78,6 @@ foreach ($stmt->fetchAll() as $a) {
     }
 }
 
-// En cours : échéance la plus proche d'abord
 if ($filtreStatut !== 'soldes') {
     usort($acomptes, fn($x, $y) => ($x['s']['echeance_solde'] ?? PHP_INT_MAX) <=> ($y['s']['echeance_solde'] ?? PHP_INT_MAX));
 }

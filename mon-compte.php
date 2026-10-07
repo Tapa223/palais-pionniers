@@ -10,9 +10,6 @@ $user_id = (int)$_SESSION['user_id'];
 $msg     = null;
 
 
-// ============================================================
-// MODIFICATION DU PROFIL
-// ============================================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'update_profil') {
 
     if (!csrf_check($_POST['csrf_token'] ?? '')) {
@@ -25,8 +22,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
         $telephone  = trim($_POST['telephone'] ?? '');
         $email      = trim($_POST['email'] ?? '');
 
-        // Compte partenaire : l'identifiant de connexion (e-mail) est défini
-        // par la Direction et ne se modifie pas depuis l'espace partenaire.
         if (is_partenaire()) {
             $email = (string)($_SESSION['email'] ?? '');
         }
@@ -80,10 +75,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'updat
 }
 
 
-// ============================================================
-// CHANGEMENT DE MOT DE PASSE (clients et partenaires)
-// Mécanisme existant : password_hash() / password_verify().
-// ============================================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'changer_mot_de_passe') {
     if (!csrf_check($_POST['csrf_token'] ?? '')) {
         $msg = ['err', 'Requête invalide.'];
@@ -114,9 +105,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'chang
 }
 
 
-// ============================================================
-// CHOIX DU CLIENT SUITE À UNE RÉQUISITION
-// ============================================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'choix_requisition') {
 
     if (!csrf_check($_POST['csrf_token'] ?? '')) {
@@ -212,9 +200,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'choix
                 }
 
 
-                // --------------------------------------------------------
-                // NOUVELLE DATE
-                // --------------------------------------------------------
                 if ($choix === 'nouvelle_date') {
 
                     if ($details === '') {
@@ -245,9 +230,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'choix
                 }
 
 
-                // --------------------------------------------------------
-                // AUTRE ESPACE
-                // --------------------------------------------------------
                 if ($choix === 'autre_espace') {
 
                     if ($details === '') {
@@ -284,9 +266,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'choix
                 }
 
 
-                // --------------------------------------------------------
-                // UNE SEULE OPÉRATION PAR RÉQUISITION
-                // --------------------------------------------------------
                 $checkOperation = $pdo->prepare("
                     SELECT id
                     FROM operations_requisition
@@ -328,9 +307,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'choix
                     : null;
 
 
-                // --------------------------------------------------------
-                // 1. ENREGISTRER LE CHOIX
-                // --------------------------------------------------------
                 $updateReq = $pdo->prepare("
                     UPDATE requisitions_ministerielles
 
@@ -357,9 +333,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'choix
                 }
 
 
-                // --------------------------------------------------------
-                // 2. CRÉER L'OPÉRATION COMPTABLE / ADMINISTRATIVE
-                // --------------------------------------------------------
                 $insertOperation = $pdo->prepare("
                     INSERT INTO operations_requisition
                     (
@@ -396,9 +369,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'choix
                 $pdo->commit();
 
 
-                // --------------------------------------------------------
-                // NOTIFICATION / LOG APRÈS COMMIT
-                // --------------------------------------------------------
                 $libellesChoix = [
                     'annulation'    => 'Annulation',
                     'remboursement' => 'Remboursement',
@@ -449,9 +419,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'choix
                     $pdo->rollBack();
                 }
 
-                $message = $e instanceof RuntimeException
-                    ? $e->getMessage()
-                    : 'Une erreur est survenue lors de l’enregistrement de votre choix. Veuillez réessayer.';
+                $message = message_erreur($e, 'Une erreur est survenue lors de l’enregistrement de votre choix. Veuillez réessayer.');
 
                 $msg = [
                     'err',
@@ -463,9 +431,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'choix
 }
 
 
-// ============================================================
-// SUPPRESSION MESSAGE
-// ============================================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'supprimer_message') {
 
     if (!csrf_check($_POST['csrf_token'] ?? '')) {
@@ -476,16 +441,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'suppr
 
         $msgId = (int)($_POST['message_id'] ?? 0);
 
-        $checkMsg = $pdo->prepare("
-            SELECT id
-            FROM messages
-            WHERE id = ?
-              AND email = (
-                  SELECT email
-                  FROM users
-                  WHERE id = ?
-              )
-        ");
+        $checkMsg = $pdo->prepare(colonne_existe($pdo, 'messages', 'user_id')
+            ? "SELECT id FROM messages WHERE id = ? AND user_id = ?"
+            : "SELECT id FROM messages WHERE id = ? AND email = (SELECT email FROM users WHERE id = ?)");
 
         $checkMsg->execute([
             $msgId,
@@ -515,9 +473,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'suppr
 }
 
 
-// ============================================================
-// DEMANDE DE RÉSILIATION
-// ============================================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'demander_resiliation') {
 
     if (!csrf_check($_POST['csrf_token'] ?? '')) {
@@ -590,9 +545,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'deman
 }
 
 
-// ============================================================
-// RETOUR D'UNE NOUVELLE RÉSERVATION LIÉE À UNE RÉQUISITION
-// ============================================================
 if ($msg === null) {
 
     if (($_GET['success'] ?? '') === 'requisition') {
@@ -604,7 +556,6 @@ if ($msg === null) {
 
     } elseif (!empty($_GET['requisition_erreur'])) {
 
-        // Codes fixes : aucun texte libre venant de l'URL n'est affiché
         $messagesRequisition = [
             'introuvable' => 'Cette réquisition est introuvable ou ne vous appartient pas.',
             'choix'       => 'Cette réquisition ne concerne pas une nouvelle date ou un autre espace.',
@@ -621,10 +572,6 @@ if ($msg === null) {
 }
 
 
-// ============================================================
-// NOTIFICATIONS DU CLIENT
-// ============================================================
-// Partenaire : notifications de son organisation ; client : les siennes (inchangé)
 [$perimetreNotifs, $paramsNotifs] = notifications_perimetre($pdo, (int)$user_id);
 $notifsClient = $pdo->prepare("
     SELECT *
@@ -647,9 +594,6 @@ $notifsNonLues = count(
 );
 
 
-// Client : notifications marquées lues à l'ouverture de son espace (inchangé).
-// Partenaire : seulement à l'ouverture de l'onglet Notifications, pour que la
-// pastille de sa barre latérale reflète réellement les notifications non lues.
 if ($notifsNonLues > 0 && (!is_partenaire() || ($_GET['tab'] ?? '') === 'notifications')) {
 
     $pdo->prepare("
@@ -661,9 +605,6 @@ if ($notifsNonLues > 0 && (!is_partenaire() || ($_GET['tab'] ?? '') === 'notific
 }
 
 
-// ============================================================
-// INFOS UTILISATEUR
-// ============================================================
 $me = $pdo->prepare("
     SELECT *
     FROM users
@@ -675,26 +616,17 @@ $me->execute([$user_id]);
 $me = $me->fetch();
 
 
-// ============================================================
-// MESSAGES
-// ============================================================
-$mesMessages = $pdo->prepare("
-    SELECT *
-    FROM messages
-    WHERE email = ?
-    ORDER BY created_at DESC
-");
-
-$mesMessages->execute([
-    $me['email']
-]);
+if (colonne_existe($pdo, 'messages', 'user_id')) {
+    $mesMessages = $pdo->prepare("SELECT * FROM messages WHERE user_id = ? ORDER BY created_at DESC");
+    $mesMessages->execute([$user_id]);
+} else {
+    $mesMessages = $pdo->prepare("SELECT * FROM messages WHERE email = ? ORDER BY created_at DESC");
+    $mesMessages->execute([$me['email']]);
+}
 
 $mesMessages = $mesMessages->fetchAll();
 
 
-// ============================================================
-// MES BAUX
-// ============================================================
 $mesBaux = $pdo->prepare("
     SELECT *
     FROM espaces
@@ -705,10 +637,6 @@ $mesBaux->execute([$user_id]);
 
 $mesBaux = $mesBaux->fetchAll();
 
-// ------------------------------------------------------------
-// COMPTE PARTENAIRE (fiche partenaire active associée au compte)
-// Synthèse financière des réservations du partenaire (tous ses comptes).
-// ------------------------------------------------------------
 $partenaireMoi = partenaire_utilisateur($pdo, (int)$user_id);
 $synthesePartenaire = null;
 if ($partenaireMoi) {
@@ -726,10 +654,6 @@ if ($partenaireMoi) {
     }
 }
 
-// ------------------------------------------------------------
-// MES DEMANDES DE SERVICES (lavage automobile, support publicitaire…)
-// ------------------------------------------------------------
-// Partenaire : demandes de services de tous les comptes de son organisation
 $mesServices = $pdo->prepare("
     SELECT ds.*, s.nom AS service_nom, s.montant, s.unite, du.nom_complet AS demandeur_nom
     FROM demandes_services ds
@@ -801,9 +725,6 @@ foreach ($mesBaux as &$bailInfo) {
 unset($bailInfo);
 
 
-// ============================================================
-// ESPACES DISPONIBLES
-// ============================================================
 $espacesDisponiblesChoix = $pdo->query("
     SELECT id, nom
     FROM espaces
@@ -816,9 +737,6 @@ $espacesDisponiblesChoix = $pdo->query("
 ")->fetchAll();
 
 
-// ============================================================
-// RÉSERVATIONS + SUIVI RÉQUISITION
-// ============================================================
 $reservations = $pdo->prepare("
     SELECT
         r.*,
@@ -985,15 +903,11 @@ $reservations = $pdo->prepare("
     ORDER BY r.created_at DESC
 ");
 
-// Partenaire : réservations de toute son organisation ; client : les siennes (inchangé)
 $reservations->execute([$partenaireMoi ? (int)$partenaireMoi['id'] : $user_id]);
 
 $reservations = $reservations->fetchAll();
 
 
-// ============================================================
-// PRIORITÉ AUX RÉQUISITIONS EN ATTENTE DE CHOIX
-// ============================================================
 usort($reservations, function($a, $b) {
 
     $prioriteA = (
@@ -1015,13 +929,6 @@ usort($reservations, function($a, $b) {
 });
 
 
-// ============================================================
-// STATUT CLIENT DE LA RÉQUISITION
-// ============================================================
-// Important : on ne montre pas au client les statuts internes
-// "a_traiter", "en_cours", etc.
-// Ils sont regroupés en seulement deux états lisibles.
-// ============================================================
 function statutRequisitionClient(array $reservation): ?array
 {
     if (empty($reservation['choix_client'])) {
@@ -1033,7 +940,6 @@ function statutRequisitionClient(array $reservation): ?array
     $operationResultat = $reservation['operation_resultat'] ?? '';
     $remboursementResultat = $reservation['remboursement_resultat'] ?? '';
 
-    // Traitement finalisé
     if (
         $operationStatut === 'traitee'
         || $requisitionStatut === 'cloturee'
@@ -1049,8 +955,6 @@ function statutRequisitionClient(array $reservation): ?array
         ];
     }
 
-    // Tant que le comptable / l'administration n'a pas terminé,
-    // le client voit simplement "En cours de traitement".
     return [
         'label' => 'En cours de traitement',
         'class' => 'bg-blue-100 text-blue-700 border-blue-200',
@@ -1059,9 +963,6 @@ function statutRequisitionClient(array $reservation): ?array
 }
 
 
-// ============================================================
-// STATS
-// ============================================================
 $stats = [
     'total'      => count($reservations),
     'en_attente' => 0,
@@ -1078,9 +979,6 @@ foreach ($reservations as $r) {
 }
 
 
-// ============================================================
-// BADGES RÉSERVATION
-// ============================================================
 $badgeConfig = [
 
     'en_attente' => [
@@ -1115,9 +1013,6 @@ $badgeConfig = [
 ];
 
 
-// ============================================================
-// ONGLET ACTIF
-// ============================================================
 $tab = in_array(
     $_GET['tab'] ?? '',
     [
@@ -1133,25 +1028,21 @@ $tab = in_array(
     ? $_GET['tab']
     : 'reservations';
 
-// Compte partenaire : tableau de bord partenaire comme point d'entrée
-// (il ne fait que présenter les fonctionnalités existantes de cet espace)
 if ($partenaireMoi && (($_GET['tab'] ?? '') === 'tableau-de-bord' || !isset($_GET['tab']))) {
     $tab = 'tableau-de-bord';
 }
-// « Mes bons » : vue des réservations validées (bons et factures), espace partenaire
 if ($partenaireMoi && ($_GET['tab'] ?? '') === 'bons') {
     $tab = 'bons';
 }
 
 
-$pageTitle = $partenaireMoi ? "Espace admin — Palais des Pionniers" : "Mon espace — Palais des Pionniers";
+$pageTitle = $partenaireMoi ? "Espace admin | Palais des Pionniers" : "Mon espace | Palais des Pionniers";
 $libellesOngletsPartenaire = [
     'tableau-de-bord' => 'Tableau de bord', 'reservations' => 'Mes réservations', 'bons' => 'Mes bons', 'services' => 'Services',
     'profil' => 'Profil et mot de passe', 'messages' => 'Messages', 'notifications' => 'Notifications', 'baux' => 'Mes baux',
 ];
 
 if ($partenaireMoi) {
-    // Espace admin du partenaire : même structure que l'administration
     $ongletPartenaire  = $tab;
     $partenaireLayout  = $partenaireMoi;
     $navPartenaireBaux = !empty($mesBaux);
@@ -1165,9 +1056,6 @@ if ($partenaireMoi) {
 <div class="<?= $partenaireMoi ? '' : 'bg-slate-50 min-h-screen pb-16' ?>">
 
   <?php if (!$partenaireMoi): ?>
-  <!-- ========================================================
-       HEADER PROFIL
-       ======================================================== -->
   <div class="bg-primary text-white">
 
     <div class="container mx-auto max-w-4xl px-4 py-6 sm:py-8 md:py-12">
@@ -1175,7 +1063,6 @@ if ($partenaireMoi) {
       <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-5">
 
         <?php if ($partenaireMoi): ?>
-        <!-- En-tête de l'espace de gestion du partenaire (droits limités à son organisation) -->
         <div class="flex items-center gap-4 min-w-0">
           <div class="w-14 h-14 rounded-2xl bg-accent flex items-center justify-center flex-shrink-0">
             <i class="fas fa-handshake text-xl"></i>
@@ -1196,13 +1083,7 @@ if ($partenaireMoi) {
 
           <div class="w-14 h-14 rounded-2xl bg-accent flex items-center justify-center font-black text-xl flex-shrink-0">
 
-            <?= strtoupper(
-                substr(
-                    $me['nom_complet'],
-                    0,
-                    1
-                )
-            ) ?>
+            <?= e(mb_strtoupper(mb_substr((string)$me['nom_complet'], 0, 1))) ?>
 
           </div>
 
@@ -1257,7 +1138,6 @@ if ($partenaireMoi) {
 
 
       <?php if (!($partenaireMoi && $tab === 'tableau-de-bord')): ?>
-      <!-- STATS RAPIDES -->
       <div class="grid grid-cols-3 gap-3 mt-6">
 
         <?php foreach ([
@@ -1305,10 +1185,9 @@ if ($partenaireMoi) {
       <?php endif; ?>
 
       <?php if ($synthesePartenaire && $tab !== 'tableau-de-bord'): ?>
-      <!-- SYNTHÈSE PARTENAIRE (réservations de tous les comptes du partenaire) -->
       <div class="mt-3 bg-white/10 rounded-2xl p-4">
         <p class="text-[10px] text-white/60 uppercase tracking-widest font-black mb-2">
-          <i class="fas fa-handshake mr-1"></i> <?= e($partenaireMoi['nom']) ?> — synthèse financière
+          <i class="fas fa-handshake mr-1"></i> <?= e($partenaireMoi['nom']) ?> · synthèse financière
         </p>
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
           <?php foreach ([
@@ -1329,9 +1208,6 @@ if ($partenaireMoi) {
     </div>
 
 
-    <!-- ======================================================
-         ONGLETS
-         ====================================================== -->
     <div class="container mx-auto max-w-4xl px-4">
 
       <div class="flex gap-0.5 sm:gap-1 border-b border-white/10 overflow-x-auto scrollbar-hide">
@@ -1433,17 +1309,13 @@ if ($partenaireMoi) {
   <?php endif; ?>
 
 
-  <!-- ========================================================
-       CONTENU
-       ======================================================== -->
   <div class="<?= $partenaireMoi ? '' : 'container mx-auto max-w-4xl px-4 py-7' ?>">
 
     <?php if ($partenaireMoi): ?>
-    <!-- En-tête de page (modèle administration) -->
     <div class="flex items-center justify-between mb-6 flex-wrap gap-3">
       <div>
         <h1 class="text-2xl font-black text-primary uppercase italic tracking-tight"><?= e($libellesOngletsPartenaire[$tab] ?? 'Tableau de bord') ?></h1>
-        <p class="text-sm text-slate-500 mt-0.5"><?= e($partenaireMoi['nom']) ?> — espace de gestion réservé à votre organisation</p>
+        <p class="text-sm text-slate-500 mt-0.5"><?= e($partenaireMoi['nom']) ?> · espace de gestion réservé à votre organisation</p>
       </div>
       <?php if (in_array($tab, ['tableau-de-bord', 'reservations', 'bons', 'services'], true)): ?>
       <div class="flex flex-wrap items-center gap-2">
@@ -1468,7 +1340,6 @@ if ($partenaireMoi) {
     <?php endif; ?>
 
 
-    <!-- MESSAGE GLOBAL -->
     <?php if ($msg): ?>
 
     <div class="mb-6 rounded-2xl p-4 flex items-start gap-3 <?= $msg[0] === 'ok'
@@ -1488,16 +1359,8 @@ if ($partenaireMoi) {
     <?php endif; ?>
 
 
-    <!-- ======================================================
-         ONGLET RÉSERVATIONS
-         ====================================================== -->
     <?php if ($tab === 'tableau-de-bord' && $partenaireMoi): ?>
     <?php
-      /*
-       * Tableau de bord de l'Espace admin partenaire — présentation uniquement :
-       * réservations de son organisation ($reservations), synthèse financière de son
-       * organisation ($synthesePartenaire), ses demandes de services ($mesServices).
-       */
       $fmtD = fn($m) => number_format((float)$m, 0, ',', ' ');
       $aSuivre = array_values(array_filter($reservations, fn($r) => in_array($r['statut'], ['en_attente', 'validee'], true)));
       $dernieres = array_slice($reservations, 0, 6);
@@ -1506,7 +1369,6 @@ if ($partenaireMoi) {
     ?>
     <div class="space-y-6">
 
-      <!-- VUE D'ENSEMBLE : un seul panneau, indicateurs séparés -->
       <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-2">
           <h2 class="font-black text-primary text-sm uppercase italic">Vue d'ensemble</h2>
@@ -1529,7 +1391,6 @@ if ($partenaireMoi) {
         </div>
       </div>
 
-      <!-- SUIVI : panneaux de liste (modèle administration) -->
       <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
 
         <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
@@ -1586,8 +1447,6 @@ if ($partenaireMoi) {
       </div>
 
       <?php
-        // Statistiques de l'organisation : uniquement ses réservations (partenaire_id) et
-        // les demandes de services de ses comptes (users.partenaire_id).
         $pidStats = (int)$partenaireMoi['id'];
         $parStatut = array_fill_keys(['en_attente', 'validee', 'refusee', 'annulee', 'expiree', 'requisitionnee'], 0);
         $stS = $pdo->prepare("SELECT statut, COUNT(*) AS nb FROM reservations WHERE partenaire_id = ? GROUP BY statut");
@@ -1609,10 +1468,9 @@ if ($partenaireMoi) {
         $maxMois = max(1, max($parMois));
         $maxEspace = max(1, (int)($parEspaceOrg[0]['nb'] ?? 1));
       ?>
-      <!-- STATISTIQUES DE L'ORGANISATION -->
       <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden" id="statistiques">
         <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-2">
-          <h2 class="font-black text-primary text-sm uppercase italic">Statistiques — <?= e($partenaireMoi['nom']) ?></h2>
+          <h2 class="font-black text-primary text-sm uppercase italic">Statistiques · <?= e($partenaireMoi['nom']) ?></h2>
           <span class="hidden sm:inline text-[10px] font-black uppercase tracking-widest text-slate-400">Tous les comptes de l'organisation</span>
         </div>
         <div class="grid grid-cols-1 lg:grid-cols-3 bg-slate-100" style="gap:1px">
@@ -1673,7 +1531,6 @@ if ($partenaireMoi) {
 
     <?php elseif ($tab === 'reservations' || $tab === 'bons'): ?>
     <?php if ($tab === 'bons'):
-      // Mes bons : mêmes cartes que « Mes réservations », limitées aux réservations validées
       $reservations = array_values(array_filter($reservations, fn($r) => $r['statut'] === 'validee'));
     ?>
     <p class="text-sm text-slate-500 mb-4"><i class="fas fa-info-circle text-primary mr-1"></i>Bons de réservation et factures de vos réservations validées. Le document s'ouvre dans un nouvel onglet.</p>
@@ -1722,27 +1579,16 @@ if ($partenaireMoi) {
         <div class="bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition overflow-hidden">
 
 
-          <!-- ==================================================
-               EN-TÊTE RÉSERVATION
-               ================================================== -->
           <div class="flex flex-col sm:flex-row items-start sm:items-center gap-4 p-5">
 
 
-            <!-- Initiale espace -->
             <div class="w-12 h-12 rounded-xl bg-primary/5 border border-primary/10 flex items-center justify-center font-black text-primary text-lg flex-shrink-0">
 
-              <?= strtoupper(
-                  substr(
-                      $r['espace_nom'],
-                      0,
-                      1
-                  )
-              ) ?>
+              <?= e(mb_strtoupper(mb_substr((string)$r['espace_nom'], 0, 1))) ?>
 
             </div>
 
 
-            <!-- Infos -->
             <div class="flex-1 min-w-0">
 
               <h3 class="font-black text-primary text-base truncate">
@@ -1905,9 +1751,6 @@ if ($partenaireMoi) {
             </div>
 
 
-            <!-- ==================================================
-                 DROITE : BADGE + ACTION
-                 ================================================== -->
             <div class="flex flex-col sm:items-end gap-2 flex-shrink-0">
 
 
@@ -1915,7 +1758,6 @@ if ($partenaireMoi) {
 
 
                 <?php
-                  // Situation financière centrale (montants, réduction, échéances)
                   $sfc = $r['statut'] === 'validee'
                       ? situation_financiere_reservation($pdo, (int) $r['id'])
                       : null;
@@ -2060,12 +1902,6 @@ if ($partenaireMoi) {
 
 
           <?php if ($partenaireMoi):
-            /*
-             * Suivi partenaire (consultation uniquement) : situation financière
-             * centrale et historique des paiements de CETTE réservation, qui
-             * appartient à l'organisation du compte connecté ($reservations est
-             * filtré par partenaire_id).
-             */
             $sfp = situation_financiere_reservation($pdo, (int)$r['id']);
             $paiementsResa = $pdo->prepare("SELECT id, montant, mode, reference, created_at FROM paiements WHERE reservation_id = ? ORDER BY created_at ASC, id ASC");
             $paiementsResa->execute([(int)$r['id']]);
@@ -2076,9 +1912,6 @@ if ($partenaireMoi) {
             $bonDispo = $r['statut'] === 'validee';
             $echeanceP = $sfp['echeance_premier_paiement'] ?? $sfp['echeance_solde'] ?? null;
           ?>
-          <!-- ==================================================
-               SUIVI PARTENAIRE : réservation et paiement
-               ================================================== -->
           <div class="px-5 pb-5">
             <?php if ((int)$r['user_id'] !== (int)$user_id): ?>
             <p class="text-[11px] text-slate-500 mb-2"><i class="fas fa-user mr-1 text-primary"></i>Demandée par <strong><?= e($r['demandeur_nom'] ?? '') ?></strong> (autre compte de <?= e($partenaireMoi['nom']) ?>)</p>
@@ -2140,9 +1973,6 @@ if ($partenaireMoi) {
           <?php endif; ?>
 
 
-          <!-- ==================================================
-               NOTE ADMIN SI REFUSÉE
-               ================================================== -->
           <?php if (
               $r['statut'] === 'refusee'
               && $r['note_admin']
@@ -2173,9 +2003,6 @@ if ($partenaireMoi) {
           <?php endif; ?>
 
 
-          <!-- ==================================================
-               RÉQUISITION MINISTÉRIELLE
-               ================================================== -->
           <?php if (
               $r['statut'] === 'requisitionnee'
               && $r['requisition_id']
@@ -2186,9 +2013,6 @@ if ($partenaireMoi) {
             <div class="rounded-2xl bg-amber-50 border-2 border-amber-200 p-4">
 
 
-              <!-- =================================================
-                   CAS 1 : AUCUN CHOIX ENCORE EFFECTUÉ
-                   ================================================= -->
               <?php if (!$r['choix_client']): ?>
 
 
@@ -2247,7 +2071,6 @@ if ($partenaireMoi) {
                     : 'sm:grid-cols-3' ?> gap-2">
 
 
-                  <!-- ANNULATION -->
                   <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 border-amber-200 bg-white cursor-pointer text-xs font-bold text-amber-700">
 
                     <input type="radio"
@@ -2262,7 +2085,6 @@ if ($partenaireMoi) {
                   </label>
 
 
-                  <!-- REMBOURSEMENT -->
                   <?php if ($aPaye): ?>
 
                   <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 border-amber-200 bg-white cursor-pointer text-xs font-bold text-amber-700">
@@ -2292,7 +2114,6 @@ if ($partenaireMoi) {
                   <?php endif; ?>
 
 
-                  <!-- NOUVELLE DATE -->
                   <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 border-amber-200 bg-white cursor-pointer text-xs font-bold text-amber-700">
 
                     <input type="radio"
@@ -2307,7 +2128,6 @@ if ($partenaireMoi) {
                   </label>
 
 
-                  <!-- AUTRE ESPACE -->
                   <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 border-amber-200 bg-white cursor-pointer text-xs font-bold text-amber-700">
 
                     <input type="radio"
@@ -2338,7 +2158,6 @@ if ($partenaireMoi) {
                 <?php endif; ?>
 
 
-                <!-- NOUVELLE DATE -->
                 <div id="choixDateWrap-<?= $r['requisition_id'] ?>"
                      class="hidden">
 
@@ -2369,7 +2188,6 @@ if ($partenaireMoi) {
                 </div>
 
 
-                <!-- AUTRE ESPACE -->
                 <div id="choixEspaceWrap-<?= $r['requisition_id'] ?>"
                      class="hidden">
 
@@ -2422,18 +2240,12 @@ if ($partenaireMoi) {
               <?php endif; ?>
 
 
-              <!-- =================================================
-                   CAS 2 : CHOIX DÉJÀ ENREGISTRÉ
-                   ================================================= -->
               <?php else: ?>
 
 
               <div>
 
 
-                <!-- =================================================
-                     UN SEUL STATUT CLIENT
-                     ================================================= -->
                 <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
 
 
@@ -2472,9 +2284,6 @@ if ($partenaireMoi) {
                 </div>
 
 
-                <!-- =================================================
-                     CHOIX EFFECTUÉ
-                     ================================================= -->
                 <div class="mt-3 bg-white/80 border border-amber-200 rounded-xl px-3 py-2.5">
 
                   <span class="text-[10px] font-black uppercase tracking-widest text-slate-400 mr-2">
@@ -2518,9 +2327,6 @@ if ($partenaireMoi) {
                 </div>
 
 
-                <!-- =================================================
-                     NOUVELLE DATE / AUTRE ESPACE : NOUVELLE RÉSERVATION
-                     ================================================= -->
                 <?php if (in_array($r['choix_client'], ['nouvelle_date', 'autre_espace'], true)):
 
                     $nouvelleActive = !empty($r['nouvelle_resa_id'])
@@ -2607,9 +2413,6 @@ if ($partenaireMoi) {
                 <?php endif; ?>
 
 
-                <!-- =================================================
-                     REMBOURSEMENT : UNIQUEMENT LE BON SI EFFECTUÉ
-                     ================================================= -->
                 <?php if (
                     $remboursementEffectue
                     && !empty($r['remboursement_id'])
@@ -2671,9 +2474,6 @@ if ($partenaireMoi) {
     <?php endif; ?>
 
 
-    <!-- ======================================================
-         ONGLET MESSAGES
-         ====================================================== -->
     <?php elseif ($tab === 'messages'): ?>
 
 
@@ -2811,9 +2611,6 @@ if ($partenaireMoi) {
     <?php endif; ?>
 
 
-    <!-- ======================================================
-         ONGLET BAUX
-         ====================================================== -->
     <?php elseif ($tab === 'baux'): ?>
 
 
@@ -3020,16 +2817,7 @@ if ($partenaireMoi) {
 
             <p class="text-xs text-slate-500 font-semibold">
 
-              Résiliation demandée le
-
-              <?= date(
-                  'd/m/Y',
-                  strtotime(
-                      $bail['resiliation_demandee_le']
-                  )
-              ) ?>
-
-              — l'administration va vous recontacter.
+              Résiliation demandée le <?= date('d/m/Y', strtotime($bail['resiliation_demandee_le'])) ?>. L'administration va vous recontacter.
 
             </p>
 
@@ -3097,14 +2885,8 @@ if ($partenaireMoi) {
     <?php endif; ?>
 
 
-    <!-- ======================================================
-         ONGLET NOTIFICATIONS
-         ====================================================== -->
     <?php elseif ($tab === 'services'): ?>
 
-    <!-- ======================================================
-         ONGLET MES SERVICES (lavage automobile, support publicitaire…)
-         ====================================================== -->
     <div class="space-y-3">
       <?php foreach ($mesServices as $ds): [$libSrv, $clsSrv] = libelle_statut_service($ds['statut']); ?>
       <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
@@ -3252,9 +3034,6 @@ if ($partenaireMoi) {
     </div>
 
 
-    <!-- ======================================================
-         ONGLET PROFIL
-         ====================================================== -->
     <?php elseif ($tab === 'profil'): ?>
 
 
@@ -3383,7 +3162,6 @@ if ($partenaireMoi) {
       </form>
 
 
-      <!-- Mot de passe -->
       <form method="POST" id="mot-de-passe" class="mt-8 pt-6 border-t border-slate-100" autocomplete="off">
         <input type="hidden" name="csrf_token" value="<?= csrf_token() ?>">
         <input type="hidden" name="action" value="changer_mot_de_passe">
@@ -3447,10 +3225,6 @@ if ($partenaireMoi) {
 
 <script>
 
-/**
- * Affiche les champs correspondant au choix
- * de la réquisition.
- */
 function toggleChoixRequisition(id) {
 
     const form =
@@ -3562,10 +3336,6 @@ function toggleChoixRequisition(id) {
 }
 
 
-/**
- * Synchronise le nom de l'espace
- * dans le champ caché.
- */
 function syncDetailsChoix(id) {
 
     const select =
@@ -3587,10 +3357,6 @@ function syncDetailsChoix(id) {
 }
 
 
-/**
- * Synchronise la date choisie
- * dans le champ caché.
- */
 document.querySelectorAll(
     'input[id^="choixDate-"]'
 ).forEach(function(input) {
@@ -3623,9 +3389,6 @@ document.querySelectorAll(
 });
 
 
-/**
- * Contrôle final avant envoi.
- */
 document.querySelectorAll(
     'form[id^="reqForm-"]'
 ).forEach(function(form) {

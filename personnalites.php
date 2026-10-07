@@ -10,20 +10,18 @@ $personnalites = $pdo->query("
 ")->fetchAll();
 $avecPhoto = array_filter($personnalites, fn($p) => !empty($p['photo']) && file_exists(__DIR__ . '/assets/images/personnalites/' . $p['photo']));
 
-$pageTitle = "Icônes — Palais des Pionniers";
+$pageTitle = "Icônes | Palais des Pionniers";
 $page = 'personnalites.php';
 require __DIR__ . '/includes/header.php';
 ?>
 
 <?php
-// Président et Premier Ministre : pas de fiche admin dédiée, fichiers manuels
 $officielsManuels = [
     ['file' => 'assets/images/officiels/president.jpg',        'label' => 'Président de la République'],
     ['file' => 'assets/images/officiels/premier-ministre.jpg', 'label' => 'Premier Ministre'],
 ];
 $bandeauOfficiels = array_values(array_filter($officielsManuels, fn($o) => file_exists(__DIR__ . '/' . $o['file'])));
 
-// Ministre / DG / DGA : gérés depuis Admin > Direction, photo automatiquement reprise ici
 $directionLabels = ['ministre' => 'Ministre de la Jeunesse et des Sports', 'dg' => 'Directeur Général du Palais des Pionniers', 'dga' => 'Directeur Général Adjoint du Palais des Pionniers'];
 $bandeauDirection = [];
 foreach ($pdo->query("SELECT role_key, nom, photo FROM direction") as $d) {
@@ -36,13 +34,11 @@ $bandeauIcones = array_values(array_map(fn($p) => [
     'file'  => 'assets/images/personnalites/' . $p['photo'],
     'label' => $p['prenom'] ? $p['prenom'].' '.$p['nom'] : $p['nom'],
 ], $avecPhoto));
-// Officiels manuels d'abord, puis Direction, puis automatiquement toute icône ajoutée en base
 $bandeauPhotos = array_merge($bandeauOfficiels, $bandeauDirection, $bandeauIcones);
 ?>
 <section class="relative flex items-center min-h-[42vh] sm:min-h-0 sm:max-h-[52vh] py-8 sm:py-14 bg-slate-900 text-white overflow-hidden">
 
     <?php if ($bandeauPhotos): ?>
-    <!-- Photos en fond, glissant lentement de gauche à droite, sous le texte -->
     <div class="absolute inset-0 z-0">
         <div class="marquee-bg flex gap-3 sm:gap-6 w-max h-full opacity-60">
             <?php foreach (array_merge($bandeauPhotos, $bandeauPhotos, $bandeauPhotos) as $slide): ?>
@@ -62,7 +58,7 @@ $bandeauPhotos = array_merge($bandeauOfficiels, $bandeauDirection, $bandeauIcone
             Les <span class="text-accent">Icônes</span>
         </h1>
         <p class="max-w-2xl mx-auto text-xs sm:text-xl text-slate-300 font-medium leading-snug sm:leading-relaxed">
-            Des bâtisseurs et figures nationales qui incarnent l'esprit du Palais — certains ont même donné leur nom à l'un de nos espaces, en hommage à leur parcours.
+            Des bâtisseurs et figures nationales qui incarnent l'esprit du Palais. Certains ont même donné leur nom à l'un de nos espaces, en hommage à leur parcours.
         </p>
         <?php if (!$bandeauPhotos): ?>
         <p class="mt-8 text-[11px] text-white/40 italic">Les photos officielles seront affichées ici dès qu'elles seront ajoutées dans <code class="bg-white/10 px-1.5 py-0.5 rounded">assets/images/officiels/</code>.</p>

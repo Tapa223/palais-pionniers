@@ -1,15 +1,4 @@
 <?php
-/*
- * Export CSV de l'Espace admin partenaire (consultation uniquement).
- *
- * Périmètre : les réservations de l'organisation du partenaire CONNECTÉ
- * (reservations.partenaire_id = sa fiche partenaire), déterminé côté serveur
- * à partir de la session. Aucun identifiant n'est lu dans l'URL : seul le
- * type d'export (?type=reservations|paiements|services) est accepté.
- *
- * Même format que les exports de l'administration (admin/export.php) :
- * UTF-8 avec BOM, séparateur « ; », montants entiers.
- */
 require_once __DIR__ . '/config/database.php';
 require_once __DIR__ . '/includes/auth.php';
 
@@ -32,7 +21,6 @@ if (!in_array($type, ['reservations', 'paiements', 'services'], true)) {
 $fin2  = fn($v) => number_format((float)$v, 0, '', '');
 $dateH = fn($v) => $v ? date('d/m/Y H:i', strtotime($v)) : '';
 $dateJ = fn($v) => $v ? date('d/m/Y', strtotime($v)) : '';
-// Texte saisi : neutralise les formules à l'ouverture dans un tableur
 $texte = function ($v): string {
     $v = (string)$v;
     return ($v !== '' && strpbrk($v[0], "=+-@\t\r") !== false) ? "'" . $v : $v;
@@ -76,7 +64,6 @@ if ($type === 'reservations') {
         ];
     }
 } elseif ($type === 'services') {
-    // Demandes de services des comptes de l'organisation (même périmètre que l'onglet « Services »)
     $st = $pdo->prepare("
         SELECT ds.id, ds.created_at, ds.message, ds.statut, ds.note_traitement, s.nom AS service, s.montant, s.unite,
                du.nom_complet AS compte

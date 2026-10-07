@@ -37,13 +37,6 @@ foreach ($occupationsRaw as $r) {
     ];
 }
 
-/* ============================================================
-   MODE RÉQUISITION (nouvelle date / autre espace)
-   Le formulaire reste le formulaire normal de réservation ; on se
-   contente de restreindre les espaces/tarifs proposés et de
-   préremplir les informations de la réservation réquisitionnée.
-   Tous les contrôles sont refaits côté serveur au traitement.
-   ============================================================ */
 $requisitionId     = isset($_GET['requisition_id']) ? max(0, (int)$_GET['requisition_id']) : 0;
 $requisition       = null;
 $requisitionErreur = '';
@@ -59,8 +52,6 @@ if ($requisitionId > 0) {
         $requisition = $contexte['req'];
         $espaceOrigine = (int)$requisition['espace_id'];
 
-        // En mode réquisition, les tarifs « bail » (demande de location longue durée)
-        // ne sont pas proposés : ils ne correspondent pas à une réservation.
         foreach ($tarifsData as $eid => $liste) {
             $tarifsData[$eid] = array_values(array_filter($liste, fn($t) => (int)$t['est_bail'] !== 1));
         }
@@ -70,7 +61,6 @@ if ($requisitionId > 0) {
             if (!isset($espacesData[$espaceOrigine])) {
                 $requisitionErreur = "L'espace « {$requisition['espace_nom']} » n'est plus proposé à la réservation pour le moment. Merci de contacter l'administration du Palais.";
             } else {
-                // Même espace, même type de réservation (même tarif)
                 $espacesData = [$espaceOrigine => $espacesData[$espaceOrigine]];
                 $idPreselectionne = $espaceOrigine;
 
@@ -87,7 +77,6 @@ if ($requisitionId > 0) {
 
         } else {
 
-            // Autre espace : tous les espaces réservables en ligne, sauf celui réquisitionné
             $espacesData = array_filter(
                 $espacesData,
                 fn($esp, $eid) => (int)$eid !== $espaceOrigine && empty($esp['gerant_externe']),
@@ -97,7 +86,6 @@ if ($requisitionId > 0) {
             if (!$espacesData) {
                 $requisitionErreur = "Aucun autre espace n'est actuellement réservable en ligne. Merci de contacter l'administration du Palais.";
             } elseif (!isset($espacesData[$idPreselectionne])) {
-                // Présélection à partir de l'espace indiqué lors du choix (nom), si retrouvé
                 $idPreselectionne = 0;
                 foreach ($espacesData as $eid => $esp) {
                     if ($esp['nom'] === (string)$requisition['details_choix']) {
@@ -108,8 +96,6 @@ if ($requisitionId > 0) {
             }
         }
 
-        // Le créneau réquisitionné reste occupé par l'institution : on l'affiche
-        // comme occupé pour que le calendrier et les contrôles JS le prennent en compte.
         if (!$requisitionErreur && !empty($requisition['heure_debut']) && $requisition['date_resa'] >= date('Y-m-d')) {
             $creneaux[$espaceOrigine][$requisition['date_resa']][] = [
                 'debut' => substr($requisition['heure_debut'], 0, 5),
@@ -117,8 +103,6 @@ if ($requisitionId > 0) {
             ];
         }
 
-        // Date proposée : celle choisie par le client lors du choix (nouvelle date),
-        // sinon la date d'origine (autre espace), si elle n'est pas passée.
         $datePropose = '';
         $candidate = $requisition['choix_client'] === 'nouvelle_date'
             ? (string)$requisition['details_choix']
@@ -148,12 +132,10 @@ if ($requisitionId > 0) {
     }
 }
 
-$pageTitle = "Réserver un espace — Palais des Pionniers";
-// Compte partenaire : le formulaire s'affiche dans l'Espace admin partenaire
-// (même enveloppe que son tableau de bord). Formulaire et traitement inchangés.
+$pageTitle = "Réserver un espace | Palais des Pionniers";
 $partenaireReservation = partenaire_utilisateur($pdo, (int)$_SESSION['user_id']);
 if ($partenaireReservation) {
-    $pageTitle         = "Nouvelle réservation — Espace admin — Palais des Pionniers";
+    $pageTitle         = "Nouvelle réservation | Espace admin | Palais des Pionniers";
     $ongletPartenaire  = 'nouvelle';
     $partenaireLayout  = $partenaireReservation;
     require __DIR__ . '/includes/partenaire_layout_debut.php';
@@ -195,7 +177,6 @@ endif;
   select.input-base { appearance:none; cursor:pointer; }
   textarea.input-base { resize:none; }
   .step-badge { display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px; border-radius:50%; background:#E61E2A; color:#fff; font-size:9px; font-weight:900; margin-right:5px; flex-shrink:0; }
-  /* Progress */
   .progress-step { flex:1; text-align:center; position:relative; }
   .progress-step::after { content:''; position:absolute; top:14px; left:60%; width:80%; height:2px; background:#e2e8f0; z-index:0; }
   .progress-step:last-child::after { display:none; }
@@ -203,17 +184,14 @@ endif;
   .progress-dot.active { background:#0A2558; border-color:#0A2558; color:#fff; }
   .progress-dot.done   { background:#22c55e; border-color:#22c55e; color:#fff; }
   .progress-label { font-size:8px; font-weight:700; color:#94a3b8; text-transform:uppercase; letter-spacing:.05em; }
-  /* Toast */
   #toast { position:fixed; bottom:1.5rem; left:50%; transform:translateX(-50%) translateY(100px); background:#0A2558; color:#fff; padding:.75rem 1.5rem; border-radius:2rem; font-size:.8rem; font-weight:700; z-index:9999; transition:transform .35s cubic-bezier(.34,1.56,.64,1),opacity .3s; opacity:0; pointer-events:none; white-space:nowrap; box-shadow:0 8px 32px rgba(10,37,88,.25); }
   #toast.show { transform:translateX(-50%) translateY(0); opacity:1; }
   #toast.success { background:#16a34a; }
   #toast.error { background:#E61E2A; }
-  /* Accordéon calendrier mobile */
   #calAccordion { overflow:hidden; transition:max-height .4s cubic-bezier(.4,0,.2,1); max-height:0; }
   #calAccordion.open { max-height:500px; }
   #calToggleIcon { transition:transform .3s; }
   #calToggleIcon.open { transform:rotate(180deg); }
-  /* Sticky bottom bar mobile */
   @media (max-width:1023px) {
     .mobile-sticky-bar { position:fixed; bottom:0; left:0; right:0; background:#fff; border-top:1px solid #e2e8f0; padding:.75rem 1rem; z-index:50; box-shadow:0 -4px 20px rgba(0,0,0,.08); }
     .has-sticky-bar { padding-bottom:5rem; }
@@ -230,7 +208,6 @@ endif;
 
 <div class="bg-slate-50 min-h-screen">
 
-  <!-- Header sticky -->
   <div class="bg-white border-b border-slate-100 <?= $partenaireReservation ? 'rounded-t-2xl' : 'sticky top-0 z-40' ?> shadow-sm">
     <div class="container mx-auto max-w-5xl px-4 py-3 flex items-center justify-between gap-4">
       <?php if ($partenaireReservation): ?>
@@ -251,7 +228,6 @@ endif;
     </div>
   </div>
 
-  <!-- Barre de progression -->
   <div class="bg-white border-b border-slate-100 py-3">
     <div class="container mx-auto max-w-lg px-4">
       <div class="flex items-start justify-center" id="progressBar">
@@ -277,11 +253,9 @@ endif;
   </div>
   <?php endif; ?>
 
-  <!-- Layout principal -->
   <div class="container mx-auto max-w-5xl px-4 py-5 md:py-8 has-sticky-bar lg:pb-8">
     <div class="flex flex-col lg:grid lg:grid-cols-3 lg:gap-8 gap-5">
 
-      <!-- ===== FORMULAIRE (toujours en premier sur mobile) ===== -->
       <div class="order-1 lg:col-span-2">
         <div class="bg-white rounded-2xl shadow-lg overflow-hidden">
           <form action="traitement-reservation.php" method="POST" id="resaForm" novalidate class="p-5 sm:p-8 space-y-6">
@@ -294,7 +268,7 @@ endif;
             <div class="rounded-2xl bg-amber-50 border-2 border-amber-200 p-4">
               <p class="text-sm font-black text-amber-700 mb-1 flex items-center gap-2">
                 <i class="fas fa-landmark"></i>
-                <?= $requisition['choix_client'] === 'nouvelle_date' ? 'Nouvelle date' : 'Autre espace' ?> — réquisition n°<?= (int)$requisition['requisition_id'] ?>
+                <?= $requisition['choix_client'] === 'nouvelle_date' ? 'Nouvelle date' : 'Autre espace' ?> · réquisition n°<?= (int)$requisition['requisition_id'] ?>
               </p>
               <p class="text-xs text-amber-700 leading-relaxed">
                 Réservation réquisitionnée : <strong><?= e($requisition['espace_nom']) ?></strong>,
@@ -320,7 +294,6 @@ endif;
             </div>
             <?php endif; ?>
 
-            <!-- 1. Espace -->
             <div>
               <label class="field-label"><span class="step-badge">1</span>Espace souhaité <span class="required">*</span></label>
               <div class="relative" id="espaceDropdownWrap">
@@ -361,7 +334,6 @@ endif;
               <p id="espaceErr" class="hidden text-xs text-accent font-bold mt-1.5 flex items-center gap-1"><i class="fas fa-exclamation-circle"></i> Veuillez sélectionner un espace.</p>
             </div>
 
-            <!-- Preview espace (mobile inline, desktop dans sidebar) -->
             <div id="espacePreviewMobile" class="hidden lg:hidden rounded-2xl overflow-hidden border border-slate-100 bg-slate-50">
               <div class="flex items-center gap-3 p-3">
                 <img id="previewImgMobile" src="" alt="" class="w-16 h-16 object-cover rounded-xl flex-shrink-0">
@@ -374,14 +346,12 @@ endif;
               </div>
             </div>
 
-            <!-- Tarifs -->
-            <!-- Message si l'espace choisi est déjà en bail (géré par un tiers) -->
             <div id="espaceEnBailMessage" class="hidden bg-amber-50 border-2 border-amber-200 rounded-2xl p-5">
               <div class="flex items-start gap-3">
                 <i class="fas fa-user-tie text-amber-500 mt-0.5 text-lg"></i>
                 <div>
                   <p class="text-sm font-black text-amber-700 mb-1">Cet espace est géré par un tiers</p>
-                  <p class="text-xs text-amber-600 mb-3">Il est loué sur une longue durée à une association, un club ou une entreprise, qui en gère l'usage au quotidien — il n'est donc pas réservable ponctuellement en ligne.</p>
+                  <p class="text-xs text-amber-600 mb-3">Il est loué sur une longue durée à une association, un club ou une entreprise, qui en gère l'usage au quotidien : il n'est donc pas réservable ponctuellement en ligne.</p>
                   <p id="espaceEnBailTexte" class="text-xs text-amber-700 leading-relaxed"></p>
                   <p class="text-xs font-black uppercase tracking-widest text-amber-700 mt-3 mb-1.5"><i class="fas fa-address-card mr-1.5"></i>Contacter le gestionnaire</p>
                   <div id="espaceEnBailFiche" class="space-y-1.5"></div>
@@ -395,7 +365,6 @@ endif;
               <p id="tarifErr" class="hidden text-xs text-accent font-bold mt-1.5 flex items-center gap-1"><i class="fas fa-exclamation-circle"></i> Veuillez sélectionner un tarif.</p>
             </div>
 
-            <!-- 2. Date -->
             <div id="dateSection">
               <label class="field-label"><span class="step-badge">2</span><span id="dateLabel">Date de réservation</span> <span class="required">*</span></label>
               <div class="relative">
@@ -406,7 +375,6 @@ endif;
               <p id="dateErr" class="hidden text-xs text-accent font-bold mt-1.5 flex items-center gap-1"><i class="fas fa-exclamation-circle"></i> Veuillez choisir une date.</p>
             </div>
 
-            <!-- 2bis. Date de départ + quantité + petit-déjeuner (mode séjour uniquement) -->
             <div id="sejourSection" class="hidden space-y-4">
               <div>
                 <label class="field-label"><span class="step-badge">↳</span>Date de départ <span class="required">*</span></label>
@@ -434,7 +402,6 @@ endif;
               </label>
             </div>
 
-            <!-- Disponibilité inline mobile (après date) -->
             <div id="creneauxMobile" class="hidden lg:hidden rounded-2xl bg-slate-50 border border-slate-100 p-4">
               <div class="flex items-center gap-2 mb-3">
                 <i class="fas fa-calendar-day text-accent text-xs"></i>
@@ -446,12 +413,11 @@ endif;
               </div>
               <div id="creneauxListMobile" class="space-y-1.5 text-xs"></div>
               <div id="creneauxLibresMobile" class="mt-3 hidden">
-                <p class="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-2">Créneaux libres — appuyez pour sélectionner</p>
+                <p class="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-2">Créneaux libres : appuyez pour sélectionner</p>
                 <div id="creneauxLibresListMobile" class="flex flex-wrap gap-1.5"></div>
               </div>
             </div>
 
-            <!-- 3. Horaires -->
             <div id="horairesSection">
               <label class="field-label"><span class="step-badge">3</span>Horaires <span class="required">*</span></label>
               <?php if ($requisition && $requisition['choix_client'] === 'nouvelle_date' && !empty($requisition['heure_debut'])): ?>
@@ -496,7 +462,6 @@ endif;
               <p id="heureErr" class="hidden text-xs text-accent font-bold mt-1.5 flex items-center gap-1"><i class="fas fa-exclamation-circle"></i></p>
             </div>
 
-            <!-- Alertes dispo -->
             <div id="conflictAlert" class="hidden rounded-2xl bg-red-50 border border-red-200 p-4 flex items-start gap-3">
               <i class="fas fa-times-circle text-accent text-base mt-0.5 flex-shrink-0"></i>
               <p class="text-sm font-bold text-red-700" id="conflictMsg"></p>
@@ -509,13 +474,11 @@ endif;
               </div>
             </div>
 
-            <!-- Option VIP (supplément, espaces qui le proposent) -->
             <label id="vipLabel" class="hidden flex items-center gap-3 p-3.5 rounded-xl border-2 border-slate-100 bg-white cursor-pointer hover:border-primary transition-all w-fit">
               <input type="checkbox" name="vip" id="vipCheck" value="1" onchange="checkAllValid()" class="w-4 h-4 accent-accent">
               <span class="text-xs font-black text-slate-700">Accueil VIP <span id="vipPrixLabel" class="text-slate-400 font-normal"></span></span>
             </label>
 
-            <!-- 4. Motif -->
             <div id="motifSection">
               <label class="field-label"><span class="step-badge">4</span>Motif de la réservation <span class="required">*</span></label>
               <div class="relative">
@@ -530,7 +493,6 @@ endif;
               </div>
             </div>
 
-            <!-- 5. Téléphone -->
             <div id="telSection">
               <label class="field-label"><span class="step-badge">5</span>Téléphone de contact <span class="required">*</span></label>
               <div class="relative">
@@ -543,7 +505,6 @@ endif;
               <p id="telErr" class="hidden text-xs text-accent font-bold mt-1.5 flex items-center gap-1"><i class="fas fa-exclamation-circle"></i>Numéro requis (min. 8 chiffres).</p>
             </div>
 
-            <!-- Récap -->
             <div id="recapBox" class="hidden rounded-2xl bg-primary/5 border border-primary/10 p-4">
               <p class="text-[10px] font-black uppercase tracking-widest text-primary mb-3 flex items-center gap-2">
                 <i class="fas fa-receipt text-accent"></i>Récapitulatif
@@ -556,7 +517,6 @@ endif;
               <p class="text-[11px] text-amber-700 leading-relaxed">Comme tout espace du Palais, celui-ci peut exceptionnellement être réquisitionné pour un besoin institutionnel prioritaire (activité ministérielle, gouvernementale ou urgence nationale), même après validation. Vous seriez alors notifié et pourriez choisir un remboursement, une nouvelle date ou un autre espace.</p>
             </div>
 
-            <!-- Bouton desktop uniquement -->
             <div id="submitBtnDesktop">
               <button type="submit" id="submitBtn" disabled
                       class="w-full bg-primary text-white py-5 rounded-2xl font-black uppercase tracking-widest text-sm transition-all flex items-center justify-center gap-3 opacity-40 cursor-not-allowed">
@@ -570,7 +530,6 @@ endif;
           </form>
         </div>
 
-        <!-- Accordéon calendrier MOBILE uniquement -->
         <div class="lg:hidden mt-4">
           <button type="button" onclick="toggleCal()"
                   class="w-full bg-slate-900 text-white rounded-2xl px-5 py-4 flex items-center justify-between font-black text-sm uppercase tracking-wide">
@@ -582,7 +541,6 @@ endif;
           </button>
           <div id="calAccordion">
             <div class="bg-slate-900 rounded-b-2xl p-5 text-white">
-              <!-- Légende -->
               <div class="flex items-center gap-3 mb-4 flex-wrap">
                 <span class="flex items-center gap-1 text-[9px] text-slate-400"><span class="w-2.5 h-2.5 rounded bg-green-500/40 inline-block"></span>Libre</span>
                 <span class="flex items-center gap-1 text-[9px] text-slate-400"><span class="w-2.5 h-2.5 rounded bg-yellow-400/50 inline-block"></span>Partiel</span>
@@ -609,10 +567,8 @@ endif;
         </div>
       </div>
 
-      <!-- ===== SIDEBAR DESKTOP ===== -->
       <div class="order-2 lg:col-span-1 hidden lg:block space-y-5">
 
-        <!-- Preview espace desktop -->
         <div id="espacePreview" class="hidden bg-white rounded-[2rem] overflow-hidden shadow-sm border border-slate-100">
           <img id="previewImg" src="" alt="" class="w-full h-40 object-cover">
           <div class="p-4">
@@ -623,7 +579,6 @@ endif;
           </div>
         </div>
 
-        <!-- Dispo desktop -->
         <div id="creneauxDuJour" class="hidden bg-white rounded-[2rem] p-5 border border-slate-100 shadow-sm">
           <div class="flex items-center gap-2 mb-4">
             <i class="fas fa-calendar-day text-accent text-sm"></i>
@@ -645,7 +600,6 @@ endif;
           </div>
         </div>
 
-        <!-- Calendrier desktop -->
         <div class="bg-slate-900 rounded-[2rem] p-6 text-white shadow-xl">
           <div class="flex items-center justify-between mb-5">
             <button type="button" onclick="changeMonth(-1)" class="w-9 h-9 flex items-center justify-center rounded-full bg-white/5 hover:bg-white/15 transition"><i class="fas fa-chevron-left text-sm"></i></button>
@@ -670,7 +624,6 @@ endif;
   </div>
 </div>
 
-<!-- Bouton sticky mobile -->
 <div id="mobileStickyBar" class="mobile-sticky-bar lg:hidden">
   <button type="button" id="submitBtnMobile" disabled onclick="submitMobile()"
           class="w-full bg-primary text-white py-4 rounded-2xl font-black uppercase tracking-widest text-sm flex items-center justify-center gap-2 opacity-40 cursor-not-allowed transition-all">
@@ -682,14 +635,13 @@ endif;
 <div id="toast"></div>
 
 <script>
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
 const espaces  = <?= json_encode($espacesData) ?>;
 const tarifs   = <?= json_encode($tarifsData) ?>;
 const creneaux = <?= json_encode($creneaux) ?>;
-// Contexte de réquisition (null pour une réservation normale)
 const REQ = <?= json_encode($requisitionJs) ?>;
 let currentViewDate = new Date();
 
-// ---- Helpers ----
 function toMin(hhmm) { const [h,m]=hhmm.split(':').map(Number); return h*60+m; }
 function fromMin(m)  { return String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0'); }
 function formatDuree(m) { const h=Math.floor(m/60),r=m%60; return h>0?(h+'h'+(r?r+'min':'')):(r+'min'); }
@@ -711,7 +663,7 @@ const JOUR_DEBUT=7*60, JOUR_FIN=22*60, JOUR_DUREE=JOUR_FIN-JOUR_DEBUT;
 function getEspaceId(){ return el('espaceSelect').value; }
 
 function toggleEspaceDropdown() {
-    if (reqNouvelleDate()) return; // nouvelle date : l'espace réquisitionné est conservé
+    if (reqNouvelleDate()) return;
     const list = el('espaceDropdownList');
     const chevron = el('espaceDropdownChevron');
     const isOpen = !list.classList.contains('hidden');
@@ -723,7 +675,6 @@ function toggleEspaceDropdown() {
     list.classList.remove('hidden');
     chevron.style.transform = 'rotate(180deg)';
 
-    // Positionnement intelligent : si pas assez de place en dessous, ouvrir vers le haut
     const wrap = el('espaceDropdownWrap');
     const rect = wrap.getBoundingClientRect();
     const spaceBelow = window.innerHeight - rect.bottom;
@@ -764,7 +715,7 @@ function getDateDepart() { return el('dateDepartInput').value; }
 function isSejour(id) { return id && espaces[id] && espaces[id].mode_reservation === 'sejour'; }
 
 function changeQuantite(delta) {
-    if (reqNouvelleDate() && isSejour(getEspaceId())) return; // nombre de chambres conservé
+    if (reqNouvelleDate() && isSejour(getEspaceId())) return;
     const input = el('quantiteInput');
     const max = parseInt(input.max || '1', 10);
     let val = parseInt(input.value || '1', 10) + delta;
@@ -787,7 +738,6 @@ function updateQuantiteMax() {
     el('quantiteMaxLabel').textContent = max > 1 ? `(max ${max} disponibles)` : '';
 }
 
-// ---- Toggle accordéon calendrier mobile ----
 function toggleCal() {
     const acc  = el('calAccordion');
     const icon = el('calToggleIcon');
@@ -796,7 +746,6 @@ function toggleCal() {
     renderCal();
 }
 
-// ---- Validation globale + bouton ----
 function checkAllValid() {
     const id    = getEspaceId();
     const date  = getDate();
@@ -814,7 +763,7 @@ function checkAllValid() {
     if (sejour) {
         const depart = getDateDepart();
         finOk  = !!(depart && depart > date);
-        noConf = true; // la disponibilité réelle (inventaire) est vérifiée côté serveur
+        noConf = true;
     } else {
         debut = getDebut();
         fin   = getFin();
@@ -825,7 +774,6 @@ function checkAllValid() {
 
     const allOk  = !!(id && date && finOk && noConf && motif.length>=10 && tel.length>=8 && hasTarif);
 
-    // Bouton desktop
     const btnD = el('submitBtn');
     if (btnD) {
         btnD.disabled = !allOk;
@@ -833,7 +781,6 @@ function checkAllValid() {
         btnD.classList.toggle('cursor-not-allowed', !allOk);
         btnD.classList.toggle('hover:bg-slate-800', allOk);
     }
-    // Bouton mobile sticky
     const btnM = el('submitBtnMobile');
     if (btnM) {
         btnM.disabled = !allOk;
@@ -897,14 +844,13 @@ function updateRecap(id, date, debut, fin, motif, tel, sejour) {
 
     el('recapContent').innerHTML = `
         <div class="grid grid-cols-2 gap-y-2 text-sm">
-            <span class="text-slate-500">Espace</span><span class="font-black text-primary text-right">${esp.nom}</span>
+            <span class="text-slate-500">Espace</span><span class="font-black text-primary text-right">${esc(esp.nom)}</span>
             ${ligneDatesHTML}
-            ${tarifLabel?`<span class="text-slate-500">Tarif</span><span class="font-bold text-primary text-right text-xs">${tarifLabel}</span>`:''}
-            <span class="text-slate-500">Contact</span><span class="font-bold text-primary text-right">${tel}</span>
+            ${tarifLabel?`<span class="text-slate-500">Tarif</span><span class="font-bold text-primary text-right text-xs">${esc(tarifLabel)}</span>`:''}
+            <span class="text-slate-500">Contact</span><span class="font-bold text-primary text-right">${esc(tel)}</span>
         </div>`;
 }
 
-// ---- Espace ----
 function onEspaceChange() {
     const id = getEspaceId();
     el('espaceErr').classList.add('hidden');
@@ -926,7 +872,6 @@ function onEspaceChange() {
 
     const esp = espaces[id];
 
-    // Espace déjà géré par un tiers (en bail) — pas de réservation en ligne possible
     const sectionsAReservation = ['dateSection','horairesSection','sejourSection','motifSection','telSection','recapBox','submitBtnDesktop'];
     if (esp.gerant_externe) {
         el('espaceEnBailMessage').classList.remove('hidden');
@@ -939,11 +884,11 @@ function onEspaceChange() {
         const ficheDiv = el('espaceEnBailFiche');
         let ficheHtml = '';
         const nomGerant = [esp.gerant_prenom, esp.gerant_nom].filter(Boolean).join(' ');
-        if (nomGerant) ficheHtml += `<p class="text-xs text-amber-700"><i class="fas fa-user w-4"></i> ${nomGerant}</p>`;
-        if (esp.gerant_email) ficheHtml += `<p class="text-xs text-amber-700"><i class="fas fa-envelope w-4"></i> <a href="mailto:${esp.gerant_email}" class="underline font-bold">${esp.gerant_email}</a></p>`;
-        if (esp.gerant_contact) ficheHtml += `<p class="text-xs text-amber-700"><i class="fas fa-phone-alt w-4"></i> <a href="tel:${esp.gerant_contact.replace(/\s+/g,'')}" class="underline font-bold">${esp.gerant_contact}</a></p>`;
+        if (nomGerant) ficheHtml += `<p class="text-xs text-amber-700"><i class="fas fa-user w-4"></i> ${esc(nomGerant)}</p>`;
+        if (esp.gerant_email) ficheHtml += `<p class="text-xs text-amber-700"><i class="fas fa-envelope w-4"></i> <a href="mailto:${esc(esp.gerant_email)}" class="underline font-bold">${esc(esp.gerant_email)}</a></p>`;
+        if (esp.gerant_contact) ficheHtml += `<p class="text-xs text-amber-700"><i class="fas fa-phone-alt w-4"></i> <a href="tel:${esc(esp.gerant_contact.replace(/\s+/g,''))}" class="underline font-bold">${esc(esp.gerant_contact)}</a></p>`;
         if (!nomGerant && !esp.gerant_email && !esp.gerant_contact) {
-            ficheHtml = `<p class="text-xs text-amber-700 italic"><i class="fas fa-exclamation-circle w-4"></i> Coordonnées du gestionnaire non encore renseignées — <a href="contact.php" class="underline font-bold">contactez l'administration du Palais</a>.</p>`;
+            ficheHtml = `<p class="text-xs text-amber-700 italic"><i class="fas fa-exclamation-circle w-4"></i> Coordonnées du gestionnaire non encore renseignées. <a href="contact.php" class="underline font-bold">Contactez l'administration du Palais</a>.</p>`;
         }
         ficheDiv.innerHTML = ficheHtml;
 
@@ -957,7 +902,6 @@ function onEspaceChange() {
 
     const sejour = esp.mode_reservation === 'sejour';
 
-    // Bascule créneau <-> séjour
     el('horairesSection').classList.toggle('hidden', sejour);
     el('sejourSection').classList.toggle('hidden', !sejour);
     el('petitDejLabel').classList.toggle('hidden', !(sejour && esp.option_petit_dejeuner == 1));
@@ -974,19 +918,16 @@ function onEspaceChange() {
     el('dateDepartInput').required = sejour;
     if (!sejour) { el('dateDepartInput').value = ''; el('petitDejCheck').checked = false; }
 
-    // Preview desktop
     el('previewNom').textContent = esp.nom;
     el('previewCap').querySelector('span').textContent = esp.capacite+' personnes';
-    el('previewImg').src = esp.photo ? 'uploads/'+esp.photo : 'https://placehold.co/600x300/0A2558/ffffff?text='+encodeURIComponent(esp.nom);
+    el('previewImg').src = esp.photo ? 'uploads/'+esp.photo : 'assets/images/porte.jpeg';
     el('espacePreview').classList.remove('hidden');
 
-    // Preview mobile inline
     el('previewNomMobile').textContent = esp.nom;
     el('previewCapMobile').querySelector('span').textContent = esp.capacite+' personnes';
-    el('previewImgMobile').src = esp.photo ? 'uploads/'+esp.photo : 'https://placehold.co/200x200/0A2558/ffffff?text='+encodeURIComponent(esp.nom);
+    el('previewImgMobile').src = esp.photo ? 'uploads/'+esp.photo : 'assets/images/porte.jpeg';
     el('espacePreviewMobile').classList.remove('hidden');
 
-    // Tarifs
     const grid = el('tarifGrid');
     grid.innerHTML = '';
     if (tarifs[id] && tarifs[id].length) {
@@ -999,7 +940,7 @@ function onEspaceChange() {
             lbl.innerHTML = `
                 <div class="flex items-center gap-3">
                     <input type="radio" name="tarif_id" value="${t.id}" ${i===0?'checked':''} onchange="checkAllValid()" class="w-4 h-4 accent-primary flex-shrink-0">
-                    <span class="text-xs font-black text-slate-700 tarif-label">${t.libelle}</span>
+                    <span class="text-xs font-black text-slate-700 tarif-label">${esc(t.libelle)}</span>
                 </div>
                 <span class="text-sm font-black text-primary whitespace-nowrap ml-2">${new Intl.NumberFormat('fr-FR').format(t.montant)} <span class="text-xs text-slate-400 font-normal">FCFA/${t.unite}</span></span>`;
             grid.appendChild(lbl);
@@ -1015,12 +956,12 @@ function onEspaceChange() {
                         <span class="bail-radio w-4 h-4 rounded-full border-2 border-indigo-300 flex-shrink-0 flex items-center justify-center">
                             <span class="bail-radio-dot hidden w-2 h-2 rounded-full bg-indigo-600"></span>
                         </span>
-                        <span class="text-xs font-black text-indigo-700">${t.libelle}</span>
+                        <span class="text-xs font-black text-indigo-700">${esc(t.libelle)}</span>
                     </div>
                     <span class="text-sm font-black text-indigo-700 whitespace-nowrap ml-2">${new Intl.NumberFormat('fr-FR').format(t.montant)} <span class="text-xs text-indigo-400 font-normal">FCFA/${t.unite}</span></span>
                 </div>
                 <div id="bailDetail-${t.id}" class="hidden mt-3 pt-3 border-t border-indigo-100">
-                    <p class="text-xs text-indigo-700 mb-3 leading-relaxed">Cette option n'est pas une réservation classique : c'est une location longue durée. En cliquant ci-dessous, vous ouvrez un formulaire pour demander à louer cet espace sur plusieurs mois — le tarif exact sera confirmé avec vous par l'administration.</p>
+                    <p class="text-xs text-indigo-700 mb-3 leading-relaxed">Cette option n'est pas une réservation classique : c'est une location longue durée. En cliquant ci-dessous, vous ouvrez un formulaire pour demander à louer cet espace sur plusieurs mois. Le tarif exact sera confirmé avec vous par l'administration.</p>
                     <a href="demande-bail.php?espace_id=${id}" class="flex items-center justify-center gap-2 p-3 rounded-xl bg-indigo-600 text-white text-xs font-black uppercase tracking-widest hover:bg-indigo-700 transition-all">
                         <i class="fas fa-arrow-right"></i> Demander un bail sur cet espace
                     </a>
@@ -1034,10 +975,6 @@ function onEspaceChange() {
                 dot.classList.toggle('hidden', estOuvert);
                 carte.classList.toggle('border-indigo-500', !estOuvert);
 
-                // Sécurité : tant que la carte bail est ouverte, aucun tarif classique
-                // ne doit rester sélectionné — sinon le formulaire pourrait être envoyé
-                // par erreur avec le premier tarif normal au lieu de passer par la
-                // vraie demande de bail.
                 if (!estOuvert) {
                     document.querySelectorAll('input[name="tarif_id"]:checked').forEach(r => r.checked = false);
                 }
@@ -1056,7 +993,6 @@ function onEspaceChange() {
     checkAllValid();
 }
 
-// ---- Date ----
 function onDateChange() {
     const date = getDate();
     el('dateErr').classList.add('hidden');
@@ -1069,10 +1005,8 @@ function onDateChange() {
     checkAllValid();
 }
 
-// ---- Heure ----
 function onHeureChange() { updateDisponibilite(); checkAllValid(); }
 
-// ---- Date de départ (séjour) ----
 function onDateDepartChange() {
     const arrivee = getDate();
     const depart  = getDateDepart();
@@ -1089,7 +1023,6 @@ function onDateDepartChange() {
     checkAllValid();
 }
 
-// ---- Motif ----
 function onMotifChange() {
     const val = el('motifInput').value.trim();
     el('motifCount').textContent = val.length+' / 10 min.';
@@ -1100,7 +1033,6 @@ function onMotifChange() {
     checkAllValid();
 }
 
-// ---- Téléphone ----
 function onTelChange() {
     const val = el('telInput').value.trim();
     setValid(el('telInput'), val.length>=8);
@@ -1108,7 +1040,6 @@ function onTelChange() {
     checkAllValid();
 }
 
-// ---- Disponibilité (desktop + mobile) ----
 function buildFrise(containerId, taken, debut, fin) {
     const friseEl = el(containerId);
     if (!friseEl) return;
@@ -1192,7 +1123,6 @@ function updateDisponibilite() {
     el('disponibleAlert').classList.add('hidden');
     el('heureErr').classList.add('hidden');
 
-    // Griser heures occupées
     const selD=el('heureDebut'), selF=el('heureFin');
     Array.from(selD.options).forEach(o=>{
         const bl=taken.some(c=>o.value>=c.debut&&o.value<c.fin);
@@ -1203,7 +1133,6 @@ function updateDisponibilite() {
         o.disabled=bl; o.style.color=bl?'#ccc':''; o.style.background=bl?'#fee2e2':'';
     });
     if (reqMemeHoraire()) {
-        // Horaire d'origine imposé : même s'il est occupé, on le garde pour afficher le conflit
         selD.value = REQ.heure_debut; selF.value = REQ.heure_fin;
     } else {
     if(selD.options[selD.selectedIndex]?.disabled){ const nf=Array.from(selD.options).find(o=>!o.disabled); if(nf)selD.value=nf.value; }
@@ -1216,21 +1145,17 @@ function updateDisponibilite() {
         return;
     }
 
-    // Label date
     const d=new Date(date+'T12:00:00');
     const dateStr=new Intl.DateTimeFormat('fr-FR',{weekday:'short',day:'numeric',month:'long'}).format(d);
     if(el('creneauxDateLabel'))    el('creneauxDateLabel').textContent=dateStr;
     if(el('creneauxDateLabelMobile')) el('creneauxDateLabelMobile').textContent=dateStr;
 
-    // Frises
     buildFrise('friseHoraire', taken, debut, fin);
     buildFrise('friseHoraireMobile', taken, debut, fin);
 
-    // Listes
     buildCreneauxList('creneauxList', taken);
     buildCreneauxList('creneauxListMobile', taken);
 
-    // Créneaux libres
     if(taken.length>0) {
         buildCreneauxLibres('creneauxLibresList','creneauxLibres', taken, selD, selF);
         buildCreneauxLibres('creneauxLibresListMobile','creneauxLibresMobile', taken, selD, selF);
@@ -1242,7 +1167,6 @@ function updateDisponibilite() {
     el('creneauxDuJour').classList.remove('hidden');
     el('creneauxMobile').classList.remove('hidden');
 
-    // Alertes conflit
     if(debut && fin) {
         if(fin<=debut) {
             el('heureErr').innerHTML='<i class="fas fa-exclamation-circle"></i> L\'heure de fin doit être après l\'heure de début.';
@@ -1261,7 +1185,6 @@ function updateDisponibilite() {
     }
 }
 
-// ---- Calendrier (dessine dans 2 grilles: desktop + mobile) ----
 function changeMonth(dir) {
     currentViewDate=new Date(currentViewDate.getFullYear(),currentViewDate.getMonth()+dir,1);
     renderCal();
@@ -1271,8 +1194,6 @@ function selectDate(y,m,d) {
     el('dateInput').value=ds;
     currentViewDate=new Date(y,m,d);
     renderCal(); onDateChange();
-    // Le calendrier reste ouvert : la date choisie est visible en surbrillance
-    // dans la grille, pas besoin de refermer ni de sauter vers le formulaire.
 }
 
 function renderCal() {
@@ -1314,7 +1235,6 @@ function renderCal() {
     });
 }
 
-// ---- Submit ----
 function submitMobile() {
     if(!checkAllValid()) { showToast('Veuillez compléter tous les champs.','error'); return; }
     el('resaForm').dispatchEvent(new Event('submit'));
@@ -1322,7 +1242,7 @@ function submitMobile() {
 let envoiEnCours = false;
 el('resaForm').addEventListener('submit', function(e) {
     e.preventDefault();
-    if (envoiEnCours) return; // protection double clic
+    if (envoiEnCours) return;
     if(!checkAllValid()) { showToast('Veuillez compléter tous les champs.','error'); return; }
     const debut=getDebut(), fin=getFin(), date=getDate(), esp=espaces[getEspaceId()];
     const d=new Date(date+'T12:00:00');
@@ -1335,7 +1255,6 @@ el('resaForm').addEventListener('submit', function(e) {
     }
 });
 
-// ---- Mode réquisition (nouvelle date / autre espace) ----
 function reqNouvelleDate() { return !!(REQ && REQ.choix === 'nouvelle_date'); }
 function reqMemeHoraire() {
     if (!reqNouvelleDate() || !REQ.heure_debut || isSejour(getEspaceId())) return false;
@@ -1408,7 +1327,6 @@ function initRequisition() {
     onDateChange();
 }
 
-// ---- Init ----
 onEspaceChange();
 renderCal();
 if(el('telInput').value.trim().length>=8) onTelChange();

@@ -7,11 +7,6 @@ expirer_reservations_non_payees();
 $pdo = db();
 $msg = null;
 
-/*
- * Vérification de disponibilité (lecture seule, JSON) : réutilise exactement
- * les fonctions utilisées à l'enregistrement d'une réservation
- * (tarif_disponible() et creneaux_libres_du_jour()).
- */
 if (($_GET['verifier_dispo'] ?? '') === '1') {
     header('Content-Type: application/json; charset=utf-8');
     $dateOk = fn($d) => ($o = DateTime::createFromFormat('!Y-m-d', (string)$d)) && $o->format('Y-m-d') === $d;
@@ -73,20 +68,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $telephone   = trim($_POST['telephone']    ?? '');
             $userId      = (int)($_POST['user_id']     ?? 0);
 
+            if ($userId) {
+                $client = $pdo->prepare("SELECT id FROM users WHERE id = ? AND role IN ('user','partenaire')");
+                $client->execute([$userId]);
+                if (!$client->fetchColumn()) {
+                    $msg = ['err', 'Client introuvable.'];
+                    goto end;
+                }
+            }
+
+            $dateResaObj = DateTime::createFromFormat('!Y-m-d', $dateResa);
+            if (!$dateResaObj || $dateResaObj->format('Y-m-d') !== $dateResa || $dateResa < date('Y-m-d')) {
+                $msg = ['err', 'Date invalide : choisissez aujourd\'hui ou une date à venir.'];
+                goto end;
+            }
+            $tarifOk = $pdo->prepare("SELECT COUNT(*) FROM tarifs WHERE id = ? AND espace_id = ? AND est_bail = 0");
+            $tarifOk->execute([(int)$tarifId, $espaceId]);
+            if (!$tarifId || !(int)$tarifOk->fetchColumn()) {
+                $msg = ['err', 'Choisissez un tarif de l\'espace sélectionné.'];
+                goto end;
+            }
+
             if (!$userId) {
                 $prenom  = trim($_POST['prenom']  ?? '');
                 $nom_fam = trim($_POST['nom_fam'] ?? '');
                 $email   = trim($_POST['email']   ?? '');
 
-                if (!$prenom || !$nom_fam || !$email) {
-                    $msg = ['err', 'Remplissez prénom, nom et email du client.'];
+                if (!$prenom || !$nom_fam || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                    $msg = ['err', 'Remplissez prénom, nom et un email valide pour le client.'];
                     goto end;
                 }
 
-                $exist = $pdo->prepare("SELECT id FROM users WHERE email = ?");
+                $exist = $pdo->prepare("SELECT id, role FROM users WHERE email = ?");
                 $exist->execute([$email]);
                 $exist = $exist->fetch();
 
+                if ($exist && !in_array($exist['role'], ['user', 'partenaire'], true)) {
+                    $msg = ['err', 'Cet email appartient à un compte d\'administration : utilisez l\'email du client.'];
+                    goto end;
+                }
                 if ($exist) {
                     $userId = (int)$exist['id'];
                 } else {
@@ -107,7 +127,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $espaceInfo->execute([$espaceId]);
             $espaceRow = $espaceInfo->fetch();
 
-            if ($espaceRow && !empty($espaceRow['gerant_externe'])) {
+            if (!$espaceRow) {
+                $msg = ['err', 'Espace introuvable.'];
+                goto end;
+            }
+            if (!empty($espaceRow['gerant_externe'])) {
                 $msg = ['err', 'Cet espace est géré par un tiers — la réservation ne peut pas être enregistrée ici.'];
                 goto end;
             }
@@ -117,13 +141,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $quantite = $estSejour ? max(1, (int)($_POST['quantite'] ?? 1)) : 1;
 
             if ($estSejour) {
-                if (!$dateDepart || $dateDepart <= $dateResa) {
+                $dateDepartObj = DateTime::createFromFormat('!Y-m-d', $dateDepart);
+                if (!$dateDepartObj || $dateDepartObj->format('Y-m-d') !== $dateDepart || $dateDepart <= $dateResa) {
                     $msg = ['err', 'La date de départ doit être après la date d\'arrivée.'];
                     goto end;
                 }
             } else {
                 if (!$heureD || !$heureF) {
                     $msg = ['err', 'Espace, date et horaires sont obligatoires.'];
+                    goto end;
+                }
+                $erreurHoraire = horaire_reservation_erreur($heureD, $heureF);
+                if ($erreurHoraire !== null) {
+                    $msg = ['err', $erreurHoraire];
                     goto end;
                 }
             }
@@ -153,8 +183,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 
             $resaId = (int)$pdo->lastInsertId();
-            attribuer_partenaire_reservation($pdo, $resaId, (int)$userId); // client partenaire : réservation attribuée
-            // Tarif normal (avant toute réduction) figé dès la saisie guichet
+            attribuer_partenaire_reservation($pdo, $resaId, (int)$userId);
             figer_montant_initial($pdo, $resaId);
             $estComptable = (($_SESSION['role'] ?? '') === 'admin_comptable');
             if (!$estComptable) {
@@ -202,7 +231,6 @@ require __DIR__ . '/_admin_header.php';
 
 <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
-  <!-- Formulaire -->
   <div class="lg:col-span-2 min-w-0">
     <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
       <div class="px-6 py-4 border-b border-slate-100 bg-slate-50">
@@ -215,7 +243,6 @@ require __DIR__ . '/_admin_header.php';
         <input type="hidden" name="action"     value="create_guichet">
         <input type="hidden" name="user_id"    id="selectedUserId" value="0">
 
-        <!-- Recherche client -->
         <div>
           <label class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Rechercher un client existant</label>
           <div class="relative">
@@ -237,7 +264,6 @@ require __DIR__ . '/_admin_header.php';
           </div>
         </div>
 
-        <!-- Nouveau client -->
         <div id="newClientFields">
           <label class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Ou créer un nouveau client</label>
           <div class="grid sm:grid-cols-3 gap-4">
@@ -251,7 +277,6 @@ require __DIR__ . '/_admin_header.php';
           </div>
         </div>
 
-        <!-- Téléphone -->
         <div>
           <label class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Téléphone</label>
           <div class="relative">
@@ -261,7 +286,6 @@ require __DIR__ . '/_admin_header.php';
           </div>
         </div>
 
-        <!-- Espace -->
         <div>
           <label class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Espace <span class="text-accent">*</span></label>
           <div class="relative">
@@ -277,13 +301,11 @@ require __DIR__ . '/_admin_header.php';
           </div>
         </div>
 
-        <!-- Tarifs -->
         <div id="tarifSection" class="hidden">
           <label class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Tarif</label>
           <div id="tarifGrid" class="grid gap-2"></div>
         </div>
 
-        <!-- Date + Horaires (mode créneau) -->
         <div id="creneauFields" class="grid sm:grid-cols-3 gap-4">
           <div>
             <label class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Date <span class="text-accent">*</span></label>
@@ -311,7 +333,6 @@ require __DIR__ . '/_admin_header.php';
           <span class="text-xs font-black text-slate-700">Accueil VIP <span id="vipPrixGuichet" class="text-slate-400 font-normal"></span></span>
         </label>
 
-        <!-- Séjour (arrivée/départ + petit-déjeuner) -->
         <div id="sejourFields" class="hidden grid sm:grid-cols-2 gap-4">
           <div>
             <label class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Arrivée <span class="text-accent">*</span></label>
@@ -339,7 +360,6 @@ require __DIR__ . '/_admin_header.php';
           </label>
         </div>
 
-        <!-- Vérification de disponibilité (même règle que l'enregistrement) -->
         <div>
           <button type="button" onclick="verifierDisponibilite()"
                   class="flex items-center justify-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-black uppercase px-4 py-2.5 rounded-xl transition">
@@ -348,7 +368,6 @@ require __DIR__ . '/_admin_header.php';
           <div id="resultatDispo" class="hidden mt-3 rounded-xl border p-3 text-xs font-bold"></div>
         </div>
 
-        <!-- Motif -->
         <div>
           <label class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Motif</label>
           <textarea name="motif" rows="2" placeholder="Objet de la réservation..."
@@ -372,7 +391,6 @@ require __DIR__ . '/_admin_header.php';
     </div>
   </div>
 
-  <!-- Réservations récentes -->
   <div>
     <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden sticky top-24">
       <div class="px-5 py-4 border-b border-slate-100 bg-slate-50">
@@ -388,7 +406,7 @@ require __DIR__ . '/_admin_header.php';
           <div class="px-4 py-3 hover:bg-slate-50 transition">
             <div class="flex items-start gap-3">
               <div class="w-8 h-8 bg-primary/10 rounded-xl flex items-center justify-center font-black text-primary text-xs flex-shrink-0">
-                <?= strtoupper(substr($r['nom_complet'],0,1)) ?>
+                <?= e(mb_strtoupper(mb_substr((string)$r['nom_complet'], 0, 1))) ?>
               </div>
               <div class="flex-1 min-w-0">
                 <p class="font-black text-primary text-xs truncate"><?= e($r['nom_complet']) ?></p>
@@ -402,7 +420,6 @@ require __DIR__ . '/_admin_header.php';
                 </p>
               </div>
               <?php
-                // État financier calculé (même libellé que la comptabilité)
                 $sfG = situation_financiere_reservation($pdo, (int)$r['id']);
                 [$etatG, $clsG] = libelle_etat_financier($sfG['etat'] ?? '');
               ?>
@@ -423,6 +440,7 @@ require __DIR__ . '/_admin_header.php';
 </div>
 
 <script>
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
 const tarifsData  = <?= json_encode($tarifsData) ?>;
 const espacesModes = <?= json_encode(array_column($espaces, 'mode_reservation', 'id')) ?>;
 const espacesPetitDej = <?= json_encode(array_column($espaces, 'option_petit_dejeuner', 'id')) ?>;
@@ -519,7 +537,7 @@ function loadTarifs(espaceId) {
         lbl.innerHTML = `
             <div class="flex items-center gap-3">
                 <input type="radio" name="tarif_id" value="${t.id}" ${i===0?'checked':''} onchange="updateQuantiteMaxGuichet(${espaceId})" class="w-4 h-4 accent-primary">
-                <span class="text-xs font-black text-slate-700">${t.libelle}</span>
+                <span class="text-xs font-black text-slate-700">${esc(t.libelle)}</span>
             </div>
             <span class="text-sm font-black text-primary">${new Intl.NumberFormat('fr-FR').format(t.montant)} <span class="text-[10px] text-slate-400 font-normal">FCFA/${t.unite}</span></span>`;
         grid.appendChild(lbl);
@@ -544,7 +562,7 @@ function searchClient(q) {
                     data.forEach(u => {
                         const div = document.createElement('div');
                         div.className = 'flex items-center gap-3 px-4 py-3 hover:bg-primary/5 cursor-pointer border-b border-slate-50 transition';
-                        div.innerHTML = `<div class="w-8 h-8 bg-primary rounded-xl flex items-center justify-center font-black text-white text-xs">${u.nom_complet[0].toUpperCase()}</div><div><p class="font-black text-primary text-sm">${u.nom_complet}</p><p class="text-xs text-slate-500">${u.email}</p></div>`;
+                        div.innerHTML = `<div class="w-8 h-8 bg-primary rounded-xl flex items-center justify-center font-black text-white text-xs">${esc((u.nom_complet || '?').charAt(0).toUpperCase())}</div><div><p class="font-black text-primary text-sm">${esc(u.nom_complet)}</p><p class="text-xs text-slate-500">${esc(u.email)}</p></div>`;
                         div.onclick = () => selectClient(u);
                         results.appendChild(div);
                     });

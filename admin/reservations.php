@@ -4,15 +4,12 @@ require_once __DIR__ . '/../includes/auth.php';
 require_role(['admin_espaces','admin_comptable','ministre']);
 expirer_reservations_non_payees();
 
-// Seul admin_espaces (+ superadmin) peut valider/refuser/annuler.
-// Comptable et ministre ont un accès en lecture seule à cette page.
 $role     = $_SESSION['role'] ?? '';
 $readonly = is_readonly_admin();
 
 $pdo = db();
 $msg = null;
 
-// --- TRAITEMENT DES ACTIONS (admin_espaces / superadmin uniquement) ---
 if (!$readonly && isset($_POST['action'])) {
     if (!csrf_check($_POST['csrf_token'] ?? '')) {
         $msg = ['error', 'Requête invalide.'];
@@ -30,12 +27,6 @@ if (!$readonly && isset($_POST['action'])) {
             goto finValider;
         }
 
-        /*
-         * Réservation issue d'une réquisition (nouvelle date / autre espace) :
-         * même validation par admin_espaces, mais faite dans une transaction
-         * qui vérifie la réquisition et rattache les paiements déjà encaissés
-         * sur la réservation d'origine (aucun nouvel encaissement n'est créé).
-         */
         if (!empty($resa['requisition_id'])) {
             $reqIdVal = (int)$resa['requisition_id'];
             try {
@@ -71,13 +62,10 @@ if (!$readonly && isset($_POST['action'])) {
                 $pdo->prepare("UPDATE reservations SET statut = 'validee', date_validation = NOW(), notification_vue = 0 WHERE id = ?")
                     ->execute([$id]);
 
-                // Tarif normal figé avant le rattachement des paiements
                 figer_montant_initial($pdo, $id);
 
                 $transfert = transferer_paiements_requisition($pdo, $id);
 
-                // Comme après un encaissement : les autres demandes validées non payées
-                // sur ce créneau sont départagées (mode créneau uniquement).
                 $annulees = ($transfert['transfere'] > 0 && empty($resa['date_depart']))
                     ? annuler_reservations_concurrentes($pdo, $id)
                     : [];
@@ -88,8 +76,7 @@ if (!$readonly && isset($_POST['action'])) {
 
             } catch (Throwable $e) {
                 if ($pdo->inTransaction()) $pdo->rollBack();
-                $msg = ['error', $e instanceof RuntimeException ? e($e->getMessage()) : 'Validation impossible : erreur technique.'];
-                if (!$e instanceof RuntimeException) error_log('Validation réservation réquisition #' . $id . ' : ' . $e->getMessage());
+                $msg = ['error', e(message_erreur($e, 'Validation impossible : erreur technique.'))];
                 goto finValider;
             }
 
@@ -113,8 +100,6 @@ if (!$readonly && isset($_POST['action'])) {
                     "requisition-detail.php?id=$reqIdVal"
                 );
             } elseif (($sfB = situation_financiere_reservation($pdo, $id)) && $sfB['total_paye'] > 0) {
-                // Revalidation : les paiements avaient déjà été rattachés à B lors
-                // d'une validation précédente (aucun nouveau transfert).
                 $montantAPayer = $sfB['solde'];
                 $suiteClient = " Les paiements déjà rattachés ({$fmt($sfB['paye_net'])} FCFA) restent acquis"
                     . ($sfB['solde'] > 0 ? " : il reste {$fmt($sfB['solde'])} FCFA à régler au guichet." : ' : aucun nouveau paiement n\'est nécessaire.');
@@ -124,8 +109,6 @@ if (!$readonly && isset($_POST['action'])) {
                     "paiements.php?resa=$id"
                 );
             } else {
-                // Réservation initiale non payée : aucun transfert, aucun
-                // remboursement ; paiement attendu dans le délai habituel de 48 h.
                 $montantAPayer = $sfB ? $sfB['solde'] : 0.0;
                 $mentionTarif = ($sfB && $sfB['prise_en_charge_requisition'])
                     ? " (tarif de votre réservation initiale maintenu)"
@@ -166,7 +149,6 @@ if (!$readonly && isset($_POST['action'])) {
             $msg = ['error', 'Cette demande n\'est plus en attente de validation.'];
             goto finValider;
         }
-        // Tarif normal (avant toute réduction) figé à la validation
         figer_montant_initial($pdo, $id);
         log_activity('reservation_validee','reservations','Réservation #'.($id??0).' validée');
 
@@ -188,8 +170,6 @@ if (!$readonly && isset($_POST['action'])) {
         finValider:
 
     } elseif ($action === 'refuser') {
-        // Réservation B issue d'une réquisition : pas de refus si elle porte des
-        // paiements (transférés ou encaissés) ni si la réquisition est clôturée.
         $chkReq = $pdo->prepare("SELECT r.requisition_id FROM reservations r WHERE r.id = ?");
         $chkReq->execute([$id]);
         $chkReq = $chkReq->fetch();
@@ -231,24 +211,18 @@ if (!$readonly && isset($_POST['action'])) {
         finRefus:
 
     } elseif ($action === 'annuler') {
-        // Une réservation réquisitionnée ne revient jamais « en attente » :
-        // son devenir est géré par la réquisition.
         $chkStatut = $pdo->prepare("SELECT statut FROM reservations WHERE id = ?");
         $chkStatut->execute([$id]);
         if ($chkStatut->fetchColumn() === 'requisitionnee') {
             $msg = ['error', 'Une réservation réquisitionnée ne peut pas être remise en attente : son traitement se fait depuis la réquisition.'];
             goto finAnnuler;
         }
-        // Réservation B issue d'une réquisition : pas de remise en attente si
-        // elle porte des paiements, si la réquisition est clôturée, ou si elle
-        // a été refusée / a expiré (le client dépose une nouvelle demande).
         if ($blocageB = reservation_requisition_blocage($pdo, $id, 'annuler')) {
             $msg = ['error', $blocageB];
             goto finAnnuler;
         }
         $stmt = $pdo->prepare("UPDATE reservations SET statut = 'en_attente', notification_vue = 0 WHERE id = ?");
         $stmt->execute([$id]); log_activity('reservation_en_attente','reservations','Réservation #'.($id??0).' remise en attente');
-        // Compte partenaire : informé que sa réservation repasse en attente de validation
         if (partenaires_disponibles($pdo) && $stmt->rowCount() === 1) {
             $resaAtt = $pdo->prepare("SELECT r.user_id, r.partenaire_id, r.date_resa, e.nom AS espace_nom FROM reservations r JOIN espaces e ON e.id = r.espace_id WHERE r.id = ?");
             $resaAtt->execute([$id]);
@@ -263,7 +237,6 @@ if (!$readonly && isset($_POST['action'])) {
         $msg = ['ok', 'La demande est de nouveau en attente.'];
         finAnnuler:
     } elseif ($action === 'supprimer') {
-        // Suppression définitive d'une erreur ou d'un test : Direction uniquement
         if (!is_superadmin()) {
             $msg = ['error', 'Seule la Direction peut supprimer une réservation.'];
         } elseif (!dossier_reservation($pdo, $id)) {
@@ -321,8 +294,6 @@ if (!$readonly && isset($_POST['action'])) {
     }
 }
 
-// --- RÉCUPÉRATION DES DONNÉES (Correction de u.nom -> u.nom_complet) ---
-// Filtres simples : canal (existant), statut, client / téléphone / n°, salle, date
 $statutsFiltre = ['en_attente' => 'En attente', 'validee' => 'Validées', 'refusee' => 'Refusées',
                   'annulee' => 'Annulées', 'expiree' => 'Expirées', 'requisitionnee' => 'Réquisitionnées'];
 $filterCanal  = in_array($_GET['canal'] ?? '', ['en_ligne','guichet'], true) ? $_GET['canal'] : '';
@@ -335,7 +306,6 @@ if (!$dObj || $dObj->format('Y-m-d') !== $filterDate) {
     $filterDate = '';
 }
 
-// Partenaires : filtre « type de client » (réservations partenaires / classiques)
 $partenairesActifs = partenaires_disponibles($pdo);
 $listePartenaires  = $partenairesActifs ? $pdo->query("SELECT id, nom FROM partenaires ORDER BY nom")->fetchAll() : [];
 $filterPartenaire  = (string)($_GET['partenaire'] ?? '');
@@ -352,7 +322,6 @@ if ($filterCanal)  { $whereResa[] = 'r.canal = ?';     $paramsResa[] = $filterCa
 if ($filterStatut) { $whereResa[] = 'r.statut = ?';    $paramsResa[] = $filterStatut; }
 if ($filterEspace) { $whereResa[] = 'r.espace_id = ?'; $paramsResa[] = $filterEspace; }
 if ($filterDate) {
-    // Date couverte par la réservation (créneau : le jour ; séjour : de l'arrivée à la veille du départ)
     $whereResa[] = '(r.date_resa = ? OR (r.date_depart IS NOT NULL AND r.date_resa <= ? AND r.date_depart > ?))';
     array_push($paramsResa, $filterDate, $filterDate, $filterDate);
 }
@@ -378,13 +347,11 @@ $stmtResa = $pdo->prepare("
     " . ($partenairesActifs ? "LEFT JOIN partenaires pa ON pa.id = r.partenaire_id" : "") . "
     " . ($whereResa ? 'WHERE ' . implode(' AND ', $whereResa) : '') . "
     ORDER BY " . ($partenairesActifs
-        // Priorité de traitement : les demandes partenaires en attente remontent en tête (même circuit de validation)
         ? "(r.statut = 'en_attente' AND r.partenaire_id IS NOT NULL) DESC, "
         : "") . "r.created_at DESC
 ");
 $stmtResa->execute($paramsResa);
 $reservations = $stmtResa->fetchAll();
-// Références de dossier (RESA-B · REQ-X · issue de RESA-A) en une requête
 $refsListe = references_dossiers($pdo, array_column($reservations, 'id'));
 
 $espacesFiltre = $pdo->query("SELECT id, nom FROM espaces ORDER BY nom")->fetchAll();
@@ -446,7 +413,6 @@ require __DIR__ . '/_admin_header.php';
         </div>
     <?php endif; ?>
 
-    <!-- Recherche -->
     <form method="GET" class="grid grid-cols-2 md:grid-cols-5 gap-2 mb-5">
         <?php if ($filterCanal): ?><input type="hidden" name="canal" value="<?= e($filterCanal) ?>"><?php endif; ?>
         <div class="relative col-span-2">
@@ -527,7 +493,6 @@ require __DIR__ . '/_admin_header.php';
                         </div>
                         <?php if (!empty($res['requisition_id'])): ?>
                             <?php
-                            // Tarif garanti : ce que le client paiera réellement si cette demande est acceptée
                             $maintienTarif = $res['statut'] === 'en_attente' ? estimation_maintien_tarif($pdo, (int)$res['id']) : null;
                             if ($maintienTarif && $maintienTarif['prise_en_charge'] > 0):
                             ?>
@@ -620,8 +585,6 @@ require __DIR__ . '/_admin_header.php';
                             <input type="hidden" name="id" value="<?= $res['id'] ?>">
 
                             <?php
-                                // Réservation B : refus / remise en attente bloqués côté serveur
-                                // (paiements, réquisition clôturée) — boutons masqués en conséquence.
                                 $blocageRefus = !empty($res['requisition_id']) ? reservation_requisition_blocage($pdo, (int)$res['id'], 'refuser') : null;
                                 $blocageAnnul = !empty($res['requisition_id']) ? reservation_requisition_blocage($pdo, (int)$res['id'], 'annuler') : null;
                             ?>

@@ -5,9 +5,6 @@ require_once __DIR__ . '/includes/auth.php';
 
 $pdo = db();
 
-/**
- * RÉCUPÉRATION DES DONNÉES
- */
 $espaces = $pdo->query("
     SELECT e.id, e.slug, e.nom, e.capacite, c.nom AS categorie,
            (SELECT chemin FROM espace_images WHERE espace_id = e.id ORDER BY id ASC LIMIT 1) as photo
@@ -42,15 +39,12 @@ function initiales($nom) {
     return mb_substr($init, 0, 3);
 }
 
-$pageTitle = "Accueil — Palais des Pionniers du Mali";
+$pageTitle = "Accueil | Palais des Pionniers du Mali";
 $page = 'index.php';
 
 require __DIR__ . '/includes/header.php';
 ?>
 
-<!-- ============================================
-     1. HERO SECTION
-     ============================================ -->
 
 <?php
 $heroSlidesTextes = [
@@ -60,7 +54,7 @@ $heroSlidesTextes = [
     ],
     [
         'titre' => 'Ta Place <br><span class="text-accent italic">T\'Attend</span>',
-        'sujet' => "Sport, formation, civisme — rejoins-nous."
+        'sujet' => "Sport, formation, civisme : rejoins-nous."
     ],
     [
         'titre' => 'Bâtir le Mali <br><span class="text-accent italic">de Demain</span>',
@@ -98,7 +92,6 @@ $heroSlidesTextes = [
 
     </div>
 
-    <!-- Points de navigation du carrousel -->
     <div class="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 flex gap-2">
 
         <?php foreach ($slides as $index => $src): ?>
@@ -182,10 +175,6 @@ $heroSlidesTextes = [
 </section>
 
 
-<!-- ============================================
-     1bis. CHIFFRES CLÉS
-     ============================================ -->
-
 <section class="bg-white border-b border-slate-100 relative z-20 -mt-1">
 
     <div class="container mx-auto px-4">
@@ -231,10 +220,6 @@ $heroSlidesTextes = [
 </section>
 
 
-<!-- ============================================
-     2. DESCRIPTION GÉNÉRALE
-     ============================================ -->
-
 <?php
 
 $presentationSlides = [
@@ -246,6 +231,7 @@ $presentationSlides = [
     'assets/images/description/description-6.jpg',
     'assets/images/description/description-7.jpg',
 ];
+$presentationSlides = array_values(array_filter($presentationSlides, fn($img) => is_file(__DIR__ . '/' . $img)));
 
 ?>
 
@@ -335,9 +321,6 @@ $dMin = $direction['ministre'] ?? null;
 if ($dMin):
 ?>
 
-<!-- ============================================
-     3. MESSAGE DU MINISTRE
-     ============================================ -->
 
 <section class="py-10 sm:py-24 bg-primary relative overflow-hidden text-white">
 
@@ -430,10 +413,6 @@ if ($dMin):
 <?php endif; ?>
 
 
-<!-- ============================================
-     4. MISSIONS & HORIZON 2028
-     ============================================ -->
-
 <section class="py-14 sm:py-24 bg-slate-900 text-white">
 
     <div class="container mx-auto px-4">
@@ -454,8 +433,6 @@ if ($dMin):
 
         </div>
 
-
-        <!-- Mobile : carrousel tactile -->
 
         <div class="sm:hidden flex overflow-x-auto snap-x snap-mandatory gap-4 pb-4 -mx-4 px-4 scrollbar-hide">
 
@@ -544,8 +521,6 @@ if ($dMin):
 
         </div>
 
-
-        <!-- Desktop : grille pleine largeur -->
 
         <div class="hidden sm:grid sm:grid-cols-3 gap-8">
 
@@ -657,9 +632,6 @@ $dDg = $direction['dg'] ?? null;
 if ($dDg):
 ?>
 
-<!-- ============================================
-     5. MESSAGE DU DIRECTEUR GÉNÉRAL
-     ============================================ -->
 
 <section class="py-10 sm:py-24 bg-slate-50">
 
@@ -756,10 +728,6 @@ if ($dDg):
 
 <?php endif; ?>
 
-
-<!-- ============================================
-     5bis. MESSAGE DU DIRECTEUR GÉNÉRAL ADJOINT
-     ============================================ -->
 
 <?php
 $dDga = $direction['dga'] ?? null;
@@ -915,9 +883,6 @@ $dDga = $direction['dga'] ?? null;
 
     ?>
 
-    <!-- ============================================
-         5ter. TEASER PERSONNALITÉS
-         ============================================ -->
 
     <section class="relative py-16 sm:py-20 bg-primary text-white overflow-hidden">
 
@@ -980,10 +945,6 @@ $dDga = $direction['dga'] ?? null;
 <?php endif; ?>
 
 
-<!-- ============================================
-     6. NOS ESPACES
-     ============================================ -->
-
 <section class="py-24 bg-white">
 
     <div class="container mx-auto px-4">
@@ -1030,7 +991,7 @@ $dDga = $direction['dga'] ?? null;
                         <?php if ($e['photo']): ?>
 
                             <img
-                                src="uploads/<?= $e['photo'] ?>"
+                                src="uploads/<?= e($e['photo']) ?>" alt="<?= e($e['nom']) ?>"
                                 class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
                             >
 
@@ -1044,7 +1005,7 @@ $dDga = $direction['dga'] ?? null;
 
 
                         <span class="absolute right-1.5 sm:right-4 top-1.5 sm:top-4 rounded-full bg-white/95 px-1.5 sm:px-3 py-0.5 sm:py-1.5 text-[7px] sm:text-[10px] font-black uppercase tracking-widest text-primary shadow-sm">
-                            <?= $e['categorie'] ?>
+                            <?= e($e['categorie']) ?>
                         </span>
 
                     </div>
@@ -1053,11 +1014,11 @@ $dDga = $direction['dga'] ?? null;
                     <div class="flex flex-1 flex-col p-3 sm:p-6">
 
                         <h3 class="text-sm sm:text-xl font-black text-slate-900 uppercase italic tracking-tighter transition-colors group-hover:text-primary">
-                            <?= $e['nom'] ?>
+                            <?= e($e['nom']) ?>
                         </h3>
 
                         <p class="mt-1 sm:mt-2 text-[9px] sm:text-xs font-bold text-slate-400 uppercase tracking-widest italic">
-                            <?= $e['capacite'] ?>
+                            <?= e($e['capacite']) ?>
                         </p>
 
                         <div class="mt-auto pt-3 sm:pt-6 inline-flex w-full items-center justify-center rounded-lg border border-slate-300 px-2 sm:px-4 py-1.5 sm:py-2 text-[9px] sm:text-[10px] font-black uppercase tracking-[0.1em] sm:tracking-[0.15em] transition-all group-hover:bg-black group-hover:border-black group-hover:text-white">
@@ -1076,10 +1037,6 @@ $dDga = $direction['dga'] ?? null;
 
 </section>
 
-
-<!-- ============================================
-     6bis. VIE AU PALAIS
-     ============================================ -->
 
 <?php
 
@@ -1120,11 +1077,9 @@ $viePalaisSlides = [
     </div>
 
 
-    <!-- Voile sombre sur les images -->
     <div class="absolute inset-0 bg-slate-900/60 z-10"></div>
 
 
-    <!-- Texte -->
     <div class="absolute inset-0 z-20 flex items-center justify-center px-4 text-center">
 
         <div>
@@ -1155,7 +1110,6 @@ $viePalaisSlides = [
     </div>
 
 
-    <!-- Points de navigation -->
     <div class="absolute bottom-5 left-1/2 -translate-x-1/2 z-30 flex gap-2">
 
         <?php foreach ($viePalaisSlides as $index => $src): ?>
@@ -1173,9 +1127,6 @@ $viePalaisSlides = [
     </div>
 
 </section>
-<!-- ============================================
-     7. CTA FINAL
-     ============================================ -->
 
 <section class="py-10 sm:py-20">
 
@@ -1214,10 +1165,6 @@ $viePalaisSlides = [
 
 </section>
 
-
-<!-- ============================================
-     BANNIÈRE S'ENGAGER
-     ============================================ -->
 
 <section class="py-14 sm:py-24 relative overflow-hidden">
 
@@ -1260,9 +1207,6 @@ $viePalaisSlides = [
 
 document.addEventListener("DOMContentLoaded", function() {
 
-    /* ==========================================
-       CARROUSEL PRÉSENTATION
-       ========================================== */
 
     const presSlides = document.querySelectorAll('.carousel-img-presentation');
 
@@ -1282,10 +1226,6 @@ document.addEventListener("DOMContentLoaded", function() {
 
     }
 
-
-    /* ==========================================
-       HERO CAROUSEL
-       ========================================== */
 
     const slides = document.querySelectorAll('.carousel-img');
     const dots = document.querySelectorAll('.carousel-dot');
@@ -1374,10 +1314,6 @@ document.addEventListener("DOMContentLoaded", function() {
     }
 
 
-    /* ==========================================
-       VIE AU PALAIS
-       ========================================== */
-
     const viePalaisSlides = document.querySelectorAll('.vie-palais-slide');
     const viePalaisDots = document.querySelectorAll('.vie-palais-dot');
 
@@ -1445,10 +1381,6 @@ document.addEventListener("DOMContentLoaded", function() {
     }
 
 
-    /* ==========================================
-       SCROLL REVEAL
-       ========================================== */
-
     const observer = new IntersectionObserver((entries) => {
 
         entries.forEach(entry => {
@@ -1489,10 +1421,6 @@ document.addEventListener("DOMContentLoaded", function() {
 
     });
 
-
-    /* ==========================================
-       COMPTEURS ANIMÉS
-       ========================================== */
 
     const counters = document.querySelectorAll('.counter');
 
@@ -1560,7 +1488,6 @@ document.addEventListener("DOMContentLoaded", function() {
 
 <?php
 require __DIR__ . '/includes/suggestion-bulle.php';
-// boîte à suggestions anonyme
 ?>
 
 <?php

@@ -11,11 +11,6 @@ try {
     die('Erreur de connexion.');
 }
 
-/*
-|--------------------------------------------------------------------------
-| Récupération du slug
-|--------------------------------------------------------------------------
-*/
 $slug = trim($_GET['slug'] ?? '');
 
 if ($slug === '') {
@@ -23,11 +18,6 @@ if ($slug === '') {
     exit;
 }
 
-/*
-|--------------------------------------------------------------------------
-| Récupération de l'activité
-|--------------------------------------------------------------------------
-*/
 $stmt = $pdo->prepare('SELECT * FROM activites WHERE slug = ? LIMIT 1');
 $stmt->execute([$slug]);
 $activite = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -37,12 +27,6 @@ if (!$activite) {
     exit;
 }
 
-/*
-|--------------------------------------------------------------------------
-| Photos de galerie
-|--------------------------------------------------------------------------
-| Les photos restent dans l'ordre défini dans l'administration.
-*/
 $stmtPh = $pdo->prepare('
     SELECT image_path
     FROM activite_galerie
@@ -56,12 +40,6 @@ $photosGalerie = array_column(
     'image_path'
 );
 
-/*
-|--------------------------------------------------------------------------
-| Toutes les photos
-|--------------------------------------------------------------------------
-| La photo principale reste la première photo du hero.
-*/
 $toutesLesPhotos = [];
 
 $imagePrincipale = trim($activite['image_principale'] ?? '');
@@ -83,11 +61,6 @@ foreach ($photosGalerie as $photo) {
     }
 }
 
-/*
-|--------------------------------------------------------------------------
-| Liens utiles
-|--------------------------------------------------------------------------
-*/
 $stmtLiens = $pdo->prepare('
     SELECT *
     FROM activite_liens
@@ -96,19 +69,10 @@ $stmtLiens = $pdo->prepare('
 ');
 $stmtLiens->execute([$activite['id']]);
 $liens = $stmtLiens->fetchAll(PDO::FETCH_ASSOC);
+$liens = array_values(array_filter($liens, fn($l) => url_web_valide((string)($l['url'] ?? ''))));
 
-/*
-|--------------------------------------------------------------------------
-| Couleur activité
-|--------------------------------------------------------------------------
-*/
 $accent = trim($activite['couleur'] ?? '') ?: '#E61E2A';
 
-/*
-|--------------------------------------------------------------------------
-| Images de la mosaïque et du carrousel inférieur
-|--------------------------------------------------------------------------
-*/
 $photosMosaique = array_slice($toutesLesPhotos, 0, 3);
 $photosCarrousel = array_slice($toutesLesPhotos, 3);
 ?>
@@ -140,10 +104,6 @@ $photosCarrousel = array_slice($toutesLesPhotos, 3);
             z-index: 1000;
         }
 
-        /*
-        Cette règle force les longues chaînes sans espace à revenir à la ligne.
-        Exemple : nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn
-        */
         .activity-description {
             max-width: 100%;
             overflow-wrap: anywhere;
@@ -160,7 +120,6 @@ $photosCarrousel = array_slice($toutesLesPhotos, 3);
     }
     ?>
 
-    <!-- Retour -->
     <div class="container mx-auto px-4 sm:px-6 pt-4 sm:pt-6">
         <a
             href="activites.php"
@@ -171,7 +130,6 @@ $photosCarrousel = array_slice($toutesLesPhotos, 3);
         </a>
     </div>
 
-    <!-- HERO : CONSERVÉ DANS LE FORMAT ORIGINAL -->
     <section class="relative h-[28vh] sm:h-[45vh] flex items-center bg-[#0a214a] overflow-hidden">
 
         <?php if ($toutesLesPhotos): ?>
@@ -198,7 +156,6 @@ $photosCarrousel = array_slice($toutesLesPhotos, 3);
         </div>
     </section>
 
-    <!-- PRÉSENTATION -->
     <section class="py-8 sm:py-16">
         <div class="container mx-auto px-4 sm:px-6">
 
@@ -206,14 +163,8 @@ $photosCarrousel = array_slice($toutesLesPhotos, 3);
 
                 <?php if (count($photosMosaique) >= 2): ?>
 
-                    <!--
-                    Mobile : une colonne.
-                    À partir de md : deux colonnes.
-                    L'espace entre texte et photos augmente selon l'écran.
-                    -->
                     <div class="grid grid-cols-1 items-start gap-y-8 md:grid-cols-2 md:gap-x-12 lg:gap-x-20 xl:gap-x-24">
 
-                        <!-- Colonne gauche : texte -->
                         <div class="min-w-0 max-w-full">
 
                             <?php if (!empty($activite['sous_titre'])): ?>
@@ -231,7 +182,6 @@ $photosCarrousel = array_slice($toutesLesPhotos, 3);
                                 </div>
                             <?php endif; ?>
 
-                            <!-- Chiffres clés : sous le texte -->
                             <?php if (!empty($activite['chiffres_cles'])): ?>
                                 <div
                                     class="mt-6 sm:mt-8 rounded-2xl border-l-4 bg-white px-5 py-4 shadow-sm"
@@ -251,7 +201,6 @@ $photosCarrousel = array_slice($toutesLesPhotos, 3);
                                 </div>
                             <?php endif; ?>
 
-                            <!-- Liens : sous chiffres clés -->
                             <?php if ($liens): ?>
                                 <div class="mt-6 sm:mt-8 flex flex-wrap gap-3">
                                     <?php foreach ($liens as $l): ?>
@@ -272,7 +221,6 @@ $photosCarrousel = array_slice($toutesLesPhotos, 3);
                             <?php endif; ?>
                         </div>
 
-                        <!-- Colonne droite : mosaïque -->
                         <div class="grid min-w-0 grid-cols-2 gap-3 sm:gap-4">
 
                             <?php foreach ($photosMosaique as $i => $p): ?>
@@ -302,7 +250,6 @@ $photosCarrousel = array_slice($toutesLesPhotos, 3);
 
                 <?php else: ?>
 
-                    <!-- Cas : moins de deux photos -->
                     <div class="max-w-3xl">
 
                         <?php if (!empty($activite['sous_titre'])): ?>
@@ -360,9 +307,6 @@ $photosCarrousel = array_slice($toutesLesPhotos, 3);
                     </div>
 
                     <?php
-                    /*
-                    Une seule photo : on l'affiche dans le carrousel inférieur.
-                    */
                     ?>
                     <?php if ($photosMosaique && !$photosCarrousel): ?>
                         <?php $photosCarrousel = $photosMosaique; ?>
@@ -370,7 +314,6 @@ $photosCarrousel = array_slice($toutesLesPhotos, 3);
 
                 <?php endif; ?>
 
-                <!-- CARROUSEL INFÉRIEUR : uniquement les photos restantes -->
                 <?php if ($photosCarrousel): ?>
                     <div class="relative rounded-2xl sm:rounded-[2rem] overflow-hidden h-[38vh] min-h-[260px] sm:h-[55vh] sm:min-h-[420px] bg-slate-100">
 
@@ -401,7 +344,7 @@ $photosCarrousel = array_slice($toutesLesPhotos, 3);
                                 <?php foreach ($photosCarrousel as $i => $p): ?>
                                     <span
                                         class="content-dot h-1.5 rounded-full transition-all <?= $i === 0 ? 'w-6' : 'w-1.5 bg-white/50' ?>"
-                                        style="<?= $i === 0 ? "background:$accent" : '' ?>"
+                                        style="<?= $i === 0 ? "background:" . e($accent) : '' ?>"
                                     ></span>
                                 <?php endforeach; ?>
                             </div>
@@ -413,7 +356,6 @@ $photosCarrousel = array_slice($toutesLesPhotos, 3);
         </div>
     </section>
 
-    <!-- CONTACT -->
     <section class="py-8 sm:py-20 bg-slate-50">
         <div class="container mx-auto px-4 sm:px-6">
             <div class="max-w-5xl mx-auto bg-white rounded-2xl sm:rounded-[3rem] shadow-2xl overflow-hidden flex flex-col md:flex-row">
@@ -493,11 +435,6 @@ $photosCarrousel = array_slice($toutesLesPhotos, 3);
     <script>
         document.addEventListener('DOMContentLoaded', function () {
 
-            /*
-            |--------------------------------------------------------------------------
-            | Lightbox galerie
-            |--------------------------------------------------------------------------
-            */
             var galleryLinks = document.querySelectorAll('.luminous-gallery');
 
             if (galleryLinks.length > 0) {
@@ -509,17 +446,14 @@ $photosCarrousel = array_slice($toutesLesPhotos, 3);
                     {
                         caption: function (trigger) {
                             var image = trigger.querySelector('img');
-                            return image ? image.getAttribute('alt') : '';
+                            var d = document.createElement('div');
+                            d.textContent = image ? image.getAttribute('alt') : '';
+                            return d.innerHTML;
                         }
                     }
                 );
             }
 
-            /*
-            |--------------------------------------------------------------------------
-            | Carrousel du hero : inchangé dans son fonctionnement
-            |--------------------------------------------------------------------------
-            */
             var detailSlides = document.querySelectorAll('.detail-slide');
             var detailDots = document.querySelectorAll('.detail-dot');
             var accentCouleur = <?= json_encode($accent) ?>;
@@ -550,11 +484,6 @@ $photosCarrousel = array_slice($toutesLesPhotos, 3);
                 }, 4000);
             }
 
-            /*
-            |--------------------------------------------------------------------------
-            | Carrousel inférieur
-            |--------------------------------------------------------------------------
-            */
             var contentSlides = document.querySelectorAll('.content-slide');
             var contentDots = document.querySelectorAll('.content-dot');
 

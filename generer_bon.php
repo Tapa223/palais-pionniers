@@ -17,15 +17,8 @@ $estAdminAutorise = in_array(
     true
 );
 
-// Compte partenaire : accès aux documents de toute son organisation
-// (réservations portant son partenaire_id), jamais d'une autre.
 $partenaireDocs = $role === 'partenaire' ? partenaire_utilisateur($pdo, (int)($_SESSION['user_id'] ?? 0)) : null;
 
-/*
-|--------------------------------------------------------------------------
-| OUTILS
-|--------------------------------------------------------------------------
-*/
 if (!function_exists('nombre_en_lettres')) {
     function nombre_en_lettres(int $n): string
     {
@@ -137,17 +130,8 @@ $modeLabels = [
     'cheque'       => 'Chèque',
 ];
 
-/*
-|--------------------------------------------------------------------------
-| 1. BON DE REMBOURSEMENT
-|--------------------------------------------------------------------------
-*/
 if ($type === 'remboursement') {
 
-    /*
-     * Le bon n'est disponible que lorsqu'un remboursement a réellement
-     * été effectué.
-     */
     $sql = "
         SELECT
             rb.*,
@@ -197,11 +181,6 @@ if ($type === 'remboursement') {
         exit('Bon de remboursement non disponible.');
     }
 
-    /*
-     * Sécurité :
-     * un client ne peut voir que son propre remboursement ; côté
-     * administration, seuls les rôles ayant accès à la comptabilité.
-     */
     $estAdminAutorise = in_array(
         $role,
         ['superadmin', 'admin_dg', 'ministre', 'admin_comptable'],
@@ -219,11 +198,6 @@ if ($type === 'remboursement') {
         exit('Accès refusé.');
     }
 
-    /*
-     * Références du dossier : réservation initiale (A), réquisition (X)
-     * et, pour un trop-perçu, la nouvelle réservation (B) qui a reçu
-     * les paiements transférés.
-     */
     $estTropPercuBon = in_array($remboursement['choix_client'] ?? '', ['nouvelle_date', 'autre_espace'], true);
     $nouvelleBon = null;
     $situationNouvelleBon = null;
@@ -247,10 +221,6 @@ if ($type === 'remboursement') {
     $refReqBon = ref_req(!empty($remboursement['requisition_id']) ? (int) $remboursement['requisition_id'] : null);
     $refNouvelleBon = $nouvelleBon ? ref_resa((int) $nouvelleBon['id']) : '';
 
-    /*
-     * Numéro du bon.
-     */
-    // Année du remboursement (et non l'année en cours)
     $numeroBon = 'BR-' . date('Y', strtotime($remboursement['date_traitement'] ?? $remboursement['created_at'] ?? 'now')) . '-' . str_pad(
         (string) $remboursement['id'],
         6,
@@ -280,10 +250,6 @@ if ($type === 'remboursement') {
         $remboursement['montant_rembourse'] ?? 0
     );
 
-    /*
-     * Par sécurité, si le montant réellement remboursé n'est pas renseigné,
-     * on affiche le montant à rembourser.
-     */
     if ($montantRembourse <= 0 && $montantARembourser > 0) {
         $montantRembourse = $montantARembourser;
     }
@@ -296,7 +262,6 @@ if ($type === 'remboursement') {
         : 'Non renseignée';
 
     if ($estTropPercuBon && $nouvelleBon) {
-        // Trop-perçu : l'argent a été transféré sur la nouvelle réservation B
         $objetRemboursement = 'Remboursement du trop-perçu de la nouvelle réservation ' . $refNouvelleBon
             . (!empty($nouvelleBon['espace_nom']) ? ' (' . $nouvelleBon['espace_nom'] . ' du ' . date('d/m/Y', strtotime($nouvelleBon['date_resa'])) . ')' : '')
             . ', établie suite à la réquisition ' . $refReqBon
@@ -347,7 +312,6 @@ if ($type === 'remboursement') {
 
         <link rel="stylesheet" href="assets/css/tailwind.css">
 
-        <!-- PDF -->
         <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 
         <style>
@@ -500,7 +464,6 @@ if ($type === 'remboursement') {
             class="max-w-2xl mx-auto bg-white p-6 md:p-10 rounded-none shadow-sm border-t-8 border-primary relative overflow-hidden"
         >
 
-            <!-- EN-TÊTE INSTITUTIONNEL -->
             <div class="flex justify-between items-start gap-4 pb-6 border-b-2 border-slate-800 mb-6">
 
                 <div class="text-[10px] leading-relaxed">
@@ -573,7 +536,6 @@ if ($type === 'remboursement') {
                 <?= e($objetRemboursement) ?>.
             </p>
 
-            <!-- TABLEAU DU REMBOURSEMENT -->
             <table class="w-full text-left text-sm border-collapse border border-slate-800 mb-6">
 
                 <thead>
@@ -654,7 +616,6 @@ if ($type === 'remboursement') {
 
             </table>
 
-            <!-- INFORMATIONS DU REMBOURSEMENT -->
             <div class="text-sm mb-8">
 
                 <p class="mb-2">
@@ -724,7 +685,6 @@ if ($type === 'remboursement') {
 
             </p>
 
-            <!-- SIGNATURES -->
             <div class="flex justify-between items-end mt-16 mb-6 text-sm">
 
                 <div class="text-center">
@@ -763,7 +723,6 @@ if ($type === 'remboursement') {
 
             </div>
 
-            <!-- TRACE MINIMALE -->
             <div class="text-[9px] text-slate-400 text-center border-t border-slate-200 pt-3">
 
                 <?php if (!empty($remboursement['requisition_id'])): ?>
@@ -802,7 +761,6 @@ if ($type === 'remboursement') {
 
             </div>
 
-            <!-- ACTIONS -->
             <div class="mt-10 flex flex-col md:flex-row justify-center gap-4 no-print">
 
                 <button
@@ -864,11 +822,6 @@ if ($type === 'remboursement') {
     exit;
 }
 
-/*
-|--------------------------------------------------------------------------
-| 2. FACTURE / BON DE RÉSERVATION
-|--------------------------------------------------------------------------
-*/
 
 $sql = "
     SELECT
@@ -938,19 +891,11 @@ if (!$bon) {
 
 $forceBon = isset($_GET['type']) && $_GET['type'] === 'bon';
 
-/*
- * Situation financière centrale : montant initial, réduction réellement
- * appliquée, net dû, payé, remboursé, solde et échéance. Une réduction
- * « non appliquée » ou « annulée » n'apparaît jamais sur les documents.
- */
 $sf = situation_financiere_reservation($pdo, $id);
 
-// Références du dossier : RESA-B, et pour une réservation issue d'une
-// réquisition, REQ-X et la réservation initiale RESA-A.
 $refsBon = references_dossier($pdo, $id);
 $refsBonRequisition = $refsBon['origine_id'] !== null;
 
-// Réservation d'un partenaire : nom du partenaire affiché sur le bon et la facture
 $partenaireBon = null;
 if (partenaires_disponibles($pdo)) {
     $stPb = $pdo->prepare("SELECT p.nom FROM reservations r JOIN partenaires p ON p.id = r.partenaire_id WHERE r.id = ?");
@@ -969,11 +914,6 @@ $estPartiel = (
 
 $from = $_GET['from'] ?? '';
 
-/*
-|--------------------------------------------------------------------------
-| PAIEMENTS
-|--------------------------------------------------------------------------
-*/
 
 $paiement = null;
 $tousLesPaiements = [];
@@ -1012,11 +952,6 @@ if ($estPaye || $estPartiel) {
     }
 }
 
-/*
-|--------------------------------------------------------------------------
-| VARIABLES
-|--------------------------------------------------------------------------
-*/
 
 $nomClient = $bon['client_nom'] ?: 'Client';
 
@@ -1041,23 +976,20 @@ $quantiteResa = max(
     (int) ($bon['quantite'] ?? 1)
 );
 
-// Montant initial (tarif normal figé), réduction appliquée et net dû
 $montantReferenceComplet = $sf['montant_initial'];
 
 $montantReductionFacture = $sf['montant_reduction'];
 
 $motifReductionFacture = $sf['reduction_appliquee']['motif'] ?? null;
 
-// Maintien du tarif suite à réquisition : ce n'est pas une remise commerciale
 $libelleReductionFacture = !empty($sf['prise_en_charge_requisition'])
     ? 'Maintien du tarif — réquisition #' . (int) $sf['requisition_id']
     : null;
 if ($libelleReductionFacture) {
-    $motifReductionFacture = null; // le libellé suffit (le détail reste dans l'historique comptable)
+    $motifReductionFacture = null;
 }
 
 if ($motifReductionFacture === null && $sf['reduction_historique'] > 0) {
-    // Ancien fonctionnement : motif porté par le paiement
     foreach ($tousLesPaiements as $pz) {
         if (!empty($pz['motif_reduction'])) {
             $motifReductionFacture = $pz['motif_reduction'];
@@ -1102,7 +1034,6 @@ $montantFinal = $sf['net_du'];
         href="assets/css/tailwind.css"
     >
 
-    <!-- PDF -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 
     <style>
@@ -1312,7 +1243,6 @@ $qteLigne = $estSejour
 
 ?>
 
-<!-- EN-TÊTE -->
 
 <div class="flex justify-between items-start gap-4 pb-6 border-b-2 border-slate-800 mb-6">
 
@@ -1624,9 +1554,6 @@ $qteLigne = $estSejour
 
 <?php else: ?>
 
-<!-- ============================================================
-     BON DE RÉSERVATION
-============================================================ -->
 
 <div class="absolute top-0 right-0 opacity-5 -mr-10 -mt-10 text-9xl font-black rotate-12 select-none">
     PALAIS
@@ -2174,7 +2101,6 @@ $qteLigne = $estSejour
 
 <?php endif; ?>
 
-<!-- INFORMATION INSTITUTIONNELLE -->
 
 <div class="border border-amber-200 bg-amber-50 rounded-2xl p-4 mb-6 flex items-start gap-3">
 
@@ -2192,7 +2118,6 @@ $qteLigne = $estSejour
 
 </div>
 
-<!-- ACTIONS -->
 
 <div class="mt-10 flex flex-col md:flex-row justify-center gap-4 no-print">
 

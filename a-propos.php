@@ -2,10 +2,9 @@
 require_once __DIR__ . '/config/database.php';
 require_once __DIR__ . '/includes/auth.php';
 $pdo = db();
-$pageTitle = "À propos — Palais des Pionniers";
+$pageTitle = "À propos | Palais des Pionniers";
 $page = 'a-propos.php';
 
-// Images institutionnelles pour le carrousel du hero
 $heroPropos = array_values(array_filter(
     ['assets/images/porte.jpeg', 'assets/images/adminis.jpeg', 'assets/images/groupewague.jpg'],
     fn($p) => file_exists(__DIR__ . '/' . $p)
@@ -14,9 +13,6 @@ $heroPropos = array_values(array_filter(
 require __DIR__ . '/includes/header.php';
 ?>
 
-<!-- ============================================
-     1. HEADER DE PAGE (STYLE INSTITUTIONNEL)
-     ============================================ -->
 <section class="relative flex items-center min-h-[42vh] sm:min-h-[52vh] py-8 sm:py-14 bg-slate-900 text-white overflow-hidden">
 
     <div id="proposCarousel" class="absolute inset-0">
@@ -39,9 +35,6 @@ require __DIR__ . '/includes/header.php';
     </div>
 </section>
 
-<!-- ============================================
-     2. HISTOIRE & IDENTITÉ (AVEC IMAGE)
-     ============================================ -->
 <section class="py-10 sm:py-24 bg-white">
     <div class="container mx-auto px-4">
         <div class="grid lg:grid-cols-2 gap-6 sm:gap-16 items-center">
@@ -60,7 +53,7 @@ require __DIR__ . '/includes/header.php';
                 </div>
             </div>
             <div class="relative">
-                <img src="assets/images/exterieur.jpg" class="rounded-[3rem] shadow-2xl border-8 border-slate-50" alt="Façade Palais">
+                <img src="<?= is_file(__DIR__ . '/assets/images/exterieur.jpg') ? 'assets/images/exterieur.jpg' : 'assets/images/porte.jpeg' ?>" class="rounded-[3rem] shadow-2xl border-8 border-slate-50" alt="Façade Palais">
                 <div class="absolute -bottom-3 -left-3 sm:-bottom-6 sm:-left-6 bg-accent text-white p-3 sm:p-8 rounded-xl sm:rounded-2xl shadow-xl">
                     <span class="text-lg sm:text-4xl font-black block">EPST</span>
                     <span class="text-xs font-bold uppercase tracking-widest">Statut Institutionnel</span>
@@ -70,13 +63,9 @@ require __DIR__ . '/includes/header.php';
     </div>
 </section>
 
-<!-- ============================================
-     3. NOS PILIERS (MISSIONS / VALEURS / VISION)
-     ============================================ -->
 <section class="py-10 sm:py-24 bg-slate-50">
     <div class="container mx-auto px-4">
         <div class="grid md:grid-cols-3 gap-12">
-            <!-- Mission -->
             <div class="bg-white p-10 rounded-[2.5rem] shadow-sm border border-slate-100 hover:shadow-xl transition group">
                 <div class="w-16 h-16 bg-primary/10 rounded-2xl flex items-center justify-center text-primary text-2xl mb-8 group-hover:bg-primary group-hover:text-white transition">
                     <i class="fas fa-bullseye"></i>
@@ -87,7 +76,6 @@ require __DIR__ . '/includes/header.php';
                 </p>
             </div>
 
-            <!-- Valeurs -->
             <div class="bg-white p-10 rounded-[2.5rem] shadow-sm border border-slate-100 hover:shadow-xl transition group">
                 <div class="w-16 h-16 bg-accent/10 rounded-2xl flex items-center justify-center text-accent text-2xl mb-8 group-hover:bg-accent group-hover:text-white transition">
                     <i class="fas fa-hand-holding-heart"></i>
@@ -98,7 +86,6 @@ require __DIR__ . '/includes/header.php';
                 </p>
             </div>
 
-            <!-- Vision -->
             <div class="bg-white p-10 rounded-[2.5rem] shadow-sm border border-slate-100 hover:shadow-xl transition group">
                 <div class="w-16 h-16 bg-slate-900/10 rounded-2xl flex items-center justify-center text-slate-900 text-2xl mb-8 group-hover:bg-slate-900 group-hover:text-white transition">
                     <i class="fas fa-eye"></i>
@@ -112,9 +99,6 @@ require __DIR__ . '/includes/header.php';
     </div>
 </section>
 
-<!-- ============================================
-     4. SECTION CHIFFRES (IMPACT)
-     ============================================ -->
 <section class="py-10 sm:py-20 bg-primary text-white">
     <div class="container mx-auto px-4">
         <div class="grid grid-cols-2 md:grid-cols-4 gap-8 text-center">
@@ -138,9 +122,6 @@ require __DIR__ . '/includes/header.php';
     </div>
 </section>
 
-<!-- ============================================
-     5. DIRECTION ET ÉQUIPE (OPTITIONNEL)
-     ============================================ -->
 <section class="py-10 sm:py-24 bg-white">
     <div class="container mx-auto px-4 text-center">
         <h2 class="text-sm font-black text-accent uppercase tracking-widest mb-3 sm:mb-4">Gouvernance</h2>
@@ -178,45 +159,6 @@ require __DIR__ . '/includes/header.php';
     </div>
 </section>
 
-<?php
-$personnelActopos = $pdo->query("SELECT * FROM personnel WHERE actif = 1 ORDER BY ordre ASC, nom ASC")->fetchAll();
-$personnelAvecPhoto = array_values(array_filter($personnelActopos, fn($p) => !empty($p['photo']) && file_exists(__DIR__ . '/assets/images/personnel/' . $p['photo'])));
-?>
-<?php if ($personnelActopos): ?>
-<!-- ============================================
-     5bis. NOTRE ÉQUIPE (carrousel personnel)
-     ============================================ 
-     <section class="py-10 sm:py-20 bg-slate-900 overflow-hidden">
-    <div class="container mx-auto px-4 text-center mb-6 sm:mb-14">
-        <h2 class="text-accent font-black tracking-widest uppercase text-[10px] sm:text-sm mb-2 sm:mb-4">L'équipe au quotidien</h2>
-        <h3 class="text-xl sm:text-4xl font-black text-white uppercase italic tracking-tighter">Notre Personnel</h3>
-    </div>
-
-    <?php if ($personnelAvecPhoto): ?>
-    <div class="relative">
-        <div class="absolute inset-y-0 left-0 w-12 sm:w-32 bg-gradient-to-r from-slate-900 to-transparent z-10"></div>
-        <div class="absolute inset-y-0 right-0 w-12 sm:w-32 bg-gradient-to-l from-slate-900 to-transparent z-10"></div>
-        <div class="marquee flex gap-6 sm:gap-10 w-max">
-            <?php foreach (array_merge($personnelAvecPhoto, $personnelAvecPhoto) as $p): ?>
-            <div class="flex-shrink-0 flex flex-col items-center text-center w-24 sm:w-36">
-                <div class="w-20 h-20 sm:w-32 sm:h-32 rounded-full overflow-hidden border-2 sm:border-4 border-white/10">
-                    <img src="assets/images/personnel/<?= e($p['photo']) ?>" class="w-full h-full object-cover">
-                </div>
-                <p class="mt-2 sm:mt-4 text-white font-black text-[11px] sm:text-sm uppercase italic tracking-tight"><?= e($p['prenom'] ? $p['prenom'].' '.$p['nom'] : $p['nom']) ?></p>
-                <?php if ($p['poste']): ?><p class="text-accent text-[9px] sm:text-xs font-bold uppercase tracking-widest mt-0.5"><?= e($p['poste']) ?></p><?php endif; ?>
-            </div>
-            <?php endforeach; ?>
-        </div>
-    </div>
-    <?php else: ?>
-    <p class="text-center text-[11px] text-white/40 italic px-4">Les photos de l'équipe seront affichées ici dès qu'elles seront ajoutées via l'administration.</p>
-    <?php endif; ?>
-</section> -->
-<?php endif; ?>
-
-<!-- ============================================
-     6. CTA REJOINDRE
-     ============================================ -->
 <section class="py-10 sm:py-24">
     <div class="container mx-auto px-4">
         <div class="bg-slate-900 rounded-2xl sm:rounded-[3rem] p-6 sm:p-12 md:p-20 relative overflow-hidden">

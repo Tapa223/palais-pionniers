@@ -5,7 +5,6 @@ require_once __DIR__ . '/includes/auth.php';
 $pdo  = db();
 $slug = $_GET['slug'] ?? '';
 
-// 1. Récupération des informations de l'espace
 $stmt = $pdo->prepare("
     SELECT e.*, c.nom AS categorie,
     (SELECT COUNT(*) FROM reservations r 
@@ -27,7 +26,6 @@ if (!$espace) {
 
 $isOccupied = ($espace['occupation_actuelle'] > 0);
 
-// 2. Galeries et Tarifs
 $imgsStmt = $pdo->prepare("SELECT chemin FROM espace_images WHERE espace_id = :id ORDER BY id ASC");
 $imgsStmt->execute([':id' => $espace['id']]);
 $galerie = $imgsStmt->fetchAll();
@@ -36,7 +34,6 @@ $tarifsStmt = $pdo->prepare("SELECT * FROM tarifs WHERE espace_id = :id ORDER BY
 $tarifsStmt->execute([':id' => $espace['id']]);
 $tarifs = $tarifsStmt->fetchAll();
 
-// 3. Occupation pour le calendrier
 $resStmt = $pdo->prepare("
     SELECT date_resa, COUNT(*) as nb 
     FROM reservations 
@@ -47,34 +44,28 @@ $resStmt = $pdo->prepare("
 $resStmt->execute([':id' => $espace['id']]);
 $occupations = $resStmt->fetchAll(PDO::FETCH_KEY_PAIR);
 
-$pageTitle = e($espace['nom']) . ' — Palais des Pionniers';
+$pageTitle = e($espace['nom']) . ' | Palais des Pionniers';
 require __DIR__ . '/includes/header.php';
 ?>
 <style>html { scroll-behavior: smooth; }</style>
 
 <div class="container mx-auto px-4 py-4 md:py-8">
-    <!-- Retour -->
     <a href="espaces.php" class="inline-flex items-center gap-1.5 text-xs font-black text-primary hover:text-accent transition uppercase tracking-widest bg-primary/5 hover:bg-accent/10 px-3.5 py-2 rounded-full">
         <i class="fas fa-arrow-left"></i> Retour aux espaces
     </a>
 
-    <!-- Grille Principale -->
     <div class="mt-5 flex flex-col gap-6 lg:grid lg:grid-cols-2 lg:gap-6 lg:items-start">
 
-        <!-- 1. GALERIE (toujours en premier) -->
         <div class="lg:col-start-2 lg:row-start-1 space-y-4">
-            <!-- Bouton Réserver visible dès le haut de page (desktop uniquement — sur mobile la carte d'image est déjà en haut) -->
             <a href="#cta-reservation" class="hidden lg:flex items-center justify-center gap-2 w-full bg-primary text-white py-3.5 rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-slate-800 transition-all shadow-lg">
                 <i class="fas fa-calendar-check"></i> Réserver cet espace
             </a>
 
-            <!-- Image Principale -->
             <div class="relative aspect-[4/3] md:aspect-video lg:aspect-[16/11] overflow-hidden rounded-[2.5rem] bg-slate-100 border border-slate-200 shadow-inner">
-                <?php $premiereImg = !empty($galerie) ? 'uploads/'.e($galerie[0]['chemin']) : 'assets/img/placeholder.jpg'; ?>
-                <img id="mainImg" src="<?= $premiereImg ?>" class="w-full h-full object-cover transition-all duration-300">
+                <?php $premiereImg = !empty($galerie) ? 'uploads/'.e($galerie[0]['chemin']) : 'assets/images/porte.jpeg'; ?>
+                <img id="mainImg" src="<?= $premiereImg ?>" alt="<?= e($espace['nom']) ?>" class="w-full h-full object-cover transition-all duration-300">
             </div>
 
-            <!-- Miniatures (Thumbnails) -->
             <?php if(count($galerie) > 1): ?>
             <div class="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
                 <?php foreach($galerie as $index => $img): ?>
@@ -90,7 +81,6 @@ require __DIR__ . '/includes/header.php';
             <?php endif; ?>
         </div>
 
-        <!-- 2. INFOS DE LA SALLE -->
         <div class="lg:col-start-1 lg:row-start-1 lg:row-span-3 flex flex-col space-y-5">
             <div>
                 <span class="inline-flex rounded-full bg-accent/10 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-accent mb-2 italic"><?= e($espace['categorie']) ?></span>
@@ -101,7 +91,6 @@ require __DIR__ . '/includes/header.php';
                 </div>
             </div>
 
-            <!-- Caractéristiques Rapides -->
             <div class="grid grid-cols-2 gap-4">
                 <div class="rounded-3xl border border-slate-100 bg-white p-5 shadow-sm">
                     <div class="text-[10px] font-black uppercase text-slate-300 tracking-widest mb-1">Capacité</div>
@@ -113,7 +102,6 @@ require __DIR__ . '/includes/header.php';
                 </div>
             </div>
 
-            <!-- LA TARIFICATION -->
             <div class="bg-white rounded-[2.5rem] border border-slate-100 p-6 shadow-sm">
                 <?php if (!empty($espace['gerant_externe'])): ?>
                 <div class="bg-amber-50 border-2 border-amber-200 rounded-2xl p-5 flex items-start gap-3">
@@ -121,7 +109,7 @@ require __DIR__ . '/includes/header.php';
                     <div>
                         <p class="text-xs font-black uppercase tracking-widest text-amber-700 mb-2">En bail</p>
                         <p class="text-sm text-amber-700 leading-relaxed"><?= e($espace['gerant_externe']) ?></p>
-                        <p class="text-xs text-amber-600 mt-3 italic">Le Palais ne fixe pas les tarifs de cet espace — la tarification et la réservation dépendent entièrement du gestionnaire.</p>
+                        <p class="text-xs text-amber-600 mt-3 italic">Le Palais ne fixe pas les tarifs de cet espace : la tarification et la réservation dépendent entièrement du gestionnaire.</p>
                     </div>
                 </div>
                 <?php else: ?>
@@ -142,7 +130,7 @@ require __DIR__ . '/includes/header.php';
                         <p class="mt-1.5 text-[10px] text-amber-600 font-semibold">
                             <i class="fas fa-user-tie mr-1"></i><?= e($t['gerant_nom'] ?: 'Gestionnaire') ?>
                             <?php if (!empty($t['gerant_contact'])): ?>
-                            — <a href="tel:<?= e(preg_replace('/\s+/', '', $t['gerant_contact'])) ?>" class="underline"><?= e($t['gerant_contact']) ?></a>
+                            · <a href="tel:<?= e(preg_replace('/\s+/', '', $t['gerant_contact'])) ?>" class="underline"><?= e($t['gerant_contact']) ?></a>
                             <?php endif; ?>
                         </p>
                         <?php endif; ?>
@@ -150,15 +138,13 @@ require __DIR__ . '/includes/header.php';
                     <?php endforeach; ?>
                 </div>
                 <?php if (array_filter($tarifs, fn($t) => $t['est_bail'])): ?>
-                <p class="mt-4 text-[10px] text-slate-400 italic">Les locations en bail sont des engagements longue durée négociés directement avec le gestionnaire concerné — non réservables en ligne.</p>
+                <p class="mt-4 text-[10px] text-slate-400 italic">Les locations en bail sont des engagements longue durée négociés directement avec le gestionnaire concerné. Elles ne sont pas réservables en ligne.</p>
                 <?php endif; ?>
                 <?php endif; ?>
             </div>
         </div>
 
-        <!-- 3. PLANNING + COMMENT ÇA MARCHE -->
         <div class="lg:col-start-2 lg:row-start-2 space-y-4">
-            <!-- Bouton Planning -->
             <button onclick="toggleModal('calModal')" class="group flex items-center gap-4 w-full p-4 rounded-3xl bg-white border border-slate-100 shadow-sm hover:shadow-md transition-all text-left">
                 <div class="w-14 h-14 rounded-2xl bg-slate-50 flex items-center justify-center text-primary/20 group-hover:text-primary transition-colors">
                     <i class="fas fa-calendar-alt text-2xl"></i>
@@ -169,7 +155,6 @@ require __DIR__ . '/includes/header.php';
                 </div>
             </button>
 
-            <!-- COMMENT ÇA MARCHE -->
             <div class="rounded-[2.5rem] bg-primary/5 border border-primary/10 p-6">
                 <h3 class="text-lg font-black text-primary flex items-center gap-2 mb-5 uppercase italic tracking-tighter">
                     <i class="fas fa-info-circle"></i> Comment ça marche ?
@@ -203,7 +188,6 @@ require __DIR__ . '/includes/header.php';
             </div>
         </div>
 
-        <!-- 4. CTA RÉSERVER (tout en bas) -->
         <div id="cta-reservation" class="lg:col-start-2 lg:row-start-3">
             <?php $tarifsReservables = array_filter($tarifs, fn($t) => !$t['est_bail']); ?>
             <?php $aOptionBail = array_filter($tarifs, fn($t) => $t['est_bail']); ?>
@@ -239,10 +223,10 @@ require __DIR__ . '/includes/header.php';
                         <i class="fas fa-paper-plane mr-2"></i>Contacter l'administration du Palais
                     </a>
                     <?php endif; ?>
-                    <p class="mt-3 text-center text-[10px] text-white/70">La réservation en ligne n'est pas disponible pour cet espace — il est loué et géré directement par un tiers.</p>
+                    <p class="mt-3 text-center text-[10px] text-white/70">La réservation en ligne n'est pas disponible pour cet espace : il est loué et géré directement par un tiers.</p>
                 <?php elseif (!$tarifsReservables && $aOptionBail): ?>
                     <div class="mb-4 pb-4 border-b border-white/15">
-                        <p class="text-[10px] font-black uppercase tracking-widest text-accent mb-1.5"><i class="fas fa-info-circle mr-1"></i>Location en bail — comment ça marche ?</p>
+                        <p class="text-[10px] font-black uppercase tracking-widest text-accent mb-1.5"><i class="fas fa-info-circle mr-1"></i>Location en bail : comment ça marche ?</p>
                         <p class="text-xs text-white/70 leading-relaxed">Cet espace ne se réserve pas ponctuellement, mais se loue sur une longue durée (mensuelle, trimestrielle, semestrielle ou annuelle). Faites votre demande ci-dessous, l'administration vous recontacte pour finaliser les modalités.</p>
                     </div>
                     <a href="demande-bail.php?espace_id=<?= (int)$espace['id'] ?>"
@@ -281,7 +265,6 @@ require __DIR__ . '/includes/header.php';
         </div>
     </div>
 
-<!-- MODALE CALENDRIER (Inchangée) -->
 <div id="calModal" class="fixed inset-0 z-[100] hidden bg-slate-900/90 backdrop-blur-md flex items-center justify-center p-4" onclick="if(event.target === this) toggleModal('calModal')">
     <div class="bg-white rounded-[2.5rem] w-full max-w-md overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-300">
         <div class="relative p-8 bg-slate-50/50 border-b border-slate-100">
@@ -301,7 +284,6 @@ require __DIR__ . '/includes/header.php';
 </div>
 
 <script>
-// Logique de changement d'image
 function updateMainImg(btn, src) {
     const mainImg = document.getElementById('mainImg');
     mainImg.style.opacity = '0.7';
@@ -351,7 +333,6 @@ function renderCal() {
 </script>
 
 <style>
-/* Cacher la scrollbar mais garder le défilement horizontal */
 .scrollbar-hide::-webkit-scrollbar { display: none; }
 .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
 </style>

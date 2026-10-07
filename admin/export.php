@@ -9,7 +9,6 @@ $type  = $_GET['type'] ?? '';
 $debut = $_GET['debut'] ?? '';
 $fin   = $_GET['fin']   ?? '';
 
-// Dates de filtre : format AAAA-MM-JJ uniquement
 $dateValide = function (string $d): string {
     $o = DateTime::createFromFormat('!Y-m-d', $d);
     return ($o && $o->format('Y-m-d') === $d) ? $d : '';
@@ -17,23 +16,15 @@ $dateValide = function (string $d): string {
 $debut = $dateValide((string)$debut);
 $fin   = $dateValide((string)$fin);
 
-/*
- * Droits d'accès, vérifiés côté serveur.
- * Les exports financiers sont réservés à la comptabilité et à la
- * Direction (ministre, superadmin). L'administration des espaces
- * n'obtient que l'export des réservations, sans colonne financière.
- */
 $rolesComptables = ['ministre', 'admin_comptable', 'superadmin'];
 $typesAutorises = [
     'paiements'      => $rolesComptables,
     'remboursements' => $rolesComptables,
     'reductions'     => $rolesComptables,
     'requisitions'   => $rolesComptables,
-    // Loyers : déjà consultables par l'administration des espaces sur la page Baux
     'baux'           => ['ministre', 'admin_comptable', 'admin_espaces', 'superadmin'],
     'reservations'   => ['ministre', 'admin_espaces', 'admin_comptable', 'superadmin'],
     'jeunes_engages' => ['ministre', 'admin_activites', 'superadmin'],
-    // Messages de contact : chaque rôle n'exporte que son périmètre (voir plus bas)
     'messages'           => ['ministre', 'admin_messages', 'admin_espaces', 'admin_activites', 'superadmin'],
     'demandes_services'  => ['ministre', 'admin_espaces', 'admin_comptable', 'superadmin'],
     'demandes_bail'      => ['ministre', 'admin_espaces', 'admin_comptable', 'superadmin'],
@@ -41,7 +32,6 @@ $typesAutorises = [
     'espaces'            => ['ministre', 'admin_espaces', 'superadmin'],
     'utilisateurs'       => ['ministre', 'superadmin'],
     'journal'            => ['ministre', 'superadmin'],
-    // Boîte à suggestions anonyme : aucune donnée d'identification de l'auteur
     'suggestions'    => ['ministre', 'admin_espaces', 'admin_activites', 'admin_messages', 'admin_comptable', 'superadmin'],
 ];
 
@@ -55,10 +45,6 @@ $accesFinancier = in_array($role, $rolesComptables, true);
 $where  = [];
 $params = [];
 
-/*
- * Situation financière par réservation (fonction centrale), mise en cache
- * pour ne la calculer qu'une fois par réservation dans un export.
- */
 $situations = [];
 $situation = function (?int $reservationId) use ($pdo, &$situations): array {
     if (!$reservationId) {
@@ -70,13 +56,11 @@ $situation = function (?int $reservationId) use ($pdo, &$situations): array {
     return $situations[$reservationId];
 };
 
-// Texte saisi par un tiers : neutralise les formules à l'ouverture dans un tableur
 $texte = function ($v): string {
     $v = (string)$v;
     return ($v !== '' && strpbrk($v[0], "=+-@\t\r") !== false) ? "'" . $v : $v;
 };
 
-// Montants : entiers sans séparateur (tri et calculs dans Excel)
 $fin2 = fn($v) => $v === null || $v === '' ? '' : number_format((float)$v, 0, '', '');
 $dateH = fn($v) => $v ? date('d/m/Y H:i', strtotime($v)) : '';
 $dateJ = fn($v) => $v ? date('d/m/Y', strtotime($v)) : '';
@@ -108,7 +92,6 @@ $natureReduction = function (array $s): string {
     return !empty($s['prise_en_charge_requisition']) ? 'Prise en charge réquisition' : 'Commerciale';
 };
 
-// Références de dossier chargées après la requête principale
 $refs = [];
 $ref = function (?int $reservationId) use (&$refs, $pdo): array {
     if (!$reservationId) {
@@ -366,7 +349,6 @@ if ($type === 'paiements') {
     }
     if ($debut) { $where[] = "sg.created_at >= ?"; $params[] = $debut . ' 00:00:00'; }
     if ($fin)   { $where[] = "sg.created_at <= ?"; $params[] = $fin   . ' 23:59:59'; }
-    // Seules les colonnes de la suggestion elle-même (aucune IP, aucun compte auteur)
     $sql = "
         SELECT sg.id, sg.created_at, sg.statut, sg.contenu, sg.statut_modifie_le, u.nom_complet AS traite_par
         FROM suggestions sg
@@ -378,7 +360,6 @@ if ($type === 'paiements') {
     $headers  = ['Référence', 'Date', 'Statut', 'Contenu', 'Date de traitement', 'Traité par'];
     $libStatutSug = ['nouvelle' => 'Nouvelle', 'lue' => 'Lue', 'traitee' => 'Traitée'];
     $mapRow = function ($r) use ($dateH, $libStatutSug) {
-        // Texte saisi publiquement : neutralise les formules à l'ouverture dans un tableur
         $contenu = (string)$r['contenu'];
         if ($contenu !== '' && strpbrk($contenu[0], "=+-@\t\r") !== false) {
             $contenu = "'" . $contenu;
@@ -392,8 +373,6 @@ if ($type === 'paiements') {
     };
 
 } elseif ($type === 'messages') {
-    // Périmètre identique à la boîte de réception : sujet « réservation d'espace »
-    // pour l'administration des espaces, « activité » pour celle des activités.
     if ($role === 'admin_espaces')   { $where[] = "m.sujet = 'reservation_espace'"; }
     if ($role === 'admin_activites') { $where[] = "m.sujet = 'activite'"; }
     if ($debut) { $where[] = "m.created_at >= ?"; $params[] = $debut . ' 00:00:00'; }
@@ -475,7 +454,6 @@ if ($type === 'paiements') {
         http_response_code(404);
         exit('Module partenaires non installé.');
     }
-    // Indicateurs identiques à la page Partenaires (réservations refusées, annulées et expirées exclues)
     $sql = "
         SELECT p.id, p.nom, p.type, p.contact_nom, p.telephone, p.email, p.actif, p.created_at,
                (SELECT COUNT(*) FROM users u WHERE u.partenaire_id = p.id) AS nb_comptes,
@@ -531,7 +509,6 @@ if ($type === 'paiements') {
         'admin_activites' => 'Admin Activités', 'admin_messages' => 'Admin Messages', 'admin_comptable' => 'Comptable',
         'user' => 'Client', 'partenaire' => 'Partenaire',
     ];
-    // Aucune donnée d'authentification exportée (ni mot de passe, ni empreinte)
     $sql = "SELECT id, nom_complet, email, telephone, role, actif, created_at FROM users ORDER BY role, nom_complet";
     $filename = 'utilisateurs_' . date('Y-m-d_His') . '.csv';
     $headers  = ['Nom', 'Email', 'Téléphone', 'Rôle', 'Statut', 'Inscription'];
@@ -540,7 +517,6 @@ if ($type === 'paiements') {
     };
 
 } elseif ($type === 'journal') {
-    // Mêmes filtres que la page Journal (module, administrateur, recherche, période)
     $jModule = (string)($_GET['module'] ?? '');
     $jUser   = (int)($_GET['user'] ?? 0);
     $jQ      = trim((string)($_GET['q'] ?? ''));
@@ -565,7 +541,7 @@ if ($type === 'paiements') {
         return [(int)$r['id'], $dateH($r['created_at']), $texte($r['user_nom']), $r['role'] ?? '', $r['module'], $r['action'], $texte($r['details'])];
     };
 
-} else { // reservations
+} else {
     $dateCol = 'r.created_at';
     if ($debut) { $where[] = "$dateCol >= ?"; $params[] = $debut . ' 00:00:00'; }
     if ($fin)   { $where[] = "$dateCol <= ?"; $params[] = $fin   . ' 23:59:59'; }
@@ -584,9 +560,7 @@ if ($type === 'paiements') {
     $colonneRefs = ['id'];
     $filename = 'reservations_' . date('Y-m-d_His') . '.csv';
 
-    // Colonnes communes (gestion des espaces et des réservations)
     $headers  = ['Réservation','Réquisition','Réservation initiale','Remplacée par','Canal','Date création','Client','Partenaire','Téléphone','Espace','Date résa','Date départ','Heure début','Heure fin','Quantité','Statut','Tarif'];
-    // Colonnes financières : uniquement pour la comptabilité et la Direction
     if ($accesFinancier) {
         $headers = array_merge($headers, [
             'État financier', 'Montant initial (FCFA)', 'Réduction appliquée (FCFA)', 'Nature de la réduction', 'Net dû (FCFA)',
@@ -630,7 +604,6 @@ $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
 $rows = $stmt->fetchAll();
 
-// Références de dossier préchargées en une requête (listes longues)
 if ($colonneRefs) {
     $ids = [];
     foreach ($rows as $r) {
@@ -653,10 +626,11 @@ header('Content-Type: text/csv; charset=utf-8');
 header('Content-Disposition: attachment; filename="' . $filename . '"');
 
 $out = fopen('php://output', 'w');
-fwrite($out, "\xEF\xBB\xBF"); // BOM UTF-8 pour Excel
+fwrite($out, "\xEF\xBB\xBF");
 fputcsv($out, $headers, ';', '"', '\\');
 foreach ($rows as $r) {
-    fputcsv($out, $mapRow($r), ';', '"', '\\');
+    $ligne = array_map(fn($v) => is_numeric($v) ? $v : $texte($v), $mapRow($r));
+    fputcsv($out, $ligne, ';', '"', '\\');
 }
 fclose($out);
 exit;

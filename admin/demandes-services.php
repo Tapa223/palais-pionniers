@@ -3,20 +3,11 @@ require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_role(['admin_espaces','ministre','admin_comptable']);
 
-/*
- * Demandes de services (support publicitaire, lavage automobile…).
- * Cycle : en_attente → en_cours → realisee
- *         en_attente → refusee ; en_cours → annulee (motif obligatoire)
- * « traitee » (ancien statut) est affiché et compté comme « réalisée ».
- * Chaque changement est conditionné au statut attendu (pas de double
- * traitement), tracé (activity_log) et notifié au client.
- */
 $pdo      = db();
 $readonly = is_readonly_admin();
 $msg      = null;
 $cycle    = services_cycle_disponible($pdo);
 
-// action => [statut requis, nouveau statut, motif obligatoire, libellé, message client]
 $transitions = [
     'prendre_en_charge' => ['en_attente', 'en_cours', false, 'prise en charge', 'est prise en charge par nos services'],
     'realiser'          => ['en_cours', 'realisee', false, 'réalisée', 'a été réalisée'],
@@ -33,7 +24,6 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $action = $_POST['action'] ?? ($cycle ? '' : 'marquer_traitee');
 
         if ($action === 'supprimer') {
-            // Suppression d'une erreur ou d'un test : Direction uniquement
             if (!is_superadmin()) {
                 $msg = ['err', 'Seule la Direction peut supprimer une demande.'];
             } else {
@@ -48,7 +38,6 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
         } elseif (!$cycle) {
-            // Base non migrée : ancien fonctionnement (en_attente → traitee)
             if ($id) {
                 $pdo->prepare("UPDATE demandes_services SET statut = 'traitee', traite_par = ?, date_traitement = NOW(), note_traitement = ? WHERE id = ? AND statut = 'en_attente'")
                     ->execute([$_SESSION['user_id'], $note ?: null, $id]);
@@ -90,7 +79,6 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// Filtres : « réalisées » inclut l'ancien statut « traitee »
 $filtres = $cycle
     ? ['en_attente' => 'En attente', 'en_cours' => 'En cours', 'realisee' => 'Réalisées', 'fermees' => 'Refusées / annulées', 'toutes' => 'Toutes']
     : ['en_attente' => 'En attente', 'traitee' => 'Traitées'];

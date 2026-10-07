@@ -11,7 +11,7 @@
       <p class="text-[11px] font-bold uppercase tracking-widest text-white/60">Ministère de la Jeunesse et des Sports, chargé de l'Instruction Civique et de la Construction Citoyenne</p>
       <h3 class="text-xl font-bold mt-2">Palais des Pionniers</h3>
       <p class="mt-3 max-w-md text-sm text-white/80">
-        Magnambougou / Dianéguéla — Institution dédiée à la formation, à la culture, au sport et à l'épanouissement de la jeunesse malienne.
+        Magnambougou / Dianéguéla. Institution dédiée à la formation, à la culture, au sport et à l'épanouissement de la jeunesse malienne.
       </p>
     </div>
     <div>

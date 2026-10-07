@@ -16,7 +16,6 @@ $roleMeta = [
     'admin_comptable' => ['Comptable',       'bg-teal-100 text-teal-700'],
     'user'            => ['Utilisateur',     'bg-slate-100 text-slate-500'],
 ];
-// Rôle « partenaire » (après migration) : compte rattaché à une fiche partenaire
 if (role_partenaire_disponible($pdo)) {
     $roleMeta['partenaire'] = ['Partenaire', 'bg-indigo-50 text-indigo-700'];
 }
@@ -35,12 +34,10 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
             $old = $pdo->prepare("SELECT nom_complet, role FROM users WHERE id = ?");
             $old->execute([$id]); $old = $old->fetch();
             if ($newRole === 'partenaire' && ($old['role'] ?? '') !== 'partenaire') {
-                // Un compte partenaire est toujours rattaché à une fiche partenaire
                 $msg = ['err', 'Le rôle « Partenaire » s\'attribue depuis la page Partenaires (création ou association du compte à une organisation).'];
             } elseif ($old) {
                 $pdo->prepare("UPDATE users SET role = ? WHERE id = ?")->execute([$newRole, $id]);
                 if ($old['role'] === 'partenaire' && $newRole !== 'partenaire' && partenaires_disponibles($pdo)) {
-                    // Plus partenaire : l'association est retirée (les réservations passées restent attribuées)
                     $pdo->prepare("UPDATE users SET partenaire_id = NULL WHERE id = ?")->execute([$id]);
                 }
                 log_activity('user_role_change', 'users', "Rôle de «{$old['nom_complet']}» : {$old['role']} → $newRole");
@@ -49,7 +46,6 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($action === 'supprimer_compte' && $id && $id !== $moi) {
-            // Compte client ou partenaire de test : suppression définitive (Direction uniquement)
             $resumeSupp = resume_compte_client($pdo, $id);
             if (!is_superadmin()) {
                 $msg = ['err', 'Seule la Direction peut supprimer un compte.'];
@@ -83,8 +79,6 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($action === 'reset_password' && $id) {
-            // Réinitialisation par la Direction : l'ancien mot de passe n'est jamais lu ni affiché
-            // (seule son empreinte est remplacée). Son propre mot de passe se change depuis « Mon mot de passe ».
             $cible = $pdo->prepare("SELECT nom_complet, role FROM users WHERE id = ?");
             $cible->execute([$id]); $cible = $cible->fetch();
             $nouveau = (string)($_POST['nouveau_mdp'] ?? '');
@@ -141,8 +135,6 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($uDel && $uDel['role'] === 'superadmin') {
                 $msg = ['err', 'Un compte Super Admin (Direction) ne peut pas être désactivé depuis cette interface.'];
             } else {
-                // Désactivation réversible plutôt que suppression définitive —
-                // conserve l'historique et le journal d'activité liés à ce compte.
                 $pdo->prepare("UPDATE users SET actif = 0 WHERE id = ?")->execute([$id]);
                 log_activity('user_bloque', 'users', "Compte désactivé (ex-suppression) : {$uDel['nom_complet']} ({$uDel['role']})");
                 $msg = ['ok', "Compte «{$uDel['nom_complet']}» désactivé — il peut être réactivé à tout moment."];
@@ -252,7 +244,7 @@ if ($compteSupp): ?>
       <label class="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Rôle *</label>
       <div class="relative">
         <select name="role" class="w-full rounded-xl border-2 border-slate-100 bg-slate-50 px-4 py-2.5 font-bold text-primary outline-none text-sm appearance-none">
-          <?php foreach ($roleMeta as $val => [$label, $_]): if ($val === 'partenaire') continue; // créé depuis la page Partenaires ?>
+          <?php foreach ($roleMeta as $val => [$label, $_]): if ($val === 'partenaire') continue;?>
             <option value="<?= $val ?>"><?= $label ?></option>
           <?php endforeach; ?>
         </select>
@@ -332,7 +324,7 @@ if ($compteSupp): ?>
           <td class="px-5 py-4">
             <div class="flex items-center gap-3">
               <div class="w-9 h-9 rounded-xl <?= $isSelf?'bg-accent':'bg-primary/10' ?> flex items-center justify-center font-black text-sm <?= $isSelf?'text-white':'text-primary' ?> flex-shrink-0">
-                <?= strtoupper(substr($u['nom_complet'],0,1)) ?>
+                <?= e(mb_strtoupper(mb_substr((string)$u['nom_complet'], 0, 1))) ?>
               </div>
               <div>
                 <p class="font-black text-primary text-sm"><?= e($u['nom_complet']) ?><?= $isSelf?' <span class="text-[9px] text-accent">(vous)</span>':'' ?></p>
@@ -420,7 +412,6 @@ if ($compteSupp): ?>
 </div>
 
 <?php if (!$readonly): ?>
-<!-- Réinitialisation du mot de passe d'un compte (Direction) -->
 <div id="modalMdp" class="hidden fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onclick="if(event.target===this)fermerMdp()">
   <div class="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden" role="dialog" aria-modal="true" aria-labelledby="mdpTitre">
     <div class="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50">

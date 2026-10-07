@@ -79,7 +79,7 @@ if ($preselectId) {
 }
 
 $pageTitle = "Galerie des formations";
-$pageRetour = false; // la page a déjà son propre lien retour
+$pageRetour = false;
 require __DIR__ . '/_admin_header.php';
 ?>
 
@@ -87,7 +87,7 @@ require __DIR__ . '/_admin_header.php';
   <div class="flex items-center justify-between mb-6">
     <div>
       <h1 class="text-2xl font-black text-primary uppercase italic tracking-tight">Galerie des formations</h1>
-      <p class="text-sm text-slate-500 mt-0.5">Ajoute plusieurs photos par formation, affichées en carrousel sur sa fiche détail</p>
+      <p class="text-sm text-slate-500 mt-0.5">Ajoutez plusieurs photos par formation, affichées en carrousel sur sa fiche détail</p>
     </div>
     <a href="formations.php" class="text-xs font-black text-slate-400 hover:text-primary transition">← Retour</a>
   </div>

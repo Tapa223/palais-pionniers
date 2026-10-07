@@ -1,11 +1,4 @@
 <?php
-/*
- * Suivi des réservations payées (soldées ou avec acompte) :
- *   « À venir » (en cours et 7 prochains jours), « À confirmer » (terminées non cochées),
- *   « Effectuées » (historique).
- * Consultation : tous les rôles d'administration.
- * Cocher / décocher « Effectuée » : Direction, Admin Espaces, Admin Activités, Comptable.
- */
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_admin();
@@ -25,7 +18,6 @@ if ($installe && $_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif (!peut_cocher_effectuee()) {
         $code = 'droits';
     } elseif ($id && $action === 'effectuer') {
-        // Seulement une réservation validée, payée (même partiellement) et déjà commencée
         $st = $pdo->prepare("
             UPDATE reservations r JOIN espaces e ON e.id = r.espace_id
             SET r.effectuee_le = NOW(), r.effectuee_par = ?

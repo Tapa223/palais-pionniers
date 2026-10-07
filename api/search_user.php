@@ -2,13 +2,10 @@
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/auth.php';
 
+require_role(['admin_espaces', 'admin_comptable']);
 header('Content-Type: application/json');
 
-if (!is_logged_in() || !is_admin()) {
-    echo json_encode([]); exit;
-}
-
-$q = trim($_GET['q'] ?? '');
+$q = trim((string)($_GET['q'] ?? ''));
 if (strlen($q) < 2) { echo json_encode([]); exit; }
 
 $pdo  = db();

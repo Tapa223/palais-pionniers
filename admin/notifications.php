@@ -12,7 +12,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_check($_POST['csrf_token'] ?? 
     $id     = (int)($_POST['id'] ?? 0);
 
     if ($action === 'mark_lu' && $id) {
-        $pdo->prepare("UPDATE notifications SET lu = 1 WHERE id = ?")->execute([$id]);
+        $pdo->prepare("UPDATE notifications SET lu = 1 WHERE id = ? AND (destinataire_role = ? OR destinataire_id = ?)")->execute([$id, $role, $uid]);
     }
     if ($action === 'mark_all_lu') {
         $pdo->prepare("UPDATE notifications SET lu = 1 WHERE lu = 0 AND (destinataire_role = ? OR destinataire_id = ?)")
@@ -32,10 +32,6 @@ $notifs = $notifs->fetchAll();
 
 $nonLus = count(array_filter($notifs, fn($n) => !$n['lu']));
 
-// Consulter la page = notifications vues : on les marque lues automatiquement
-// (la pastille rouge ne doit pas rester affichée une fois la liste ouverte).
-// On le fait APRÈS avoir chargé $notifs pour garder le surlignage "nouveau"
-// visible sur cette page — seule la pastille du prochain chargement se videra.
 if ($nonLus > 0) {
     $pdo->prepare("UPDATE notifications SET lu = 1 WHERE lu = 0 AND (destinataire_role = ? OR destinataire_id = ?)")
         ->execute([$role, $uid]);

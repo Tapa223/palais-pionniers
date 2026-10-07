@@ -3,42 +3,17 @@ header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 header('Pragma: no-cache');
 
 require_once __DIR__ . '/includes/auth.php';
+require_once __DIR__ . '/config/database.php';
 
-// 1. Connexion via ton système de fonction
-require_once __DIR__ . '/config/database.php'; 
-
-// On récupère l'instance PDO en appelant la fonction db() définie dans ton fichier
-try {
-    $pdo = db(); 
-} catch (Exception $e) {
-    die("<div class='bg-red-100 text-red-700 p-4'>Erreur de connexion : " . $e->getMessage() . "</div>");
-}
-
-$pageTitle = "Nos Activités — Palais des Pionniers";
+$pageTitle = "Nos Activités | Palais des Pionniers";
 $page = 'activites.php';
 require __DIR__ . '/includes/header.php';
 
-// 2. Récupération des activités
 $all_activites = [];
-$diagnostic = null;
 try {
-    $stmt = $pdo->query("SELECT * FROM activites ORDER BY id DESC");
-    $all_activites = $stmt->fetchAll();
-
-    // Diagnostic — ne s'affiche que si la liste semble vide, pour comprendre
-    // pourquoi sans avoir à deviner. À retirer une fois le souci résolu.
-    if (empty($all_activites)) {
-        $stmtCount = $pdo->query("SELECT COUNT(*) FROM activites");
-        $totalReel = (int)$stmtCount->fetchColumn();
-        $stmtDb = $pdo->query("SELECT DATABASE()");
-        $baseConnectee = $stmtDb->fetchColumn();
-        $diagnostic = [
-            'total_reel' => $totalReel,
-            'base_connectee' => $baseConnectee,
-        ];
-    }
+    $all_activites = db()->query("SELECT * FROM activites ORDER BY id DESC")->fetchAll();
 } catch (PDOException $e) {
-    echo "<div class='bg-red-100 text-red-700 p-4'>Erreur de requête : " . $e->getMessage() . "</div>";
+    error_log('activites.php : ' . $e->getMessage());
 }
 ?>
 
@@ -49,7 +24,7 @@ try {
                 Nos <span class="text-red-600">Activités</span>
             </h1>
             <p class="text-slate-500 mt-2 max-w-2xl mx-auto font-medium text-sm sm:text-base">
-                Un aperçu des activités qui se déroulent au sein du Palais — certaines portées par nos équipes, d'autres organisées par des partenaires ou structures externes accueillis dans nos espaces.
+                Un aperçu des activités qui se déroulent au sein du Palais : certaines portées par nos équipes, d'autres organisées par des partenaires ou structures externes accueillis dans nos espaces.
             </p>
         </div>
 
@@ -58,21 +33,13 @@ try {
             <?php if (empty($all_activites)): ?>
                 <div class="col-span-full text-center py-12">
                     <p class="text-slate-400 italic text-xl">Aucune activité n'est disponible pour le moment.</p>
-                    <?php if ($diagnostic): ?>
-                    <div class="mt-6 inline-block text-left bg-amber-50 border-2 border-amber-300 rounded-2xl p-5 text-sm">
-                        <p class="font-black text-amber-800 mb-2">🔍 Diagnostic temporaire</p>
-                        <p class="text-amber-700">Base de données connectée : <span class="font-black"><?= htmlspecialchars($diagnostic['base_connectee']) ?></span></p>
-                        <p class="text-amber-700">Nombre réel de lignes dans la table <code>activites</code> de cette base : <span class="font-black"><?= $diagnostic['total_reel'] ?></span></p>
-                        <p class="text-amber-600 text-xs mt-2 italic">Si ce nombre est différent de ce que tu vois dans phpMyAdmin, c'est que le site et phpMyAdmin ne regardent pas la même base de données.</p>
-                    </div>
-                    <?php endif; ?>
                 </div>
             <?php else: ?>
                 
                 <?php foreach ($all_activites as $act): $accent = $act['couleur'] ?: '#E61E2A'; ?>
                 <a href="detail-activite.php?slug=<?= urlencode($act['slug']) ?>" class="block bg-slate-50 rounded-xl sm:rounded-[2rem] overflow-hidden border border-slate-100 hover:shadow-2xl transition-all group">
                     <div class="aspect-square sm:aspect-[4/3] bg-slate-200 overflow-hidden relative">
-                        <?php if (!empty($act['image_principale'])): ?>
+                        <?php if (!empty($act['image_principale']) && $act['image_principale'] !== 'default-hero.jpg'): ?>
                         <img src="assets/images/activites/<?= e($act['image_principale']) ?>" class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105">
                         <?php else: ?>
                         <div class="w-full h-full flex items-center justify-center text-2xl sm:text-6xl text-slate-300"><i class="fas fa-star"></i></div>

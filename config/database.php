@@ -1,21 +1,23 @@
 <?php
-/**
- * Configuration de la connexion MySQL via PDO
- * À adapter selon votre environnement local (XAMPP/WAMP)
- */
-
 declare(strict_types=1);
 
-const DB_HOST = '127.0.0.1';
-const DB_PORT = 3306;
-const DB_NAME = 'palais_pionniers';
-const DB_USER = 'root';
-const DB_PASS = ''; // ⚠ XAMPP par défaut : vide. WAMP : 'root' ou ''.
-const DB_CHARSET = 'utf8mb4';
+// Identifiants du serveur en ligne : config/database.local.php (voir database.local.exemple.php)
+if (is_file(__DIR__ . '/database.local.php')) {
+    require __DIR__ . '/database.local.php';
+}
 
-/**
- * Retourne une instance PDO singleton.
- */
+defined('DB_HOST')    || define('DB_HOST', '127.0.0.1');
+defined('DB_PORT')    || define('DB_PORT', 3306);
+defined('DB_NAME')    || define('DB_NAME', 'palais_pionniers');
+defined('DB_USER')    || define('DB_USER', 'root');
+defined('DB_PASS')    || define('DB_PASS', '');
+defined('DB_CHARSET') || define('DB_CHARSET', 'utf8mb4');
+defined('APP_DEBUG')  || define('APP_DEBUG', in_array($_SERVER['SERVER_NAME'] ?? 'localhost', ['localhost', '127.0.0.1'], true));
+
+date_default_timezone_set('Africa/Bamako');
+ini_set('display_errors', APP_DEBUG ? '1' : '0');
+ini_set('log_errors', '1');
+
 function db(): PDO
 {
     static $pdo = null;
@@ -34,8 +36,9 @@ function db(): PDO
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
             PDO::ATTR_EMULATE_PREPARES   => false,
         ]);
+        $pdo->exec("SET time_zone = '+00:00'");
     } catch (PDOException $e) {
-        // En production, ne JAMAIS afficher le détail de l'erreur.
+        error_log('Connexion base de données : ' . $e->getMessage());
         http_response_code(500);
         die('Erreur de connexion à la base de données.');
     }

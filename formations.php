@@ -5,8 +5,6 @@ require_once __DIR__ . '/includes/auth.php';
 $pdo = db();
 $formations = $pdo->query("SELECT * FROM formations WHERE actif = 1 ORDER BY ordre ASC, nom ASC")->fetchAll();
 
-// Photos du hero : d'abord les vraies photos de formations si présentes,
-// sinon des photos réelles déjà prises au Palais (galerie des activités)
 $photosFormations = array_values(array_filter(
     array_map(fn($f) => $f['photo'] ? 'assets/images/formations/' . $f['photo'] : null, $formations),
     fn($p) => $p && file_exists(__DIR__ . '/' . $p)
@@ -14,8 +12,6 @@ $photosFormations = array_values(array_filter(
 if ($photosFormations) {
     $heroSlides = array_slice($photosFormations, 0, 30);
 } else {
-    // 3 images ciblées pour les formations — modifie simplement ces noms de
-    // fichiers pour changer les photos affichées dans ce bandeau.
     $imagesCibleesFormations = [
         'assets/images/formation1.jpg',
         'assets/images/formation2.jpg',
@@ -28,7 +24,7 @@ if ($photosFormations) {
     }
 }
 
-$pageTitle = "Formations — Palais des Pionniers";
+$pageTitle = "Formations | Palais des Pionniers";
 $page = 'formations.php';
 require __DIR__ . '/includes/header.php';
 ?>
@@ -116,7 +112,7 @@ document.addEventListener("DOMContentLoaded", function() {
                     <p class="mt-1.5 sm:mt-4 text-[10px] sm:text-sm text-slate-600 leading-snug sm:leading-relaxed line-clamp-2 sm:line-clamp-3"><?= nl2br(e($f['description'])) ?></p>
                     <?php endif; ?>
                     <?php if ($estTerminee): ?>
-                    <p class="mt-4 text-xs font-black text-slate-400 uppercase tracking-widest hidden sm:block"><i class="fas fa-info-circle mr-1"></i>Cette formation s'est déroulée au Palais — d'autres sessions pourront être organisées</p>
+                    <p class="mt-4 text-xs font-black text-slate-400 uppercase tracking-widest hidden sm:block"><i class="fas fa-info-circle mr-1"></i>Cette formation s'est déroulée au Palais. D'autres sessions pourront être organisées</p>
                     <?php elseif ($f['contact']): ?>
                     <p class="mt-1.5 sm:mt-4 text-[9px] sm:text-xs font-black text-accent uppercase tracking-widest truncate"><i class="fas fa-paper-plane mr-1"></i>Inscription : <?= e($f['contact']) ?></p>
                     <?php endif; ?>
