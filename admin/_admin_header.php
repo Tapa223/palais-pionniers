@@ -77,7 +77,7 @@ h1,h2,h3 { font-family:'Plus Jakarta Sans',Inter,sans-serif; letter-spacing:-.02
       </div>
     </div>
 
-    <nav class="flex-1 p-3 space-y-1 text-sm overflow-y-auto">
+    <nav id="adminNav" class="flex-1 p-3 space-y-1 text-sm overflow-y-auto">
       <?php
       $current = basename($_SERVER['PHP_SELF']);
       $navBadges = admin_nav_badges();
@@ -95,14 +95,15 @@ h1,h2,h3 { font-family:'Plus Jakarta Sans',Inter,sans-serif; letter-spacing:-.02
           <?php endif; ?>
         </a>
       <?php endforeach; ?>
+      <?php $active = ($current === 'mon-mot-de-passe.php'); ?>
+        <a href="mon-mot-de-passe.php"
+           class="flex items-center gap-3 rounded-xl px-3 py-2.5 transition-all <?= $active ? 'bg-accent text-white shadow-lg' : 'text-white/75 hover:bg-white/10 hover:text-white' ?>">
+          <i class="fas fa-key w-4 text-center text-sm <?= $active ? '' : 'opacity-70' ?>"></i>
+          <span class="flex-1">Mon mot de passe</span>
+        </a>
     </nav>
 
     <div class="p-3 border-t border-white/10 space-y-1">
-      <a href="mon-mot-de-passe.php"
-         class="flex items-center gap-3 rounded-xl px-3 py-2.5 transition text-sm <?= basename($_SERVER['PHP_SELF']) === 'mon-mot-de-passe.php' ? 'bg-accent text-white' : 'text-white/75 hover:bg-white/10 hover:text-white' ?>">
-        <i class="fas fa-key w-4 text-center text-sm opacity-70"></i>
-        <span>Mon mot de passe</span>
-      </a>
       <a href="../logout.php" onclick="return confirm('Se déconnecter ?')"
          class="flex items-center gap-3 rounded-xl px-3 py-2.5 text-red-400 hover:bg-red-500/10 hover:text-red-300 transition text-sm">
         <i class="fas fa-sign-out-alt w-4 text-center text-sm"></i>
@@ -110,6 +111,27 @@ h1,h2,h3 { font-family:'Plus Jakarta Sans',Inter,sans-serif; letter-spacing:-.02
       </a>
     </div>
   </aside>
+  <script>
+  (function () {
+    var cle = 'pp-admin-menu-defilement';
+    var zones = [document.getElementById('sidebar'), document.getElementById('adminNav')];
+    var restaure = false;
+    try {
+      var memo = JSON.parse(sessionStorage.getItem(cle) || 'null');
+      if (memo) { zones[0].scrollTop = memo[0]; zones[1].scrollTop = memo[1]; restaure = true; }
+    } catch (e) {}
+    var actif = document.querySelector('#adminNav a.bg-accent');
+    if (actif) {
+      var r = actif.getBoundingClientRect();
+      if (!restaure || r.top < 0 || r.bottom > window.innerHeight) { actif.scrollIntoView({ block: 'center' }); window.scrollTo(0, 0); }
+    }
+    document.querySelectorAll('#adminNav a').forEach(function (lien) {
+      lien.addEventListener('click', function () {
+        try { sessionStorage.setItem(cle, JSON.stringify([zones[0].scrollTop, zones[1].scrollTop])); } catch (e) {}
+      });
+    });
+  })();
+  </script>
 
   <div id="mainContent" class="flex-1 flex flex-col min-w-0">
     <header class="flex items-center justify-between border-b border-slate-200 bg-white px-4 md:px-6 py-3 sticky top-0 z-30 shadow-sm">

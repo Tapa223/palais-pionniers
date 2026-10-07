@@ -244,10 +244,17 @@ require __DIR__ . '/_admin_header.php';
     <h1 class="text-2xl font-black text-primary uppercase italic tracking-tight">Observations & Notes</h1>
     <p class="text-sm text-slate-500 mt-0.5"><?= count($observations) ?> observation(s)</p>
   </div>
+  <div class="flex items-center gap-2 flex-wrap">
+  <?php if (in_array($_SESSION['role'] ?? '', ['superadmin', 'ministre'], true)): ?>
+  <a href="export.php?type=observations" class="flex items-center gap-2 bg-white border border-slate-200 text-primary text-xs font-black uppercase px-5 py-3 rounded-xl hover:bg-slate-50 transition shadow-sm">
+    <i class="fas fa-file-csv"></i> Exporter (CSV)
+  </a>
+  <?php endif; ?>
   <button onclick="document.getElementById('obsForm').classList.toggle('hidden')"
           class="flex items-center gap-2 bg-accent text-white text-xs font-black uppercase px-5 py-3 rounded-xl hover:bg-red-700 transition shadow-lg">
     <i class="fas fa-plus"></i> Nouvelle observation
   </button>
+  </div>
 </div>
 
 <?php if ($msg): ?>

@@ -89,9 +89,14 @@ require __DIR__ . '/_admin_header.php';
 ?>
 
 <div class="px-4 sm:px-6 py-8">
-  <div class="mb-6">
-    <h1 class="text-2xl font-black text-primary uppercase italic tracking-tight">Suivi des acomptes</h1>
-    <p class="text-sm text-slate-500 mt-0.5">Toutes les réservations réglées par acompte, avec leur solde restant et leur échéance</p>
+  <div class="mb-6 flex items-center justify-between flex-wrap gap-3">
+    <div>
+      <h1 class="text-2xl font-black text-primary uppercase italic tracking-tight">Suivi des acomptes</h1>
+      <p class="text-sm text-slate-500 mt-0.5">Toutes les réservations réglées par acompte, avec leur solde restant et leur échéance</p>
+    </div>
+    <a href="export.php?type=acomptes" class="flex items-center gap-2 bg-white border border-slate-200 text-primary text-xs font-black uppercase px-5 py-3 rounded-xl hover:bg-slate-50 transition shadow-sm">
+      <i class="fas fa-file-csv"></i> Exporter (CSV)
+    </a>
   </div>
 
   <div class="flex flex-wrap gap-2 mb-6">

@@ -729,132 +729,9 @@ if ($dDg):
 <?php endif; ?>
 
 
-<?php
-$dDga = $direction['dga'] ?? null;
-?>
-
-<?php if ($dDga): ?>
-
-<section class="py-10 sm:py-24 bg-white">
-
-    <div class="container mx-auto px-4">
-
-        <div class="max-w-5xl mx-auto flex flex-col md:flex-row items-center gap-4 sm:gap-16">
-
-            <div class="w-full md:w-2/5 flex justify-center">
-
-                <?php if (!empty($dDga['photo'])): ?>
-
-                    <img
-                        src="assets/images/dga.jpeg"
-                        class="w-36 h-44 sm:w-64 sm:h-64 object-cover rounded-2xl sm:rounded-[4rem] shadow-xl sm:shadow-2xl border-4 sm:border-8 border-slate-50"
-                        alt="<?= e($dDga['nom']) ?>"
-                    >
-
-                <?php else: ?>
-
-                    <div class="w-36 h-44 sm:w-64 sm:h-64 rounded-2xl sm:rounded-[4rem] shadow-xl sm:shadow-2xl border-4 sm:border-8 border-slate-50 bg-primary flex items-center justify-center">
-
-                        <span class="text-white text-2xl sm:text-6xl font-black italic">
-                            <?= e(initiales($dDga['nom'])) ?>
-                        </span>
-
-                    </div>
-
-                <?php endif; ?>
-
-            </div>
-
-
-            <div class="w-full md:w-3/5 text-center md:text-left">
-
-                <h2 class="text-accent font-black tracking-widest uppercase text-[10px] sm:text-sm mb-2 sm:mb-6">
-                    Relève & Engagement
-                </h2>
-
-                <p class="text-lg font-black text-primary mb-1">
-                    <?= e($dDga['nom']) ?>
-                </p>
-
-                <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-4 sm:hidden">
-                    <?= e($dDga['titre']) ?>
-                </p>
-
-                <i class="fas fa-quote-left text-3xl sm:text-5xl text-accent/10 mb-2 sm:mb-6 hidden sm:block"></i>
-
-                <?php if ($dDga['citation']): ?>
-
-                    <h3 class="text-lg sm:text-3xl md:text-4xl font-black text-slate-900 mb-3 sm:mb-8 leading-snug sm:leading-tight">
-                        <?= e($dDga['citation']) ?>
-                    </h3>
-
-                <?php endif; ?>
-
-                <?php if ($dDga['texte']): ?>
-
-                    <p class="text-sm sm:text-xl text-slate-600 leading-relaxed mb-4 sm:mb-8 italic">
-                        <?= nl2br(e($dDga['texte'])) ?>
-                    </p>
-
-                <?php endif; ?>
-
-                <div class="hidden sm:flex items-center gap-4 justify-center md:justify-start">
-
-                    <div class="w-12 h-px bg-accent hidden md:block"></div>
-
-                    <div>
-
-                        <p class="text-2xl font-black text-primary">
-                            <?= e($dDga['nom']) ?>
-                        </p>
-
-                        <p class="text-xs font-bold text-slate-400 uppercase tracking-widest">
-                            <?= e($dDga['titre']) ?>
-                        </p>
-
-                    </div>
-
-                </div>
-
-            </div>
-
-        </div>
-
-    </div>
-
-</section>
-
-<?php endif; ?>
-
-
 <?php if ($nbPersonnalites > 0): ?>
 
     <?php
-
-    $officielsTeaser = [
-        'assets/images/officiels/president.jpg',
-        'assets/images/officiels/premier-ministre.jpg'
-    ];
-
-    $officielsTeaser = array_values(
-        array_filter(
-            $officielsTeaser,
-            fn($f) => file_exists(__DIR__ . '/' . $f)
-        )
-    );
-
-    $directionTeaser = [];
-
-    foreach ($pdo->query("SELECT photo FROM direction") as $d) {
-
-        if (
-            !empty($d['photo']) &&
-            file_exists(__DIR__ . '/assets/images/' . $d['photo'])
-        ) {
-            $directionTeaser[] = 'assets/images/' . $d['photo'];
-        }
-
-    }
 
     $persoTeaser = $pdo->query("
         SELECT photo
@@ -876,8 +753,7 @@ $dDga = $direction['dga'] ?? null;
     );
 
     $teaserPhotos = array_merge(
-        $officielsTeaser,
-        $directionTeaser,
+        array_column(photos_officiels($pdo), 'file'),
         $persoTeaser
     );
 

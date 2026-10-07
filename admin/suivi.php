@@ -75,9 +75,16 @@ require __DIR__ . '/_admin_header.php';
     <h1 class="text-2xl font-black text-primary uppercase italic tracking-tight">Suivi des réservations</h1>
     <p class="text-sm text-slate-500 mt-0.5">Réservations payées (soldées ou avec acompte) : à venir, à confirmer et effectuées</p>
   </div>
+  <div class="flex items-center gap-3 flex-wrap">
   <?php if (!peut_cocher_effectuee()): ?>
   <span class="text-[10px] font-black text-slate-300 uppercase tracking-widest"><i class="fas fa-eye mr-1"></i> Consultation</span>
   <?php endif; ?>
+  <?php if ($installe): ?>
+  <a href="export.php?type=suivi&amp;vue=<?= e($vue) ?>" class="flex items-center gap-2 bg-white border border-slate-200 text-primary text-xs font-black uppercase px-5 py-3 rounded-xl hover:bg-slate-50 transition shadow-sm">
+    <i class="fas fa-file-csv"></i> Exporter (CSV)
+  </a>
+  <?php endif; ?>
+  </div>
 </div>
 
 <?php if (!$installe): ?>

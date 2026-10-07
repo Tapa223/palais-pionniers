@@ -3268,3 +3268,33 @@ if (!function_exists('date_saisie_valide')) {
         return $d && $d->format('Y-m-d') === $date;
     }
 }
+
+if (!function_exists('photos_officiels')) {
+    // Président, Premier ministre, puis Ministre et Directeur général (photos de la page Direction)
+    function photos_officiels(PDO $pdo): array
+    {
+        $base = dirname(__DIR__) . '/';
+        $photos = [];
+        foreach (['president' => 'Président de la République', 'premier-ministre' => 'Premier Ministre'] as $nom => $label) {
+            foreach (["assets/images/officiels/$nom.jpg", "assets/images/$nom.jpg", "$nom.jpg"] as $chemin) {
+                if (is_file($base . $chemin)) {
+                    $photos[] = ['file' => $chemin, 'label' => $label];
+                    break;
+                }
+            }
+        }
+        $labels = ['ministre' => 'Ministre de la Jeunesse et des Sports', 'dg' => 'Directeur Général du Palais des Pionniers'];
+        $direction = [];
+        foreach ($pdo->query("SELECT role_key, nom, photo FROM direction WHERE role_key IN ('ministre', 'dg')") as $d) {
+            if (!empty($d['photo']) && is_file($base . 'assets/images/' . $d['photo'])) {
+                $direction[$d['role_key']] = ['file' => 'assets/images/' . $d['photo'], 'label' => $labels[$d['role_key']]];
+            }
+        }
+        foreach (['ministre', 'dg'] as $cle) {
+            if (isset($direction[$cle])) {
+                $photos[] = $direction[$cle];
+            }
+        }
+        return $photos;
+    }
+}

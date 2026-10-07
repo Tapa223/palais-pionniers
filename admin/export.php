@@ -33,6 +33,9 @@ $typesAutorises = [
     'utilisateurs'       => ['ministre', 'superadmin'],
     'journal'            => ['ministre', 'superadmin'],
     'suggestions'    => ['ministre', 'admin_espaces', 'admin_activites', 'admin_messages', 'admin_comptable', 'superadmin'],
+    'suivi'          => ['ministre', 'admin_espaces', 'admin_activites', 'admin_messages', 'admin_comptable', 'superadmin'],
+    'acomptes'       => $rolesComptables,
+    'observations'   => ['ministre', 'superadmin'],
 ];
 
 if (!isset($typesAutorises[$type]) || !in_array($role, $typesAutorises[$type], true)) {
@@ -103,6 +106,7 @@ $ref = function (?int $reservationId) use (&$refs, $pdo): array {
     return $refs[$reservationId];
 };
 $colonneRefs = [];
+$rowsFournies = null;
 
 if ($type === 'paiements') {
     $dateCol = 'p.created_at';
@@ -541,6 +545,81 @@ if ($type === 'paiements') {
         return [(int)$r['id'], $dateH($r['created_at']), $texte($r['user_nom']), $r['role'] ?? '', $r['module'], $r['action'], $texte($r['details'])];
     };
 
+} elseif ($type === 'suivi') {
+    $vuesSuivi = ['a_venir' => 'a_venir', 'a_confirmer' => 'a_confirmer', 'effectuees' => 'effectuees'];
+    $vue = $vuesSuivi[$_GET['vue'] ?? ''] ?? 'a_venir';
+    if (!suivi_disponible($pdo)) {
+        http_response_code(404);
+        exit('Suivi non installé.');
+    }
+    $rowsFournies = reservations_suivi($pdo, $vue, 5000);
+    $filename = 'suivi_' . $vue . '_' . date('Y-m-d_His') . '.csv';
+    $headers  = ['Réservation', 'Espace', 'Client', 'Téléphone', 'Partenaire', 'Début', 'Fin', 'Paiement', 'Motif', 'Effectuée le', 'Confirmée par'];
+    $libPaiement = ['paye' => 'Soldée', 'partiellement_paye' => 'Acompte versé'];
+    $mapRow = function ($r) use ($dateH, $libPaiement) {
+        return [
+            ref_resa((int)$r['id']), $r['espace_nom'], $r['nom_complet'], $r['telephone'] ?? '', $r['partenaire_nom'] ?? '',
+            $dateH($r['debut_dt']), $dateH($r['fin_dt']), $libPaiement[$r['statut_paiement']] ?? $r['statut_paiement'],
+            $r['motif'] ?? '', $dateH($r['effectuee_le']), $r['effectuee_par_nom'] ?? '',
+        ];
+    };
+
+} elseif ($type === 'acomptes') {
+    $stmtA = $pdo->query("
+        SELECT r.id, r.date_resa, r.date_depart, r.heure_debut, r.heure_fin,
+               e.nom AS espace_nom, u.nom_complet, u.telephone
+        FROM reservations r
+        JOIN espaces e ON e.id = r.espace_id
+        JOIN users u ON u.id = r.user_id
+        WHERE r.statut = 'validee'
+          AND EXISTS (SELECT 1 FROM paiements p WHERE p.reservation_id = r.id)
+        ORDER BY r.date_resa ASC, r.heure_debut ASC
+    ");
+    $rowsFournies = [];
+    foreach ($stmtA->fetchAll() as $a) {
+        $s = situation_financiere_reservation($pdo, (int)$a['id']);
+        if (!$s || ($s['solde'] <= 0 && $s['nb_paiements'] <= 1)) {
+            continue;
+        }
+        $a['s'] = $s;
+        $rowsFournies[] = $a;
+    }
+    $filename = 'acomptes_' . date('Y-m-d_His') . '.csv';
+    $headers  = ['Réservation', 'Client', 'Téléphone', 'Espace', 'Date', 'Horaires', 'Net dû (FCFA)', 'Payé net (FCFA)', 'Solde (FCFA)', 'Échéance du solde', 'État'];
+    $mapRow = function ($r) use ($fin2, $dateJ, $dateH) {
+        $s = $r['s'];
+        $horaires = $r['heure_debut'] ? substr($r['heure_debut'], 0, 5) . ' - ' . substr($r['heure_fin'], 0, 5)
+            : ($r['date_depart'] ? 'Jusqu\'au ' . $dateJ($r['date_depart']) : '');
+        return [
+            ref_resa((int)$r['id']), $r['nom_complet'], $r['telephone'] ?? '', $r['espace_nom'],
+            $dateJ($r['date_resa']), $horaires,
+            $fin2($s['net_du']), $fin2($s['paye_net']), $fin2($s['solde']),
+            $s['solde'] > 0 ? $dateH($s['echeance_solde'] ?? null) : '',
+            $s['solde'] > 0 ? (!empty($s['en_retard']) ? 'Solde en retard' : 'En cours') : 'Soldé',
+        ];
+    };
+
+} elseif ($type === 'observations') {
+    if ($debut) { $where[] = "o.created_at >= ?"; $params[] = $debut . ' 00:00:00'; }
+    if ($fin)   { $where[] = "o.created_at <= ?"; $params[] = $fin   . ' 23:59:59'; }
+    $sql = "
+        SELECT o.id, o.created_at, o.cible_type, o.cible_id, o.contenu, o.parent_id, u.nom_complet AS auteur, u.role
+        FROM observations o
+        LEFT JOIN users u ON u.id = o.auteur_id
+        " . ($where ? 'WHERE ' . implode(' AND ', $where) : '') . "
+        ORDER BY o.created_at DESC
+    ";
+    $filename = 'observations_' . date('Y-m-d_His') . '.csv';
+    $headers  = ['N°', 'Date', 'Auteur', 'Rôle', 'Objet', 'N° de l\'objet', 'Réponse à', 'Observation'];
+    $libCible = ['reservation' => 'Réservation', 'paiement' => 'Paiement', 'activite' => 'Activité', 'espace' => 'Espace', 'requisition' => 'Réquisition', 'remboursement' => 'Remboursement'];
+    $mapRow = function ($r) use ($dateH, $libCible) {
+        return [
+            (int)$r['id'], $dateH($r['created_at']), $r['auteur'] ?? '', $r['role'] ?? '',
+            $libCible[$r['cible_type']] ?? $r['cible_type'], (int)$r['cible_id'],
+            $r['parent_id'] ? (int)$r['parent_id'] : '', $r['contenu'],
+        ];
+    };
+
 } else {
     $dateCol = 'r.created_at';
     if ($debut) { $where[] = "$dateCol >= ?"; $params[] = $debut . ' 00:00:00'; }
@@ -600,9 +679,13 @@ if ($type === 'paiements') {
     };
 }
 
-$stmt = $pdo->prepare($sql);
-$stmt->execute($params);
-$rows = $stmt->fetchAll();
+if ($rowsFournies !== null) {
+    $rows = $rowsFournies;
+} else {
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $rows = $stmt->fetchAll();
+}
 
 if ($colonneRefs) {
     $ids = [];
@@ -617,7 +700,7 @@ if ($colonneRefs) {
 $moduleJournal = [
     'suggestions' => 'messages', 'messages' => 'messages', 'jeunes_engages' => 'activites',
     'demandes_services' => 'espaces', 'demandes_bail' => 'espaces', 'espaces' => 'espaces',
-    'partenaires' => 'users', 'utilisateurs' => 'users', 'journal' => 'users',
+    'partenaires' => 'users', 'utilisateurs' => 'users', 'journal' => 'users', 'observations' => 'messages',
 ][$type] ?? 'reservations';
 log_activity('export_' . $type, $moduleJournal, count($rows) . ' ligne(s) exportée(s) (' . $type . ')'
     . ($debut || $fin ? ' — période ' . ($debut ?: '…') . ' → ' . ($fin ?: '…') : ''));

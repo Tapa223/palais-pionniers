@@ -76,7 +76,7 @@ if (!$readonly && $_SERVER['REQUEST_METHOD'] === 'POST' && csrf_check($_POST['cs
             $sujetMail = "Réponse à votre message - Palais des Pionniers";
             $corpsMail = "Bonjour {$msgOrig['nom']},\n\n$reponse\n\nLe Palais des Pionniers";
             $envoye = filter_var($msgOrig['email'], FILTER_VALIDATE_EMAIL)
-                && @mail($msgOrig['email'], $sujetMail, $corpsMail, "From: no-reply@palaisdespionniers.ml\r\nContent-Type: text/plain; charset=UTF-8");
+                && @mail($msgOrig['email'], $sujetMail, $corpsMail, "From: Palais des Pionniers <ppb@mjsports.gouv.ml>\r\nContent-Type: text/plain; charset=UTF-8");
             if (!$envoye) {
                 $viaEmail = 0;
                 $pdo->prepare("UPDATE messages SET envoye_email = 0 WHERE id = ?")->execute([$id]);

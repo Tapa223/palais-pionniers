@@ -16,25 +16,11 @@ require __DIR__ . '/includes/header.php';
 ?>
 
 <?php
-$officielsManuels = [
-    ['file' => 'assets/images/officiels/president.jpg',        'label' => 'Président de la République'],
-    ['file' => 'assets/images/officiels/premier-ministre.jpg', 'label' => 'Premier Ministre'],
-];
-$bandeauOfficiels = array_values(array_filter($officielsManuels, fn($o) => file_exists(__DIR__ . '/' . $o['file'])));
-
-$directionLabels = ['ministre' => 'Ministre de la Jeunesse et des Sports', 'dg' => 'Directeur Général du Palais des Pionniers', 'dga' => 'Directeur Général Adjoint du Palais des Pionniers'];
-$bandeauDirection = [];
-foreach ($pdo->query("SELECT role_key, nom, photo FROM direction") as $d) {
-    if (!empty($d['photo']) && file_exists(__DIR__ . '/assets/images/' . $d['photo'])) {
-        $bandeauDirection[] = ['file' => 'assets/images/' . $d['photo'], 'label' => $directionLabels[$d['role_key']] ?? $d['nom']];
-    }
-}
-
 $bandeauIcones = array_values(array_map(fn($p) => [
     'file'  => 'assets/images/personnalites/' . $p['photo'],
     'label' => $p['prenom'] ? $p['prenom'].' '.$p['nom'] : $p['nom'],
 ], $avecPhoto));
-$bandeauPhotos = array_merge($bandeauOfficiels, $bandeauDirection, $bandeauIcones);
+$bandeauPhotos = array_merge(photos_officiels($pdo), $bandeauIcones);
 ?>
 <section class="relative flex items-center min-h-[42vh] sm:min-h-0 sm:max-h-[52vh] py-8 sm:py-14 bg-slate-900 text-white overflow-hidden">
 

@@ -112,7 +112,7 @@ require __DIR__ . '/includes/header.php';
       <?php foreach ([
         ['fa-map-marker-alt', 'Adresse',   'Magnambougou / Dianéguéla, Bamako, Mali'],
         ['fa-phone',          'Téléphone', '+223 76 45 42 59'],
-        ['fa-envelope',       'Email',     'sd_dicko@yahoo.fr'],
+        ['fa-envelope',       'Email',     'ppb@mjsports.gouv.ml'],
         ['fa-clock',          'Horaires',  'Lun – Sam : 08h00 – 18h00'],
       ] as [$icon, $label, $val]): ?>
       <div class="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm flex items-start gap-4 hover:shadow-md transition">
@@ -139,28 +139,30 @@ require __DIR__ . '/includes/header.php';
 
       <?php
       $reseaux = array_filter(require __DIR__ . '/config/reseaux_sociaux.php', 'url_web_valide');
-      if ($reseaux):
+      $boutonsReseaux = [
+          'facebook' => ['fa-facebook-f', 'Facebook', 'bg-blue-600 hover:bg-blue-700'],
+          'tiktok'   => ['fa-tiktok', 'TikTok', 'bg-slate-900 hover:bg-black'],
+      ];
       ?>
       <div class="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm">
         <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-4">Suivez-nous</p>
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          <?php if (!empty($reseaux['facebook'])): ?>
-          <a href="<?= e($reseaux['facebook']) ?>" target="_blank" rel="noopener"
-             class="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white transition justify-center">
-            <i class="fab fa-facebook-f text-sm w-4 text-center"></i>
-            <span class="text-xs font-black">Facebook</span>
+        <div class="grid grid-cols-2 gap-2">
+          <?php foreach ($boutonsReseaux as $cle => [$icone, $nom, $couleur]): ?>
+          <?php if (!empty($reseaux[$cle])): ?>
+          <a href="<?= e($reseaux[$cle]) ?>" target="_blank" rel="noopener" aria-label="<?= $nom ?> du Palais des Pionniers"
+             class="flex items-center gap-2.5 px-3 py-2.5 rounded-xl <?= $couleur ?> text-white transition justify-center">
+            <i class="fab <?= $icone ?> text-sm w-4 text-center"></i>
+            <span class="text-xs font-black"><?= $nom ?></span>
           </a>
+          <?php else: ?>
+          <span class="flex items-center gap-2.5 px-3 py-2.5 rounded-xl <?= $couleur ?> text-white justify-center">
+            <i class="fab <?= $icone ?> text-sm w-4 text-center"></i>
+            <span class="text-xs font-black"><?= $nom ?></span>
+          </span>
           <?php endif; ?>
-          <?php if (!empty($reseaux['tiktok'])): ?>
-          <a href="<?= e($reseaux['tiktok']) ?>" target="_blank" rel="noopener"
-             class="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-slate-900 hover:bg-black text-white transition justify-center">
-            <i class="fab fa-tiktok text-sm w-4 text-center"></i>
-            <span class="text-xs font-black">TikTok</span>
-          </a>
-          <?php endif; ?>
+          <?php endforeach; ?>
         </div>
       </div>
-      <?php endif; ?>
     </div>
 
     <div class="md:col-span-2 order-1 md:order-2">

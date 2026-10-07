@@ -19,13 +19,13 @@ if ($installe && !$readonly && $_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!is_superadmin()) {
                 $msg = ['err', 'Seule la Direction peut supprimer une suggestion.'];
             } else {
-                $st = $pdo->prepare("DELETE FROM suggestions WHERE id = ? AND statut = 'traitee'");
+                $st = $pdo->prepare("DELETE FROM suggestions WHERE id = ?");
                 $st->execute([$id]);
                 if ($st->rowCount() === 1) {
-                    log_activity('suggestion_supprimee', 'messages', "Suggestion SUG-$id (traitée) supprimée");
+                    log_activity('suggestion_supprimee', 'messages', "Suggestion SUG-$id supprimée");
                     $msg = ['ok', "Suggestion SUG-$id supprimée."];
                 } else {
-                    $msg = ['err', 'Seule une suggestion marquée « Traitée » peut être supprimée.'];
+                    $msg = ['err', 'Suggestion introuvable.'];
                 }
             }
         } elseif ($id && isset($statuts[$nouveau])) {
@@ -116,9 +116,9 @@ require __DIR__ . '/_admin_header.php';
       <?php foreach ($libelles as $cle => $lib): if ($cle === $sg['statut']) continue; ?>
       <button type="submit" name="statut" value="<?= $cle ?>" class="text-[11px] font-black uppercase px-3 py-1.5 rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50 transition">Marquer « <?= $lib ?> »</button>
       <?php endforeach; ?>
-      <?php if (is_superadmin() && $sg['statut'] === 'traitee'): ?>
-      <button type="submit" name="action" value="supprimer" onclick="return confirm('Supprimer définitivement cette suggestion traitée ?')"
-              class="text-[11px] font-black uppercase px-3 py-1.5 rounded-xl border border-rose-100 text-rose-500 hover:bg-rose-50 transition">Supprimer</button>
+      <?php if (is_superadmin()): ?>
+      <button type="submit" name="action" value="supprimer" onclick="return confirm('Supprimer définitivement cette suggestion ?')"
+              class="text-[11px] font-black uppercase px-3 py-1.5 rounded-xl border border-red-200 text-accent hover:bg-red-50 transition"><i class="fas fa-trash-alt mr-1"></i>Supprimer</button>
       <?php endif; ?>
     </form>
     <?php endif; ?>
