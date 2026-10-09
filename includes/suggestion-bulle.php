@@ -8,29 +8,18 @@ $retourSuggestion = $_GET['suggestion'] ?? '';
 <style>
   @media (prefers-reduced-motion: no-preference) {
     #suggestionOuvrir { animation: suggestionFlotte 3.6s ease-in-out infinite; }
-    #suggestionLibelle { display:inline-block; animation: suggestionApparait .8s ease-out both, suggestionRespire 3.6s ease-in-out .8s infinite; }
-    #suggestionOuvrir:hover, #suggestionOuvrir:focus-visible,
-    #suggestionOuvrir:hover #suggestionLibelle, #suggestionOuvrir:focus-visible #suggestionLibelle { animation-play-state: paused; }
+    #suggestionOuvrir:hover, #suggestionOuvrir:focus-visible { animation-play-state: paused; }
   }
   @keyframes suggestionFlotte {
     0%, 100% { transform: translateY(0); }
     50%      { transform: translateY(-4px); }
   }
-  @keyframes suggestionApparait {
-    from { opacity: 0; transform: translateX(4px); }
-    to   { opacity: 1; transform: none; }
-  }
-  @keyframes suggestionRespire {
-    0%, 100% { opacity: 1; }
-    50%      { opacity: .78; }
-  }
 </style>
 <div id="suggestion" class="fixed right-4 z-40" style="bottom:1rem">
   <a href="?suggestion=ouvrir#suggestionModal" id="suggestionOuvrir" role="button" aria-haspopup="dialog" aria-controls="suggestionModal"
-     aria-label="Une suggestion ? Envoyer une suggestion anonyme"
-     class="flex items-center gap-2 bg-primary text-white rounded-full shadow-xl px-4 py-3 text-xs font-black tracking-wide hover:bg-accent transition">
-    <i class="fas fa-comment-dots text-base"></i>
-    <span id="suggestionLibelle" aria-hidden="true">Une suggestion ?</span>
+     aria-label="Envoyer une suggestion anonyme" title="Une suggestion ?"
+     class="flex items-center justify-center w-14 h-14 bg-primary text-white rounded-full shadow-xl hover:bg-accent transition">
+    <i class="fas fa-comment-dots text-lg sm:text-xl" aria-hidden="true"></i>
   </a>
 </div>
 
