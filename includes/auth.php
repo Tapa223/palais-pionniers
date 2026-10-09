@@ -3385,3 +3385,12 @@ if (!function_exists('resume_texte')) {
         return rtrim($p !== false && $p > 60 ? substr($t, 0, $p) : $t, " ,;:.-") . '…';
     }
 }
+
+if (!function_exists('version_fichier')) {
+    // Suffixe ?v=… qui change à chaque mise à jour du fichier : le navigateur recharge la feuille de style au lieu de garder l'ancienne
+    function version_fichier(string $chemin): string
+    {
+        $t = @filemtime(dirname(__DIR__) . '/' . ltrim($chemin, '/'));
+        return $t ? '?v=' . $t : '';
+    }
+}

@@ -1,10 +1,12 @@
 /* Conteneur centré (classe utilisée par toutes les pages publiques, absente de la compilation d'origine) */
-.container{width:100%;margin-left:auto;margin-right:auto}
-@media (min-width:640px){.container{max-width:640px}}
-@media (min-width:768px){.container{max-width:768px;padding-left:1.5rem!important;padding-right:1.5rem!important}}
-@media (min-width:1024px){.container{max-width:1024px;padding-left:2rem!important;padding-right:2rem!important}}
+.container{width:100%;margin-left:auto;margin-right:auto;padding-left:1.25rem!important;padding-right:1.25rem!important}
+@media (min-width:640px){.container{max-width:640px;padding-left:1.5rem!important;padding-right:1.5rem!important}}
+@media (min-width:768px){.container{max-width:768px;padding-left:2rem!important;padding-right:2rem!important}}
+@media (min-width:1024px){.container{max-width:1024px;padding-left:3rem!important;padding-right:3rem!important}}
 @media (min-width:1280px){.container{max-width:1280px}}
 @media (min-width:1536px){.container{max-width:1440px}}
+/* iPhone / iPad (Safari) : un champ en dessous de 16 px provoque un zoom automatique de la page à la saisie */
+@supports (-webkit-touch-callout: none){input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]),select,textarea{font-size:16px!important}}
 
 *, ::before, ::after {
   --tw-border-spacing-x: 0;

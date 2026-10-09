@@ -60,7 +60,7 @@ $pageTitle = "Inscription | Palais des Pionniers";
     <link rel="icon" href="favicon.ico" sizes="any">
     <link rel="icon" type="image/png" sizes="32x32" href="assets/images/favicon/favicon-32.png">
     <link rel="apple-touch-icon" sizes="180x180" href="assets/images/favicon/apple-touch-icon.png">
-    <link rel="stylesheet" href="assets/css/tailwind.css">
+    <link rel="stylesheet" href="assets/css/tailwind.css<?= version_fichier('assets/css/tailwind.css') ?>">
     <link rel="stylesheet" href="assets/fontawesome/css/all.min.css">
     <link rel="stylesheet" href="assets/css/fonts.css">
     <style>

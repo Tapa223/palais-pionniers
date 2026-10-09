@@ -74,7 +74,7 @@ if (!empty($reseauxEntete['facebook'])) {
 
     <script type="application/ld+json"><?= json_encode($donneesStructurees, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP) ?></script>
 
-    <link rel="stylesheet" href="<?= $prefix ?>assets/css/tailwind.css">
+    <link rel="stylesheet" href="<?= $prefix ?>assets/css/tailwind.css<?= version_fichier('assets/css/tailwind.css') ?>">
     <link rel="stylesheet" href="<?= $prefix ?>assets/fontawesome/css/all.min.css">
     <link rel="stylesheet" href="<?= $prefix ?>assets/css/fonts.css">
     <style>

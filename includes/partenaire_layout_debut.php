@@ -35,7 +35,7 @@ $titreCourt = $navPartenaire[$ongletActif][2] ?? 'Tableau de bord';
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <title><?= e($pageTitle ?? 'Espace admin | Palais des Pionniers') ?></title>
-<link rel="stylesheet" href="assets/css/tailwind.css">
+<link rel="stylesheet" href="assets/css/tailwind.css<?= version_fichier('assets/css/tailwind.css') ?>">
 <link rel="stylesheet" href="assets/fontawesome/css/all.min.css">
 <link rel="stylesheet" href="assets/css/fonts.css">
 <style>
