@@ -13,6 +13,7 @@ foreach ($questions as $q) {
 }
 
 $pageTitle = "Questions fréquentes | Palais des Pionniers";
+$pageDescription = "Réponses aux questions fréquentes sur la réservation des espaces, le paiement, l'annulation, la location longue durée et le compte client du Palais des Pionniers.";
 $page = 'faq.php';
 require __DIR__ . '/includes/header.php';
 ?>
@@ -37,7 +38,7 @@ require __DIR__ . '/includes/header.php';
         <h2 id="titreFaq" class="text-xl sm:text-3xl font-black italic uppercase tracking-tighter text-primary mb-6">Vos questions, nos réponses</h2>
 
         <?php if (!$parCategorie): ?>
-        <p class="text-sm text-slate-500">Les questions fréquentes seront bientôt disponibles. En attendant, n'hésitez pas à <a href="contact.php" class="font-bold text-accent hover:underline">nous écrire</a>.</p>
+        <p class="text-sm text-slate-500">Les questions fréquentes seront bientôt disponibles. En attendant, n'hésitez pas à <a href="<?= lien_page('contact.php') ?>" class="font-bold text-accent hover:underline">nous écrire</a>.</p>
         <?php else: ?>
         <div class="space-y-8">
             <?php foreach ($parCategorie as $categorie => $liste): ?>
@@ -65,7 +66,7 @@ require __DIR__ . '/includes/header.php';
             <p class="font-black uppercase italic text-lg sm:text-2xl tracking-tight">Vous ne trouvez pas votre réponse ?</p>
             <p class="text-sm text-white/70 mt-1">Notre équipe vous répond sous 24 heures, du lundi au samedi.</p>
         </div>
-        <a href="contact.php" class="bg-accent text-white text-xs font-black uppercase px-6 py-3 rounded-xl hover:bg-accent-dark transition whitespace-nowrap">Contactez-nous</a>
+        <a href="<?= lien_page('contact.php') ?>" class="bg-accent text-white text-xs font-black uppercase px-6 py-3 rounded-xl hover:bg-accent-dark transition whitespace-nowrap">Contactez-nous</a>
     </section>
 </div>
 

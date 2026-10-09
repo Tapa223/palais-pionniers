@@ -25,6 +25,7 @@ if ($photosFormations) {
 }
 
 $pageTitle = "Formations | Palais des Pionniers";
+$pageDescription = "Les formations proposées par le Palais des Pionniers à Bamako : durée, public visé et modalités d'inscription.";
 $page = 'formations.php';
 require __DIR__ . '/includes/header.php';
 ?>
@@ -85,10 +86,10 @@ document.addEventListener("DOMContentLoaded", function() {
             <?php foreach ($formations as $f):
                 $estTerminee = !empty($f['date_fin']) && strtotime($f['date_fin']) < strtotime('today');
             ?>
-            <a href="formation.php?id=<?= (int)$f['id'] ?>" class="block bg-slate-50 rounded-xl sm:rounded-[2rem] overflow-hidden border border-slate-100 hover:shadow-2xl transition-all group">
+            <a href="<?= e(lien_page('formation.php', ['id' => (int)$f['id']])) ?>" class="block bg-slate-50 rounded-xl sm:rounded-[2rem] overflow-hidden border border-slate-100 hover:shadow-2xl transition-all group">
                 <div class="aspect-square sm:aspect-[4/3] bg-slate-200 overflow-hidden relative">
                     <?php if ($f['photo']): ?>
-                    <img src="assets/images/formations/<?= e($f['photo']) ?>" class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105 <?= $estTerminee ? 'grayscale' : '' ?>">
+                    <img src="assets/images/formations/<?= e($f['photo']) ?>" alt="<?= e($f['nom']) ?>" loading="lazy" class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105 <?= $estTerminee ? 'grayscale' : '' ?>">
                     <?php else: ?>
                     <div class="w-full h-full flex items-center justify-center text-2xl sm:text-6xl text-slate-300"><i class="fas fa-graduation-cap"></i></div>
                     <?php endif; ?>

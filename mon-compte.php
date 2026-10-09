@@ -1037,6 +1037,7 @@ if ($partenaireMoi && ($_GET['tab'] ?? '') === 'bons') {
 
 
 $pageTitle = $partenaireMoi ? "Espace admin | Palais des Pionniers" : "Mon espace | Palais des Pionniers";
+$pageRobots = 'noindex, nofollow';
 $libellesOngletsPartenaire = [
     'tableau-de-bord' => 'Tableau de bord', 'reservations' => 'Mes réservations', 'bons' => 'Mes bons', 'services' => 'Services',
     'profil' => 'Profil et mot de passe', 'messages' => 'Messages', 'notifications' => 'Notifications', 'baux' => 'Mes baux',
@@ -1547,7 +1548,7 @@ if ($partenaireMoi) {
           Aucune réservation pour le moment.
         </p>
 
-        <a href="espaces.php"
+        <a href="<?= lien_page('espaces.php') ?>"
            class="inline-flex items-center gap-2 mt-4 text-xs font-black text-accent hover:underline">
 
           <i class="fas fa-building"></i>
@@ -2487,7 +2488,7 @@ if ($partenaireMoi) {
           Vous n'avez envoyé aucun message pour l'instant.
         </p>
 
-        <a href="contact.php"
+        <a href="<?= lien_page('contact.php') ?>"
            class="inline-block mt-4 text-accent font-black text-sm hover:underline">
 
           Contactez-nous →
@@ -2911,7 +2912,7 @@ if ($partenaireMoi) {
       </div>
       <?php endforeach; ?>
       <p class="text-center pt-2">
-        <a href="espaces.php#services" class="text-xs font-black text-accent hover:underline">Faire une nouvelle demande de service</a>
+        <a href="<?= lien_page('espaces.php') ?>#services" class="text-xs font-black text-accent hover:underline">Faire une nouvelle demande de service</a>
       </p>
     </div>
 
@@ -3191,7 +3192,7 @@ if ($partenaireMoi) {
 
       <div class="mt-6 pt-5 border-t border-slate-100 flex flex-wrap gap-3">
 
-        <a href="contact.php"
+        <a href="<?= lien_page('contact.php') ?>"
            class="flex items-center gap-2 text-xs font-black text-primary border border-slate-200 hover:border-primary px-4 py-2.5 rounded-xl transition">
 
           <i class="fas fa-envelope text-accent"></i>

@@ -39,7 +39,7 @@ function initiales($nom) {
     return mb_substr($init, 0, 3);
 }
 
-$pageTitle = "Accueil | Palais des Pionniers du Mali";
+$pageTitle = "Palais des Pionniers du Mali | Magnambougou, Bamako";
 $page = 'index.php';
 
 require __DIR__ . '/includes/header.php';
@@ -159,7 +159,7 @@ $heroSlidesTextes = [
                 </a>
 
                 <a
-                    href="sengager.php"
+                    href="<?= lien_page('sengager.php') ?>"
                     class="text-center bg-white/10 backdrop-blur-md text-white border-2 border-white/20 px-6 sm:px-8 py-3 sm:py-4 rounded-2xl font-black transition-all hover:bg-white/20 text-sm sm:text-base"
                 >
                     <i class="fas fa-hand-fist mr-2"></i>
@@ -249,6 +249,7 @@ $presentationSlides = array_values(array_filter($presentationSlides, fn($img) =>
 
                         <img
                             src="<?= e($src) ?>"
+                            alt="Le Palais des Pionniers"
                             loading="<?= $index === 0 ? 'eager' : 'lazy' ?>"
                             class="carousel-img-presentation absolute inset-0 w-full h-full object-cover transition-opacity duration-1000 ease-in-out <?= $index === 0 ? 'opacity-100' : 'opacity-0' ?>"
                         >
@@ -774,6 +775,7 @@ if ($dDg):
 
                             <img
                                 src="<?= e($tp) ?>"
+                                alt=""
                                 loading="lazy"
                                 class="w-full h-full object-cover"
                             >
@@ -807,7 +809,7 @@ if ($dDg):
 
 
             <a
-                href="personnalites.php"
+                href="<?= lien_page('personnalites.php') ?>"
                 class="flex-shrink-0 bg-white text-primary px-8 py-4 rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-accent hover:text-white transition-all"
             >
                 Découvrir les icônes
@@ -840,7 +842,7 @@ if ($dDg):
             </div>
 
             <a
-                href="espaces.php"
+                href="<?= lien_page('espaces.php') ?>"
                 class="bg-primary text-white px-8 py-4 rounded-xl font-black transition hover:bg-slate-900 uppercase text-xs tracking-widest"
             >
                 Catalogue complet
@@ -853,12 +855,12 @@ if ($dDg):
 
             <?php foreach ($espaces as $e):
 
-                $urlDetails = "espace.php?slug=" . urlencode($e['slug']);
+                $urlDetails = lien_page('espace.php', ['slug' => $e['slug']]);
 
             ?>
 
                 <a
-                    href="<?= $urlDetails ?>"
+                    href="<?= e($urlDetails) ?>"
                     class="group flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-all hover:-translate-y-2 hover:shadow-2xl relative"
                 >
 
@@ -1025,7 +1027,7 @@ $viePalaisSlides = [
                 <div class="flex flex-wrap justify-center gap-6">
 
                     <a
-                        href="contact.php"
+                        href="<?= lien_page('contact.php') ?>"
                         class="bg-accent text-white px-8 sm:px-12 py-3 sm:py-5 rounded-xl sm:rounded-2xl font-black text-sm sm:text-lg hover:shadow-2xl transition uppercase tracking-widest"
                     >
                         Contactez-nous
@@ -1065,7 +1067,7 @@ $viePalaisSlides = [
             </h3>
 
             <a
-                href="sengager.php"
+                href="<?= lien_page('sengager.php') ?>"
                 class="inline-flex items-center gap-2 bg-white text-accent px-8 sm:px-10 py-4 sm:py-5 rounded-2xl font-black uppercase tracking-widest text-xs sm:text-sm hover:bg-accent hover:text-white transition-all shadow-2xl"
             >
                 <i class="fas fa-hand-fist"></i>

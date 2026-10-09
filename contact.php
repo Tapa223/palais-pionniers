@@ -87,6 +87,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $pageTitle = "Contact | Palais des Pionniers";
+$pageDescription = "Contactez le Palais des Pionniers à Magnambougou / Dianéguéla, Bamako : téléphone, e-mail, horaires d'ouverture et formulaire de contact.";
 require __DIR__ . '/includes/header.php';
 ?>
 

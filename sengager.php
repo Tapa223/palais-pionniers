@@ -44,6 +44,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $pageTitle = "S'engager | Palais des Pionniers";
+$pageDescription = "Jeunes du Mali, engagez-vous comme volontaires au Palais des Pionniers : inscrivez-vous en ligne pour rejoindre nos programmes citoyens.";
 $page = 'sengager.php';
 require __DIR__ . '/includes/header.php';
 ?>

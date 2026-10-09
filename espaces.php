@@ -59,6 +59,7 @@ $espaces = $stmt->fetchAll();
 $cats = $pdo->query("SELECT slug, nom FROM categories ORDER BY id")->fetchAll();
 
 $pageTitle = "Nos espaces | Palais des Pionniers";
+$pageDescription = "Salles, terrains de sport, piscine et hébergement : découvrez les espaces du Palais des Pionniers à Bamako, leurs tarifs et leurs disponibilités, et réservez en ligne.";
 $page = 'espaces.php';
 require __DIR__ . '/includes/header.php';
 ?>
@@ -84,15 +85,15 @@ require __DIR__ . '/includes/header.php';
   <?php else: ?>
     <div class="mt-12 grid grid-cols-2 gap-3 sm:gap-8 lg:grid-cols-3 xl:grid-cols-4">
       <?php foreach ($espaces as $e): 
-          $urlDetails = "espace.php?slug=" . urlencode($e['slug']);
+          $urlDetails = lien_page('espace.php', ['slug' => $e['slug']]);
           $photos = $e['toutes_photos'] ? explode(',', $e['toutes_photos']) : [];
       ?>
-        <div onclick="window.location='<?= $urlDetails ?>'" class="cursor-pointer group flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-all hover:-translate-y-2 hover:shadow-2xl relative">
+        <div onclick="window.location='<?= e($urlDetails) ?>'" class="cursor-pointer group flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-all hover:-translate-y-2 hover:shadow-2xl relative">
           
           <div class="relative aspect-[16/11] overflow-hidden bg-slate-100 js-slider">
             <?php if (!empty($photos)): ?>
                 <?php foreach ($photos as $index => $img): ?>
-                    <img src="uploads/<?= e($img) ?>" 
+                    <img src="uploads/<?= e($img) ?>" alt="<?= e($e['nom']) ?>" loading="lazy"
                          class="absolute inset-0 w-full h-full object-cover transition-opacity duration-500 <?= $index === 0 ? 'opacity-100' : 'opacity-0' ?> js-slide"
                          data-index="<?= $index ?>">
                 <?php endforeach; ?>
@@ -148,7 +149,7 @@ require __DIR__ . '/includes/header.php';
             </p>
             <?php endif; ?>
 
-            <a href="<?= $urlDetails ?>" class="mt-auto pt-3 sm:pt-6 inline-flex w-full items-center justify-center rounded-lg border border-slate-300 px-2 sm:px-4 py-1.5 sm:py-2 text-[9px] sm:text-[10px] font-black uppercase tracking-[0.1em] sm:tracking-[0.15em] transition-all hover:bg-black hover:border-black hover:text-white">
+            <a href="<?= e($urlDetails) ?>" class="mt-auto pt-3 sm:pt-6 inline-flex w-full items-center justify-center rounded-lg border border-slate-300 px-2 sm:px-4 py-1.5 sm:py-2 text-[9px] sm:text-[10px] font-black uppercase tracking-[0.1em] sm:tracking-[0.15em] transition-all hover:bg-black hover:border-black hover:text-white">
                 Voir détails
             </a>
           </div>

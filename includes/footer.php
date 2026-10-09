@@ -17,13 +17,13 @@
     <div>
       <h4 class="mb-3 text-sm font-semibold uppercase tracking-wider">Navigation</h4>
       <ul class="space-y-2 text-sm text-white/80">
-        <li><a href="espaces.php" class="hover:text-white">Espaces</a></li>
-        <li><a href="activites.php" class="hover:text-white">Activités</a></li>
-        <li><a href="a-propos.php" class="hover:text-white">À propos</a></li>
-        <li><a href="personnalites.php" class="hover:text-white">Icônes</a></li>
-        <li><a href="sengager.php" class="hover:text-white">S'engager</a></li>
-        <li><a href="faq.php" class="hover:text-white">FAQ</a></li>
-        <li><a href="contact.php" class="hover:text-white">Contact</a></li>
+        <li><a href="<?= $prefix ?? '' ?><?= lien_page('espaces.php') ?>" class="hover:text-white">Espaces</a></li>
+        <li><a href="<?= $prefix ?? '' ?><?= lien_page('activites.php') ?>" class="hover:text-white">Activités</a></li>
+        <li><a href="<?= $prefix ?? '' ?><?= lien_page('a-propos.php') ?>" class="hover:text-white">À propos</a></li>
+        <li><a href="<?= $prefix ?? '' ?><?= lien_page('personnalites.php') ?>" class="hover:text-white">Icônes</a></li>
+        <li><a href="<?= $prefix ?? '' ?><?= lien_page('sengager.php') ?>" class="hover:text-white">S'engager</a></li>
+        <li><a href="<?= $prefix ?? '' ?><?= lien_page('faq.php') ?>" class="hover:text-white">FAQ</a></li>
+        <li><a href="<?= $prefix ?? '' ?><?= lien_page('contact.php') ?>" class="hover:text-white">Contact</a></li>
       </ul>
     </div>
     <div>
@@ -47,8 +47,8 @@
     <div class="container mx-auto px-4 py-5 text-xs text-white/70 md:px-6 flex flex-wrap items-center justify-between gap-2">
       <span>© <?= date('Y') ?> Palais des Pionniers. Tous droits réservés.</span>
       <span class="flex gap-4">
-        <a href="mentions-legales.php" class="hover:text-white transition">Mentions légales</a>
-        <a href="politique-confidentialite.php" class="hover:text-white transition">Confidentialité</a>
+        <a href="<?= $prefix ?? '' ?><?= lien_page('mentions-legales.php') ?>" class="hover:text-white transition">Mentions légales</a>
+        <a href="<?= $prefix ?? '' ?><?= lien_page('politique-confidentialite.php') ?>" class="hover:text-white transition">Confidentialité</a>
       </span>
     </div>
   </div>

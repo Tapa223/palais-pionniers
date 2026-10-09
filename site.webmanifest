@@ -1,0 +1,11 @@
+{
+  "name": "Palais des Pionniers",
+  "short_name": "Palais des Pionniers",
+  "icons": [
+    { "src": "assets/images/favicon/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "assets/images/favicon/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ],
+  "theme_color": "#0A2558",
+  "background_color": "#FFFFFF",
+  "display": "browser"
+}

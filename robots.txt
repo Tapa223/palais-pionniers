@@ -3,8 +3,12 @@ Allow: /
 Disallow: /admin/
 Disallow: /includes/
 Disallow: /config/
-Disallow: /mon-compte.php
-Disallow: /login.php
-Disallow: /register.php
+Disallow: /mon-compte
+Disallow: /reserver
+Disallow: /traitement-reservation.php
+Disallow: /generer_bon.php
+Disallow: /export-partenaire.php
+Disallow: /suggestion.php
+Disallow: /logout.php
 
-Sitemap: https://palaisdespionniers.ml/sitemap.php
+Sitemap: https://palaisdespionniers.ml/sitemap.xml

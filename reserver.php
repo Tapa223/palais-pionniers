@@ -133,6 +133,7 @@ if ($requisitionId > 0) {
 }
 
 $pageTitle = "Réserver un espace | Palais des Pionniers";
+$pageRobots = 'noindex, nofollow';
 $partenaireReservation = partenaire_utilisateur($pdo, (int)$_SESSION['user_id']);
 if ($partenaireReservation) {
     $pageTitle         = "Nouvelle réservation | Espace admin | Palais des Pionniers";
@@ -213,7 +214,7 @@ endif;
       <?php if ($partenaireReservation): ?>
       <span class="flex-shrink-0 text-[10px] font-black uppercase tracking-widest text-slate-400"><i class="fas fa-handshake mr-1"></i><span class="hidden sm:inline"><?= e($partenaireReservation['nom']) ?></span></span>
       <?php else: ?>
-      <a href="espaces.php" class="flex items-center gap-2 text-xs font-black text-slate-400 uppercase tracking-widest hover:text-primary transition flex-shrink-0">
+      <a href="<?= lien_page('espaces.php') ?>" class="flex items-center gap-2 text-xs font-black text-slate-400 uppercase tracking-widest hover:text-primary transition flex-shrink-0">
         <i class="fas fa-arrow-left"></i>
         <span class="hidden sm:inline">Espaces</span>
       </a>
@@ -888,7 +889,7 @@ function onEspaceChange() {
         if (esp.gerant_email) ficheHtml += `<p class="text-xs text-amber-700"><i class="fas fa-envelope w-4"></i> <a href="mailto:${esc(esp.gerant_email)}" class="underline font-bold">${esc(esp.gerant_email)}</a></p>`;
         if (esp.gerant_contact) ficheHtml += `<p class="text-xs text-amber-700"><i class="fas fa-phone-alt w-4"></i> <a href="tel:${esc(esp.gerant_contact.replace(/\s+/g,''))}" class="underline font-bold">${esc(esp.gerant_contact)}</a></p>`;
         if (!nomGerant && !esp.gerant_email && !esp.gerant_contact) {
-            ficheHtml = `<p class="text-xs text-amber-700 italic"><i class="fas fa-exclamation-circle w-4"></i> Coordonnées du gestionnaire non encore renseignées. <a href="contact.php" class="underline font-bold">Contactez l'administration du Palais</a>.</p>`;
+            ficheHtml = `<p class="text-xs text-amber-700 italic"><i class="fas fa-exclamation-circle w-4"></i> Coordonnées du gestionnaire non encore renseignées. <a href="<?= lien_page('contact.php') ?>" class="underline font-bold">Contactez l'administration du Palais</a>.</p>`;
         }
         ficheDiv.innerHTML = ficheHtml;
 

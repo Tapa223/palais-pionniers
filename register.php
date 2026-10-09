@@ -56,6 +56,10 @@ $pageTitle = "Inscription | Palais des Pionniers";
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?= e($pageTitle) ?></title>
+    <meta name="robots" content="noindex, follow">
+    <link rel="icon" href="favicon.ico" sizes="any">
+    <link rel="icon" type="image/png" sizes="32x32" href="assets/images/favicon/favicon-32.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="assets/images/favicon/apple-touch-icon.png">
     <link rel="stylesheet" href="assets/css/tailwind.css">
     <link rel="stylesheet" href="assets/fontawesome/css/all.min.css">
     <link rel="stylesheet" href="assets/css/fonts.css">
@@ -83,7 +87,7 @@ $pageTitle = "Inscription | Palais des Pionniers";
         <div class="absolute -bottom-32 -left-32 w-96 h-96 rounded-full bg-accent/10"></div>
         <div class="absolute -top-20 -right-20 w-72 h-72 rounded-full bg-white/5"></div>
 
-        <a href="index.php">
+        <a href="<?= lien_page('index.php') ?>">
             <img src="assets/images/logopalais.png" alt="Palais des Pionniers" class="h-20 w-auto object-contain">
         </a>
 
@@ -127,7 +131,7 @@ $pageTitle = "Inscription | Palais des Pionniers";
         <div class="w-full max-w-md py-8">
 
             <div class="lg:hidden flex justify-center mb-8">
-                <a href="index.php"><img src="assets/images/logopalais.png" alt="Logo" class="h-16 w-auto object-contain"></a>
+                <a href="<?= lien_page('index.php') ?>"><img src="assets/images/logopalais.png" alt="Logo" class="h-16 w-auto object-contain"></a>
             </div>
 
             <div class="mb-8">
@@ -235,7 +239,7 @@ $pageTitle = "Inscription | Palais des Pionniers";
                 </p>
             </div>
             <div class="mt-4 text-center">
-                <a href="index.php" class="text-xs text-slate-400 hover:text-primary transition">
+                <a href="<?= lien_page('index.php') ?>" class="text-xs text-slate-400 hover:text-primary transition">
                     <i class="fas fa-arrow-left mr-1"></i> Retour à l'accueil
                 </a>
             </div>

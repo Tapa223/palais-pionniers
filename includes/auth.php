@@ -3298,3 +3298,90 @@ if (!function_exists('photos_officiels')) {
         return $photos;
     }
 }
+
+// ---------- Adresses publiques (URL propres, canonical, référencement) ----------
+
+if (!function_exists('pages_url_propres')) {
+    // Pages publiques servies sans l'extension .php lorsque le serveur réécrit les adresses (.htaccess de la racine)
+    function pages_url_propres(): array
+    {
+        return ['index', 'espaces', 'espace', 'activites', 'detail-activite', 'formations', 'formation',
+            'personnalites', 'personnalite', 'a-propos', 'faq', 'contact', 'sengager', 'demande-bail',
+            'mentions-legales', 'politique-confidentialite'];
+    }
+}
+
+if (!function_exists('url_propres_actives')) {
+    // Vrai seulement si le .htaccess a posé la variable PP_URL_PROPRES (mod_rewrite actif) : sinon les liens restent en .php
+    function url_propres_actives(): bool
+    {
+        return !empty($_SERVER['PP_URL_PROPRES']) || !empty($_SERVER['REDIRECT_PP_URL_PROPRES']);
+    }
+}
+
+if (!function_exists('lien_page')) {
+    // lien_page('activites.php') -> 'activites' ; lien_page('espace.php', ['slug' => 'piscine']) -> 'espace?slug=piscine'
+    function lien_page(string $fichier, array $params = []): string
+    {
+        $nom = basename($fichier, '.php');
+        $url = $fichier;
+        if (url_propres_actives() && in_array($nom, pages_url_propres(), true)) {
+            $url = $nom === 'index' ? './' : $nom;
+        }
+        if ($params) {
+            $url .= '?' . http_build_query($params);
+        }
+        return $url;
+    }
+}
+
+if (!function_exists('url_racine_site')) {
+    // Adresse absolue de la racine du site, sans barre finale (domaine officiel en HTTPS sur le serveur en ligne)
+    function url_racine_site(): string
+    {
+        $hote = strtolower((string)($_SERVER['HTTP_HOST'] ?? ''));
+        if ($hote === '' || preg_match('/(^|\.)palaisdespionniers\.ml(:\d+)?$/', $hote)) {
+            return 'https://palaisdespionniers.ml';
+        }
+        $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
+        $dossier = str_replace('\\', '/', dirname((string)($_SERVER['SCRIPT_NAME'] ?? '/')));
+        if (basename($dossier) === 'admin') {
+            $dossier = dirname($dossier);
+        }
+        return ($https ? 'https://' : 'http://') . $hote . rtrim($dossier, '/');
+    }
+}
+
+if (!function_exists('url_canonique')) {
+    // Une seule adresse par page : sans .php, sans paramètres parasites, seulement slug ou id pour les fiches
+    function url_canonique(): string
+    {
+        $nom = basename((string)($_SERVER['SCRIPT_NAME'] ?? 'index.php'), '.php');
+        $cles = ['espace' => 'slug', 'detail-activite' => 'slug', 'formation' => 'id', 'personnalite' => 'id'];
+        $params = [];
+        if (isset($cles[$nom]) && isset($_GET[$cles[$nom]]) && is_scalar($_GET[$cles[$nom]]) && $_GET[$cles[$nom]] !== '') {
+            $params[$cles[$nom]] = (string)$_GET[$cles[$nom]];
+        }
+        if ($nom === 'index') {
+            return url_racine_site() . '/';
+        }
+        $chemin = (url_propres_actives() && in_array($nom, pages_url_propres(), true)) ? $nom : $nom . '.php';
+        return url_racine_site() . '/' . $chemin . ($params ? '?' . http_build_query($params) : '');
+    }
+}
+
+if (!function_exists('resume_texte')) {
+    // Résumé en texte brut pour les balises description (coupé sur un mot)
+    function resume_texte(?string $texte, int $max = 158): string
+    {
+        // Sans dépendre de l'extension mbstring (pas toujours activée chez l'hébergeur)
+        $t = trim((string)preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags((string)$texte), ENT_QUOTES | ENT_HTML5, 'UTF-8')));
+        $car = preg_split('//u', $t, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        if (count($car) <= $max) {
+            return $t;
+        }
+        $t = implode('', array_slice($car, 0, $max - 1));
+        $p = strrpos($t, ' ');
+        return rtrim($p !== false && $p > 60 ? substr($t, 0, $p) : $t, " ,;:.-") . '…';
+    }
+}

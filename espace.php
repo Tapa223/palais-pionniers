@@ -19,8 +19,7 @@ $stmt->execute([':slug' => $slug]);
 $espace = $stmt->fetch();
 
 if (!$espace) {
-    http_response_code(404);
-    echo "Espace non trouvé.";
+    require __DIR__ . '/404.php';
     exit;
 }
 
@@ -44,13 +43,17 @@ $resStmt = $pdo->prepare("
 $resStmt->execute([':id' => $espace['id']]);
 $occupations = $resStmt->fetchAll(PDO::FETCH_KEY_PAIR);
 
-$pageTitle = e($espace['nom']) . ' | Palais des Pionniers';
+$pageTitle = $espace['nom'] . ' | Palais des Pionniers';
+$pageDescription = resume_texte($espace['description'] ?? '') ?: ($espace['nom'] . ' : espace du Palais des Pionniers à Bamako. Tarifs, disponibilités et réservation en ligne.');
+if (!empty($galerie[0]['chemin'])) {
+    $pageImage = 'uploads/' . basename($galerie[0]['chemin']);
+}
 require __DIR__ . '/includes/header.php';
 ?>
 <style>html { scroll-behavior: smooth; }</style>
 
 <div class="container mx-auto px-4 py-4 md:py-8">
-    <a href="espaces.php" class="inline-flex items-center gap-1.5 text-xs font-black text-primary hover:text-accent transition uppercase tracking-widest bg-primary/5 hover:bg-accent/10 px-3.5 py-2 rounded-full">
+    <a href="<?= lien_page('espaces.php') ?>" class="inline-flex items-center gap-1.5 text-xs font-black text-primary hover:text-accent transition uppercase tracking-widest bg-primary/5 hover:bg-accent/10 px-3.5 py-2 rounded-full">
         <i class="fas fa-arrow-left"></i> Retour aux espaces
     </a>
 
@@ -71,7 +74,7 @@ require __DIR__ . '/includes/header.php';
                 <?php foreach($galerie as $index => $img): ?>
                 <button onclick="updateMainImg(this, 'uploads/<?= e($img['chemin']) ?>')"
                         class="flex-none w-20 h-20 rounded-2xl overflow-hidden border-2 <?= $index === 0 ? 'border-accent shadow-lg' : 'border-transparent opacity-60' ?> transition-all hover:opacity-100 js-thumb">
-                    <img src="uploads/<?= e($img['chemin']) ?>" class="w-full h-full object-cover">
+                    <img src="uploads/<?= e($img['chemin']) ?>" alt="<?= e($espace['nom']) ?>, photo <?= $index + 1 ?>" loading="lazy" class="w-full h-full object-cover">
                 </button>
                 <?php endforeach; ?>
             </div>
@@ -182,7 +185,7 @@ require __DIR__ . '/includes/header.php';
                         </div>
                     </div>
                 </div>
-                <a href="faq.php#tutoriel-video" class="mt-5 inline-flex items-center gap-2 text-xs font-black uppercase tracking-tight text-primary hover:text-accent transition">
+                <a href="<?= lien_page('faq.php') ?>#tutoriel-video" class="mt-5 inline-flex items-center gap-2 text-xs font-black uppercase tracking-tight text-primary hover:text-accent transition">
                     <i class="fas fa-circle-play text-accent"></i> Voir le tutoriel et les questions fréquentes
                 </a>
             </div>

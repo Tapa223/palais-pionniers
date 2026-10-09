@@ -1,3 +1,11 @@
+/* Conteneur centré (classe utilisée par toutes les pages publiques, absente de la compilation d'origine) */
+.container{width:100%;margin-left:auto;margin-right:auto}
+@media (min-width:640px){.container{max-width:640px}}
+@media (min-width:768px){.container{max-width:768px;padding-left:1.5rem!important;padding-right:1.5rem!important}}
+@media (min-width:1024px){.container{max-width:1024px;padding-left:2rem!important;padding-right:2rem!important}}
+@media (min-width:1280px){.container{max-width:1280px}}
+@media (min-width:1536px){.container{max-width:1440px}}
+
 *, ::before, ::after {
   --tw-border-spacing-x: 0;
   --tw-border-spacing-y: 0;

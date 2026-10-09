@@ -23,7 +23,7 @@ $stmt->execute([$slug]);
 $activite = $stmt->fetch(PDO::FETCH_ASSOC);
 
 if (!$activite) {
-    header('Location: activites.php');
+    require __DIR__ . '/404.php';
     exit;
 }
 
@@ -75,21 +75,17 @@ $accent = trim($activite['couleur'] ?? '') ?: '#E61E2A';
 
 $photosMosaique = array_slice($toutesLesPhotos, 0, 3);
 $photosCarrousel = array_slice($toutesLesPhotos, 3);
+
+$pageTitle = $activite['nom'] . ' | Palais des Pionniers';
+$pageDescription = resume_texte(($activite['sous_titre'] ?? '') !== '' ? $activite['sous_titre'] . '. ' . ($activite['description'] ?? '') : ($activite['description'] ?? ''))
+    ?: ($activite['nom'] . ' : une activité du Palais des Pionniers à Bamako.');
+if ($toutesLesPhotos) {
+    $pageImage = $toutesLesPhotos[0]['chemin'];
+}
+$page = 'activites.php';
+ob_start();
 ?>
-
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-    <title><?= e($activite['nom']) ?> - Palais des Pionniers</title>
-
-    <link rel="stylesheet" href="assets/css/tailwind.css">
-    <link rel="stylesheet" href="assets/fontawesome/css/all.min.css">
-    <link rel="stylesheet" href="assets/css/fonts.css">
     <link rel="stylesheet" href="assets/vendor/luminous/luminous-basic.min.css">
-
     <style>
         .gallery-image {
             transition: transform 0.6s cubic-bezier(0.165, 0.84, 0.44, 1);
@@ -110,19 +106,15 @@ $photosCarrousel = array_slice($toutesLesPhotos, 3);
             word-break: break-word;
         }
     </style>
-</head>
-
-<body class="bg-[#f8fafc] text-slate-900 font-sans">
+<?php $pageHeadExtra = ob_get_clean(); ?>
 
     <?php
-    if (file_exists(__DIR__ . '/includes/header.php')) {
-        include __DIR__ . '/includes/header.php';
-    }
+    require __DIR__ . '/includes/header.php';
     ?>
 
     <div class="container mx-auto px-4 sm:px-6 pt-4 sm:pt-6">
         <a
-            href="activites.php"
+            href="<?= lien_page('activites.php') ?>"
             class="inline-flex items-center gap-2 text-xs font-black uppercase tracking-widest text-primary hover:text-accent transition bg-primary/5 hover:bg-accent/10 px-3.5 py-2 rounded-full"
         >
             <i class="fas fa-arrow-left"></i>
@@ -516,5 +508,3 @@ $photosCarrousel = array_slice($toutesLesPhotos, 3);
             }
         });
     </script>
-</body>
-</html>

@@ -1,8 +1,8 @@
 Options -Indexes
 DirectoryIndex index.php
 
-# Fichiers de travail jamais servis par le site
-<FilesMatch "(?i)(\.(sql|md|log|bak|old|orig|swp|sh|ini|dist|tgz|gz|zip|rar|7z)|~)$">
+# Fichiers de travail jamais servis par le site (dont error_log, écrit par PHP sur cPanel)
+<FilesMatch "(?i)(\.(sql|md|log|bak|old|orig|swp|sh|ini|dist|tgz|gz|zip|rar|7z)|~|^error_log)$">
     Require all denied
 </FilesMatch>
 <FilesMatch "^\.">
@@ -16,4 +16,40 @@ DirectoryIndex index.php
 <IfModule mod_headers.c>
     Header always set X-Content-Type-Options "nosniff"
     Header always set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
+
+AddType application/manifest+json .webmanifest
+
+# Page « introuvable » du site (sur le serveur en ligne, installé à la racine du domaine)
+<If "%{HTTP_HOST} =~ /palaisdespionniers\.ml(:\d+)?$/">
+    ErrorDocument 404 /404.php
+</If>
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Signale à PHP que les adresses sans .php sont disponibles (voir lien_page() dans includes/auth.php)
+    RewriteRule ^ - [E=PP_URL_PROPRES:1]
+
+    # Serveur en ligne uniquement : HTTPS obligatoire et domaine sans www
+    RewriteCond %{HTTP_HOST} palaisdespionniers\.ml(:\d+)?$ [NC]
+    RewriteCond %{HTTPS} off [OR]
+    RewriteCond %{HTTP_HOST} ^www\. [NC]
+    RewriteRule ^ https://palaisdespionniers.ml%{REQUEST_URI} [R=301,L]
+
+    # /index.php -> / (requêtes GET seulement)
+    RewriteCond %{THE_REQUEST} ^GET\s/index\.php[\s?]
+    RewriteRule ^index\.php$ / [R=301,L]
+
+    # Anciennes adresses publiques en .php -> adresses propres (GET seulement : les formulaires POST ne sont jamais redirigés)
+    RewriteCond %{THE_REQUEST} ^GET\s/(espaces|espace|activites|detail-activite|formations|formation|personnalites|personnalite|a-propos|faq|contact|sengager|demande-bail|mentions-legales|politique-confidentialite)\.php[\s?]
+    RewriteRule ^([a-z-]+)\.php$ /$1 [R=301,L]
+
+    # Plan du site
+    RewriteRule ^sitemap\.xml$ sitemap.php [L]
+
+    # /activites sert activites.php (pages publiques de la racine uniquement)
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule ^(index|espaces|espace|activites|detail-activite|formations|formation|personnalites|personnalite|a-propos|faq|contact|sengager|demande-bail|mentions-legales|politique-confidentialite)$ $1.php [L]
 </IfModule>

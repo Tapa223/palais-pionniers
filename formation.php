@@ -9,7 +9,7 @@ $stmt = $pdo->prepare("SELECT * FROM formations WHERE id = ? AND actif = 1");
 $stmt->execute([$id]);
 $f = $stmt->fetch();
 
-if (!$f) { header('Location: formations.php'); exit; }
+if (!$f) { require __DIR__ . '/404.php'; exit; }
 
 $estTerminee = !empty($f['date_fin']) && strtotime($f['date_fin']) < strtotime('today');
 
@@ -23,13 +23,17 @@ foreach ($galerie as $g) $slidesFormation[] = 'assets/images/formations/' . $g['
 $slidesFormation = array_values(array_unique(array_filter($slidesFormation, fn($p) => file_exists(__DIR__ . '/' . $p))));
 
 $pageTitle = $f['nom'] . " | Palais des Pionniers";
+$pageDescription = resume_texte($f['description'] ?? '') ?: ('Formation « ' . $f['nom'] . ' » proposée par le Palais des Pionniers à Bamako.');
+if ($slidesFormation) {
+    $pageImage = $slidesFormation[0];
+}
 $page = 'formations.php';
 require __DIR__ . '/includes/header.php';
 ?>
 
 <section class="py-10 sm:py-14 bg-slate-50 border-b border-slate-100">
     <div class="container mx-auto px-4">
-        <a href="formations.php" class="inline-flex items-center gap-2 text-xs font-black uppercase tracking-widest text-primary hover:text-accent transition bg-primary/5 hover:bg-accent/10 px-3.5 py-2 rounded-full">
+        <a href="<?= lien_page('formations.php') ?>" class="inline-flex items-center gap-2 text-xs font-black uppercase tracking-widest text-primary hover:text-accent transition bg-primary/5 hover:bg-accent/10 px-3.5 py-2 rounded-full">
             <i class="fas fa-arrow-left"></i> Retour aux formations
         </a>
     </div>
@@ -42,7 +46,7 @@ require __DIR__ . '/includes/header.php';
                 <div class="aspect-[4/3] rounded-[2.5rem] overflow-hidden bg-slate-100 shadow-xl relative">
                     <?php if ($slidesFormation): ?>
                         <?php foreach ($slidesFormation as $index => $src): ?>
-                        <img src="<?= e($src) ?>" data-slide-formation="<?= $index ?>"
+                        <img src="<?= e($src) ?>" alt="<?= e($f['nom']) ?>" data-slide-formation="<?= $index ?>"
                              class="slide-formation absolute inset-0 w-full h-full object-cover transition-opacity duration-700 ease-in-out <?= $index === 0 ? 'opacity-100' : 'opacity-0' ?> <?= $estTerminee ? 'grayscale' : '' ?>">
                         <?php endforeach; ?>
                     <?php else: ?>
@@ -57,7 +61,7 @@ require __DIR__ . '/includes/header.php';
                     <?php foreach ($slidesFormation as $index => $src): ?>
                     <button onclick="goToFormationSlide(<?= $index ?>)" data-thumb-formation="<?= $index ?>"
                             class="flex-shrink-0 w-16 h-16 sm:w-20 sm:h-20 rounded-xl overflow-hidden border-2 <?= $index === 0 ? 'border-accent' : 'border-transparent opacity-60' ?> transition-all">
-                        <img src="<?= e($src) ?>" class="w-full h-full object-cover">
+                        <img src="<?= e($src) ?>" alt="" loading="lazy" class="w-full h-full object-cover">
                     </button>
                     <?php endforeach; ?>
                 </div>

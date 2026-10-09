@@ -76,6 +76,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $pageTitle = "Demande de bail | Palais des Pionniers";
+$pageDescription = "Demandez la location d'un espace du Palais des Pionniers sur une longue durée : au mois, au trimestre, au semestre ou à l'année.";
 $page = 'demande-bail.php';
 require __DIR__ . '/includes/header.php';
 ?>

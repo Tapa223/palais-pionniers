@@ -6,6 +6,7 @@ require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/config/database.php';
 
 $pageTitle = "Nos Activités | Palais des Pionniers";
+$pageDescription = "Les activités menées et accueillies au Palais des Pionniers de Bamako : citoyenneté, sport, culture et engagement de la jeunesse malienne.";
 $page = 'activites.php';
 require __DIR__ . '/includes/header.php';
 
@@ -37,10 +38,10 @@ try {
             <?php else: ?>
                 
                 <?php foreach ($all_activites as $act): $accent = $act['couleur'] ?: '#E61E2A'; ?>
-                <a href="detail-activite.php?slug=<?= urlencode($act['slug']) ?>" class="block bg-slate-50 rounded-xl sm:rounded-[2rem] overflow-hidden border border-slate-100 hover:shadow-2xl transition-all group">
+                <a href="<?= e(lien_page('detail-activite.php', ['slug' => $act['slug']])) ?>" class="block bg-slate-50 rounded-xl sm:rounded-[2rem] overflow-hidden border border-slate-100 hover:shadow-2xl transition-all group">
                     <div class="aspect-square sm:aspect-[4/3] bg-slate-200 overflow-hidden relative">
                         <?php if (!empty($act['image_principale']) && $act['image_principale'] !== 'default-hero.jpg'): ?>
-                        <img src="assets/images/activites/<?= e($act['image_principale']) ?>" class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105">
+                        <img src="assets/images/activites/<?= e($act['image_principale']) ?>" alt="<?= e($act['nom']) ?>" loading="lazy" class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105">
                         <?php else: ?>
                         <div class="w-full h-full flex items-center justify-center text-2xl sm:text-6xl text-slate-300"><i class="fas fa-star"></i></div>
                         <?php endif; ?>

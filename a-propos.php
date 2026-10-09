@@ -3,6 +3,7 @@ require_once __DIR__ . '/config/database.php';
 require_once __DIR__ . '/includes/auth.php';
 $pdo = db();
 $pageTitle = "À propos | Palais des Pionniers";
+$pageDescription = "Histoire, cadre légal, mission, valeurs et gouvernance du Palais des Pionniers de Magnambougou/Dianéguéla, établissement public placé sous la tutelle du Ministère de la Jeunesse et des Sports.";
 $page = 'a-propos.php';
 
 $heroPropos = array_values(array_filter(
@@ -171,7 +172,7 @@ require __DIR__ . '/includes/header.php';
                     <p class="text-slate-400 text-xs sm:text-lg">Consultez nos espaces disponibles et réservez pour vos événements institutionnels ou privés.</p>
                 </div>
                 <div class="flex md:justify-end">
-                    <a href="espaces.php" class="bg-white text-primary px-6 sm:px-12 py-3 sm:py-5 rounded-xl sm:rounded-2xl font-black text-xs sm:text-base uppercase tracking-widest hover:bg-accent hover:text-white transition shadow-2xl">
+                    <a href="<?= lien_page('espaces.php') ?>" class="bg-white text-primary px-6 sm:px-12 py-3 sm:py-5 rounded-xl sm:rounded-2xl font-black text-xs sm:text-base uppercase tracking-widest hover:bg-accent hover:text-white transition shadow-2xl">
                         Voir les espaces
                     </a>
                 </div>

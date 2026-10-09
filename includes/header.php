@@ -4,49 +4,75 @@ $u = current_user();
 $page = $page ?? basename($_SERVER['PHP_SELF']);
 
 $current_dir = basename(dirname($_SERVER['PHP_SELF']));
-$prefix = ($current_dir === 'admin') ? '../' : '';
-$admin_link = ($current_dir === 'admin') ? 'dashboard.php' : 'admin/dashboard.php';
+$prefix = $prefixeForce ?? (($current_dir === 'admin') ? '../' : ''); // la page 404 impose un chemin absolu
+$admin_link = ($current_dir === 'admin' && !isset($prefixeForce)) ? 'dashboard.php' : 'admin/dashboard.php';
 
 $pageDescription = $pageDescription ?? "Le Palais des Pionniers de Magnambougou/Dianéguéla, établissement public malien dédié à la construction citoyenne, la formation et l'épanouissement de la jeunesse. Réservez nos espaces, découvrez nos activités.";
 $pageImage = $pageImage ?? 'assets/images/porte.jpeg';
-$currentUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https://' : 'http://') . ($_SERVER['HTTP_HOST'] ?? 'palaisdespionniers.ml') . ($_SERVER['REQUEST_URI'] ?? '');
+$pageRobots = $pageRobots ?? 'index, follow';
+$racineSite = url_racine_site();
+$currentUrl = url_canonique();
+$titreComplet = $pageTitle ?? 'Palais des Pionniers';
+$imagePartage = preg_match('#^https?://#', $pageImage) ? $pageImage : $racineSite . '/' . ltrim($pageImage, '/');
+$donneesStructurees = [
+    '@context' => 'https://schema.org',
+    '@type' => 'GovernmentOrganization',
+    '@id' => $racineSite . '/#organisation',
+    'name' => 'Palais des Pionniers',
+    'alternateName' => 'Palais des Pionniers de Magnambougou/Dianéguéla',
+    'url' => $racineSite . '/',
+    'logo' => $racineSite . '/assets/images/logopalais.png',
+    'image' => $racineSite . '/assets/images/porte.jpeg',
+    'email' => 'ppb@mjsports.gouv.ml',
+    'telephone' => '+223 76 45 42 59',
+    'address' => [
+        '@type' => 'PostalAddress',
+        'streetAddress' => 'Magnambougou / Dianéguéla',
+        'addressLocality' => 'Bamako',
+        'addressCountry' => 'ML',
+    ],
+    'parentOrganization' => [
+        '@type' => 'GovernmentOrganization',
+        'name' => "Ministère de la Jeunesse et des Sports, chargé de l'Instruction Civique et de la Construction Citoyenne",
+    ],
+];
+$reseauxEntete = is_file(__DIR__ . '/../config/reseaux_sociaux.php') ? (array)(include __DIR__ . '/../config/reseaux_sociaux.php') : [];
+if (!empty($reseauxEntete['facebook'])) {
+    $donneesStructurees['sameAs'] = [$reseauxEntete['facebook']];
+}
 ?>
 <!DOCTYPE html>
 <html lang="fr" class="scroll-smooth">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title><?= e($pageTitle ?? 'Palais des Pionniers') ?></title>
+    <title><?= e($titreComplet) ?></title>
     <meta name="description" content="<?= e($pageDescription) ?>">
+    <meta name="robots" content="<?= e($pageRobots) ?>">
+    <?php if (http_response_code() === 200 || http_response_code() === false): ?>
     <link rel="canonical" href="<?= e($currentUrl) ?>">
+    <?php endif; ?>
+
+    <link rel="icon" href="<?= $prefix ?>favicon.ico" sizes="any">
+    <link rel="icon" type="image/png" sizes="32x32" href="<?= $prefix ?>assets/images/favicon/favicon-32.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="<?= $prefix ?>assets/images/favicon/apple-touch-icon.png">
+    <link rel="manifest" href="<?= $prefix ?>site.webmanifest">
+    <meta name="theme-color" content="#0A2558">
 
     <meta property="og:type" content="website">
-    <meta property="og:title" content="<?= e($pageTitle ?? 'Palais des Pionniers') ?>">
+    <meta property="og:title" content="<?= e($titreComplet) ?>">
     <meta property="og:description" content="<?= e($pageDescription) ?>">
-    <meta property="og:image" content="<?= e((isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https://' : 'http://') . ($_SERVER['HTTP_HOST'] ?? 'palaisdespionniers.ml') . '/' . ($prefix ?? '') . $pageImage) ?>">
+    <meta property="og:image" content="<?= e($imagePartage) ?>">
     <meta property="og:url" content="<?= e($currentUrl) ?>">
     <meta property="og:locale" content="fr_FR">
     <meta property="og:site_name" content="Palais des Pionniers">
 
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="<?= e($pageTitle ?? 'Palais des Pionniers') ?>">
+    <meta name="twitter:title" content="<?= e($titreComplet) ?>">
     <meta name="twitter:description" content="<?= e($pageDescription) ?>">
+    <meta name="twitter:image" content="<?= e($imagePartage) ?>">
 
-    <script type="application/ld+json">
-    {
-        "@context": "https://schema.org",
-        "@type": "GovernmentOrganization",
-        "name": "Palais des Pionniers",
-        "alternateName": "Palais des Pionniers de Magnambougou/Dianéguéla",
-        "url": "<?= e($currentUrl) ?>",
-        "logo": "<?= e(($prefix ?? '') . 'assets/images/logopalais.png') ?>",
-        "address": {
-            "@type": "PostalAddress",
-            "addressCountry": "ML",
-            "addressLocality": "Bamako"
-        }
-    }
-    </script>
+    <script type="application/ld+json"><?= json_encode($donneesStructurees, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP) ?></script>
 
     <link rel="stylesheet" href="<?= $prefix ?>assets/css/tailwind.css">
     <link rel="stylesheet" href="<?= $prefix ?>assets/fontawesome/css/all.min.css">
@@ -65,6 +91,7 @@ $currentUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https:/
         .marquee-bg { animation: marquee-scroll 55s linear infinite; }
         .marquee-bg-slow { animation: marquee-scroll 150s linear infinite; }
     </style>
+<?= $pageHeadExtra ?? '' ?>
 </head>
 <body class="min-h-screen flex flex-col">
 
@@ -76,7 +103,7 @@ $currentUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https:/
   </div>
   <div class="container mx-auto flex h-16 items-center justify-between px-4">
     
-  <a href="<?= $prefix ?>index.php" class="flex items-center gap-2 sm:gap-4">
+  <a href="<?= $prefix ?><?= lien_page('index.php') ?>" class="flex items-center gap-2 sm:gap-4">
     <?php if (file_exists(__DIR__ . '/../assets/images/logominis.jpg')): ?>
     <img src="<?= $prefix ?>assets/images/logominis.jpg" alt="Sceau de la République du Mali" class="h-7 sm:h-12 md:h-14 w-auto object-contain rounded-full">
     <div class="h-6 sm:h-10 md:h-12 w-px bg-slate-200"></div>
@@ -91,7 +118,7 @@ $currentUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https:/
       foreach ($links as $href => $label):
         $active = ($page === $href);
       ?>
-        <a href="<?= $prefix ?><?= $href ?>" class="rounded-md px-3 py-2 font-medium <?= $active ? 'text-accent' : 'text-slate-700 hover:bg-slate-100' ?>">
+        <a href="<?= $prefix ?><?= lien_page($href) ?>" class="rounded-md px-3 py-2 font-medium <?= $active ? 'text-accent' : 'text-slate-700 hover:bg-slate-100' ?>">
           <?= $label ?>
         </a>
       <?php endforeach; ?>
@@ -134,7 +161,7 @@ $currentUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https:/
   <div id="mobileMenu" class="lg:hidden bg-white shadow-2xl border-b border-slate-200 absolute w-full left-0 z-50 overflow-hidden transition-all duration-300 ease-out max-h-0 opacity-0">
     <nav class="flex flex-col px-3 max-h-[45vh] overflow-y-auto">
         <?php foreach ($links as $href => $label): $activeM = ($page === $href); ?>
-            <a href="<?= $prefix ?><?= $href ?>" class="py-2 font-bold text-[11px] uppercase tracking-tight border-b border-slate-100 flex items-center justify-between <?= $activeM ? 'text-accent border-accent/20' : 'text-primary' ?>">
+            <a href="<?= $prefix ?><?= lien_page($href) ?>" class="py-2 font-bold text-[11px] uppercase tracking-tight border-b border-slate-100 flex items-center justify-between <?= $activeM ? 'text-accent border-accent/20' : 'text-primary' ?>">
                 <?= $label ?>
                 <?php if ($activeM): ?><i class="fas fa-circle text-[5px] text-accent"></i><?php endif; ?>
             </a>

@@ -43,7 +43,7 @@ require __DIR__ . '/includes/header.php';
 
         <section>
             <h2 class="text-sm font-black uppercase text-primary mb-2">Vos droits</h2>
-            <p>Vous pouvez à tout moment demander la consultation, la correction ou la suppression de vos données personnelles en nous contactant via notre <a href="contact.php" class="text-accent font-bold hover:underline">formulaire de contact</a>.</p>
+            <p>Vous pouvez à tout moment demander la consultation, la correction ou la suppression de vos données personnelles en nous contactant via notre <a href="<?= lien_page('contact.php') ?>" class="text-accent font-bold hover:underline">formulaire de contact</a>.</p>
         </section>
 
         <section>
@@ -51,7 +51,7 @@ require __DIR__ . '/includes/header.php';
             <p>Ce site utilise uniquement des cookies techniques nécessaires au bon fonctionnement de la connexion à votre compte (session). Aucun cookie publicitaire ou de suivi tiers n'est utilisé.</p>
         </section>
 
-        <p class="text-xs text-slate-400 pt-4">Voir aussi nos <a href="mentions-legales.php" class="text-accent font-bold hover:underline">Mentions légales</a>.</p>
+        <p class="text-xs text-slate-400 pt-4">Voir aussi nos <a href="<?= lien_page('mentions-legales.php') ?>" class="text-accent font-bold hover:underline">Mentions légales</a>.</p>
     </div>
 </div>
 

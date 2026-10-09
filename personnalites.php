@@ -11,6 +11,7 @@ $personnalites = $pdo->query("
 $avecPhoto = array_filter($personnalites, fn($p) => !empty($p['photo']) && file_exists(__DIR__ . '/assets/images/personnalites/' . $p['photo']));
 
 $pageTitle = "Icônes | Palais des Pionniers";
+$pageDescription = "Les Icônes du Palais des Pionniers : les personnalités qui ont marqué le Mali et dont plusieurs espaces du Palais portent le nom.";
 $page = 'personnalites.php';
 require __DIR__ . '/includes/header.php';
 ?>
@@ -29,7 +30,7 @@ $bandeauPhotos = array_merge(photos_officiels($pdo), $bandeauIcones);
         <div class="marquee-bg flex gap-3 sm:gap-6 w-max h-full opacity-60">
             <?php foreach (array_merge($bandeauPhotos, $bandeauPhotos, $bandeauPhotos) as $slide): ?>
             <div class="relative flex-shrink-0 w-64 sm:w-72 h-full">
-                <img src="<?= e($slide['file']) ?>" loading="lazy" class="w-full h-full object-cover">
+                <img src="<?= e($slide['file']) ?>" alt="" loading="lazy" class="w-full h-full object-cover">
             </div>
             <?php endforeach; ?>
         </div>
@@ -60,10 +61,10 @@ $bandeauPhotos = array_merge(photos_officiels($pdo), $bandeauIcones);
         <?php else: ?>
         <div class="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-8">
             <?php foreach ($personnalites as $p): ?>
-            <a href="personnalite.php?id=<?= (int)$p['id'] ?>" class="bg-slate-50 rounded-2xl sm:rounded-[2rem] overflow-hidden border border-slate-100 hover:shadow-2xl transition-all group flex flex-col h-full">
+            <a href="<?= e(lien_page('personnalite.php', ['id' => (int)$p['id']])) ?>" class="bg-slate-50 rounded-2xl sm:rounded-[2rem] overflow-hidden border border-slate-100 hover:shadow-2xl transition-all group flex flex-col h-full">
                 <div class="aspect-[4/3] bg-slate-200 overflow-hidden flex-shrink-0">
                     <?php if ($p['photo'] && file_exists(__DIR__ . '/assets/images/personnalites/' . $p['photo'])): ?>
-                    <img src="assets/images/personnalites/<?= e($p['photo']) ?>" class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105">
+                    <img src="assets/images/personnalites/<?= e($p['photo']) ?>" alt="<?= e(trim(($p['prenom'] ?? '') . ' ' . $p['nom'])) ?>" loading="lazy" class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105">
                     <?php else: ?>
                     <div class="w-full h-full flex items-center justify-center text-3xl sm:text-6xl text-slate-300"><i class="fas fa-user"></i></div>
                     <?php endif; ?>

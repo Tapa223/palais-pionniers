@@ -38,10 +38,10 @@ require __DIR__ . '/includes/header.php';
 
         <section>
             <h2 class="text-sm font-black uppercase text-primary mb-2">Contact</h2>
-            <p>Pour toute question relative à ces mentions légales, vous pouvez nous contacter via notre <a href="contact.php" class="text-accent font-bold hover:underline">formulaire de contact</a>.</p>
+            <p>Pour toute question relative à ces mentions légales, vous pouvez nous contacter via notre <a href="<?= lien_page('contact.php') ?>" class="text-accent font-bold hover:underline">formulaire de contact</a>.</p>
         </section>
 
-        <p class="text-xs text-slate-400 pt-4">Voir aussi notre <a href="politique-confidentialite.php" class="text-accent font-bold hover:underline">Politique de confidentialité</a>.</p>
+        <p class="text-xs text-slate-400 pt-4">Voir aussi notre <a href="<?= lien_page('politique-confidentialite.php') ?>" class="text-accent font-bold hover:underline">Politique de confidentialité</a>.</p>
     </div>
 </div>
 
