@@ -199,6 +199,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'choix
                     );
                 }
 
+                // Après un paiement, annuler sans rembourser ferait perdre la somme versée : le choix « Remboursement » annule et rembourse
+                if (
+                    $choix === 'annulation'
+                    && (float)$reqInfo['montant_verse'] > 0
+                ) {
+
+                    throw new RuntimeException(
+                        "Un paiement a déjà été effectué pour cette réservation : choisissez « Remboursement » pour l'annuler et récupérer la somme versée."
+                    );
+                }
+
 
                 if ($choix === 'nouvelle_date') {
 
@@ -2067,11 +2078,10 @@ if ($partenaireMoi) {
                 ?>
 
 
-                <div class="grid grid-cols-1 <?= $aPaye
-                    ? 'sm:grid-cols-4'
-                    : 'sm:grid-cols-3' ?> gap-2">
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
 
 
+                  <?php if (!$aPaye): ?>
                   <label class="flex items-center gap-2 p-2.5 rounded-xl border-2 border-amber-200 bg-white cursor-pointer text-xs font-bold text-amber-700">
 
                     <input type="radio"
@@ -2084,6 +2094,7 @@ if ($partenaireMoi) {
                     Annuler
 
                   </label>
+                  <?php endif; ?>
 
 
                   <?php if ($aPaye): ?>
